@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drexier</title><link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div id="auth" class="auth-shell">
+  <section class="auth-card">
+    <div class="wordmark">Drexier</div><p class="muted">Atendimento ao cliente, organizado.</p>
+    <div class="tabs"><button class="tab active" data-auth="login">Entrar</button><button class="tab" data-auth="signup">Criar conta</button></div>
+    <form id="login-form" class="form">
+      <label>Email<input name="email" type="email" required autocomplete="email"></label>
+      <label>Senha<input name="password" type="password" required autocomplete="current-password"></label>
+      <button class="btn primary" type="submit">Entrar</button>
+    </form>
+    <form id="signup-form" class="form hidden">
+      <label>Nome completo<input name="name" required minlength="2"></label>
+      <label>Email<input name="email" type="email" required></label>
+      <label>Tipo de negócio<select name="business_type" required><option value="">Selecione</option><option>Serviços</option><option>Vendas</option><option>Serviços e vendas</option><option>Outro</option></select></label>
+      <label>Senha (mínimo 8 caracteres, com letra e número)<input name="password" type="password" minlength="8" required></label>
+      <label>Confirmar senha<input name="confirm_password" type="password" minlength="8" required></label>
+      <button class="btn primary" type="submit">Criar conta</button>
+    </form>
+    <p id="auth-error" class="error" role="alert"></p>
+  </section>
+</div>
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="wordmark side-mark">Drexier</div>
+    <nav id="nav">
+      <button class="nav-item active" data-page="dashboard">Dashboard</button>
+      <button class="nav-item" data-page="messages">Mensagens</button>
+      <button class="nav-item" data-page="reports">Relatórios</button>
+      <button class="nav-item" data-page="business">Negócio</button>
+      <button class="nav-item" data-page="settings">Configurações</button>
+    </nav>
+    <div class="sidebar-bottom"><span id="side-user"></span><button class="btn outline small" id="logout">Sair da conta</button></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><button id="mobile-menu" class="btn outline small">Menu</button><div><h1 id="page-title">Dashboard</h1><p id="page-subtitle" class="muted">Visão geral do atendimento</p></div><div class="top-user" id="top-user"></div></header>
+    <div id="notice" class="notice hidden" role="status"></div>
+    <section id="page-dashboard" class="page">
+      <div class="metric-grid">
+        <article class="metric"><span>Mensagens respondidas</span><strong id="metric-messages">0</strong></article>
+        <article class="metric"><span>Clientes adquiridos</span><strong id="metric-contacts">0</strong></article>
+        <article class="metric"><span>Novos clientes hoje</span><strong id="metric-today">0</strong><small id="compare-yesterday">Dia anterior: 0</small></article>
+        <article class="metric"><span>Pedidos para confirmar</span><strong id="metric-pending">0</strong></article>
+      </div>
+      <div class="panel"><div class="panel-heading"><h2>Aquisição de clientes</h2><span class="muted">Hoje vs. dia anterior</span></div><div id="dashboard-chart" class="chart"></div></div>
+      <div class="panel"><div class="panel-heading"><h2>Pedidos aguardando confirmação manual</h2><button class="btn outline small" data-goto="messages">Ver mensagens</button></div><div id="pending-list" class="empty">Nenhum pedido pendente.</div></div>
+    </section>
+    <section id="page-messages" class="page hidden">
+      <div class="two-col messages-layout"><div class="panel contact-panel"><div class="panel-heading"><h2>Clientes</h2><button class="btn outline small" id="refresh-contacts">Atualizar</button></div><div id="contacts-list" class="contact-list empty">Ainda não existem conversas.</div></div>
+      <div class="panel conversation-panel"><div class="panel-heading"><h2 id="conversation-title">Conversa</h2></div><div id="conversation" class="conversation empty">Selecione um cliente para ver a interação.</div>
+      <form id="incoming-form" class="inline-form"><h3>Registar mensagem recebida</h3><p class="muted">Ferramenta de teste manual; a integração WhatsApp ainda não está ligada.</p><label>Identificador do cliente<input name="contact_key" placeholder="Telefone ou identificador real" required></label><label>Nome do cliente<input name="customer_name"></label><label>Mensagem recebida<textarea name="message" required rows="2"></textarea></label><button class="btn primary" type="submit">Processar mensagem</button></form>
+      <form id="conversion-form" class="inline-form hidden"><h3>Registar intenção de compra/marcação</h3><label>Tipo<select name="request_type"><option value="purchase">Compra</option><option value="booking">Marcação</option><option value="other">Outro pedido</option></select></label><label>Detalhes<textarea name="details" rows="2"></textarea></label><button class="btn primary" type="submit">Notificar proprietário</button></form>
+      </div></div>
+    </section>
+    <section id="page-reports" class="page hidden">
+      <div class="panel"><div class="panel-heading"><h2>Clientes adquiridos por dia</h2><span class="muted">Dados reais da conta · últimos 14 dias</span></div><div id="reports-chart" class="chart line-chart"></div><div id="chart-labels" class="chart-labels"></div></div>
+      <div class="panel"><div class="panel-heading"><h2>Teste de estilos de resposta</h2><button class="btn primary small" id="add-variant">Novo estilo</button></div><p class="muted">Registe variantes para acompanhar os resultados. Os contadores só aumentam quando eventos reais forem ligados; não são criados resultados fictícios.</p><div id="variants-list" class="variant-list empty">Ainda não existem variantes.</div><form id="variant-form" class="form hidden"><label>Nome do estilo<input name="label" required></label><label>Texto da resposta<textarea name="response_text" rows="3" required></textarea></label><div class="actions"><button class="btn primary" type="submit">Guardar estilo</button><button class="btn outline" type="button" id="cancel-variant">Cancelar</button></div></form></div>
+    </section>
+    <section id="page-business" class="page hidden">
+      <div class="panel"><div class="panel-heading"><div><h2>Informações do negócio</h2><p class="muted">A IA utiliza apenas os dados que cadastrar aqui.</p></div><button class="btn primary" id="new-info">Nova informação</button></div>
+        <div id="info-kind-picker" class="kind-picker hidden"><p>Que tipo de informação deseja adicionar?</p><div class="kind-grid">
+          <button class="kind-option" data-kind="horarios">Horários</button><button class="kind-option" data-kind="productos">Produtos e preços</button><button class="kind-option" data-kind="marcacoes">Tempo para marcações</button><button class="kind-option" data-kind="campanhas">Campanhas</button><button class="kind-option" data-kind="servicos">Serviços e disponibilidade</button><button class="kind-option" data-kind="personalizado">Personalizado</button>
+        </div></div>
+        <form id="info-form" class="form hidden"><input type="hidden" name="id"><label>Tipo<select name="kind" required><option value="horarios">Horários</option><option value="productos">Produtos e preços</option><option value="marcacoes">Tempo para marcações</option><option value="campanhas">Campanhas</option><option value="servicos">Serviços e disponibilidade</option><option value="personalizado">Personalizado</option></select></label><label>Título<input name="title" required maxlength="180"></label><label>Informação completa<textarea name="content" rows="5" required placeholder="Insira os dados reais que o agente poderá consultar."></textarea></label><p class="muted">Para produtos, inclua nomes, preços e disponibilidade. Para horários/campanhas/marcações, inclua dias, datas e horas aplicáveis.</p><div class="actions"><button class="btn primary" type="submit">Guardar informação</button><button class="btn outline" id="cancel-info" type="button">Cancelar</button></div></form>
+        <div id="info-list" class="card-grid empty">Ainda não existem informações cadastradas.</div>
+      </div>
+    </section>
+    <section id="page-settings" class="page hidden">
+      <div class="settings-tabs"><button class="settings-tab active" data-setting="integration">Integração</button><button class="settings-tab" data-setting="instructions">Instruções ao agente</button><button class="settings-tab" data-setting="mandatory">Respostas obrigatórias</button><button class="settings-tab" data-setting="account">Conta</button></div>
+      <div id="setting-integration" class="panel setting-panel"><h2>Integração WhatsApp</h2><p>Esta área está reservada para a integração WhatsApp. Ainda não está conectada.</p><div class="empty-state">Nenhuma integração configurada.</div></div>
+      <div id="setting-instructions" class="panel setting-panel hidden"><h2>Instruções ao agente</h2><p class="muted">Defina o tom, o estilo e as regras gerais de atendimento.</p><form id="instructions-form" class="form"><label>Instruções personalizadas<textarea name="instructions" rows="8" placeholder="Escreva as instruções para o agente."></textarea></label><button class="btn primary" type="submit">Guardar instruções</button></form></div>
+      <div id="setting-mandatory" class="panel setting-panel hidden"><h2>Respostas obrigatórias</h2><p class="muted">Defina mensagens que devem ser usadas em etapas específicas. Deixe em branco as que não quiser configurar.</p><form id="mandatory-form" class="form"><label>Primeira resposta<textarea name="greeting" rows="2"></textarea></label><label>Quando não souber a resposta<textarea name="unknown" rows="2"></textarea></label><label>Quando o cliente demonstrar intenção de compra/marcação<textarea name="conversion" rows="2"></textarea></label><label>Encerramento<textarea name="closing" rows="2"></textarea></label><button class="btn primary" type="submit">Guardar respostas</button></form></div>
+      <div id="setting-account" class="panel setting-panel hidden"><h2>Conta</h2><form id="account-form" class="form"><label>Nome de usuário<input name="name" required></label><label>Email cadastrado<input name="email" disabled></label><label>Tipo de negócio<select name="business_type"><option>Serviços</option><option>Vendas</option><option>Serviços e vendas</option><option>Outro</option></select></label><label>Descrição do negócio<textarea name="business_description" rows="3"></textarea></label><label>Língua do agente<select name="language"><option>Português</option><option>English</option><option>Español</option><option>Deutsch</option><option>Français</option></select></label><button class="btn primary" type="submit">Guardar conta</button></form><hr><button class="btn outline" id="logout-account">Sair da conta</button></div>
+    </section>
+    <footer> DREXIER · Estrutura base · Dados da conta isolados por utilizador </footer>
+  </main>
+</div>
+<div id="confirm-modal" class="modal hidden"><div class="modal-card"><h2>Confirmar saída?</h2><p>Tem a certeza de que deseja sair da sua conta?</p><div class="actions"><button class="btn outline" id="cancel-logout">Cancelar</button><button class="btn primary" id="confirm-logout">Sair</button></div></div></div>
+<script type="module" src="./app.js"></script>
+</body></html>

@@ -1,0 +1,16 @@
+{
+  "name": "drexier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plataforma Drexier de atendimento ao cliente com IA",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0"
+  }
+}
