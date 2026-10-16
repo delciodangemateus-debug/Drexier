@@ -219,8 +219,32 @@ async def incoming(data:IncomingMessage,user=Depends(current_user)):
                           (user["id"],data.customer_name or "",data.contact_key))
             cid=cur.lastrowid
         c.execute("INSERT INTO messages(user_id,contact_id,sender,content) VALUES(?,?,'customer',?)",(user["id"],cid,data.message))
-        info=c.execute("SELECT kind,title,content FROM business_info WHERE user_id=?",(user["id"],)).fetchall()
-        reply=await draft_reply(data.message,info,user["agent_instructions"],user["language"])
+        # Obter histórico recente da conversa (últimas 10 mensagens anteriores a esta)
+        history_rows = c.execute(
+            "SELECT sender, content FROM messages WHERE contact_id=? AND user_id=? AND id != last_insert_rowid() ORDER BY id DESC LIMIT 10",
+            (cid, user["id"])
+        ).fetchall()
+        history = [{"sender": r["sender"], "content": r["content"]} for r in reversed(history_rows)]
+
+        info = c.execute("SELECT kind,title,content FROM business_info WHERE user_id=?", (user["id"],)).fetchall()
+        
+        mandatory = {}
+        try:
+            mandatory = json.loads(user.get("mandatory_responses") or "{}")
+        except Exception:
+            pass
+
+        reply = await draft_reply(
+            message=data.message,
+            info_rows=info,
+            instructions=user.get("agent_instructions") or "",
+            language=user.get("language") or "Português",
+            history=history,
+            business_name=user.get("name") or "nosso negócio",
+            business_type=user.get("business_type") or "Serviços",
+            business_description=user.get("business_description") or "",
+            mandatory_responses=mandatory
+        )
         c.execute("INSERT INTO messages(user_id,contact_id,sender,content) VALUES(?,?,'agent',?)",(user["id"],cid,reply))
         c.execute("UPDATE contacts SET last_message_at=CURRENT_TIMESTAMP WHERE id=?",(cid,))
     return {"contact_id":cid,"reply":reply}

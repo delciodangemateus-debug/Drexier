@@ -54,6 +54,6 @@ Abra **dois terminais**:
 - A base de dados inicia sem clientes, mensagens, produtos, serviços, campanhas ou relatórios de exemplo.
 - O dashboard e os relatórios mostram estados vazios até serem inseridos dados reais.
 - O fluxo de mensagens é preparado para receber mensagens e usar a base de informações do negócio. A integração com WhatsApp está intencionalmente vazia, conforme solicitado.
-- A resposta por IA externa só ficará ativa quando for configurada uma API compatível em `.env`; sem isso, o agente responde de forma segura usando apenas as informações cadastradas e admite quando não sabe.
+- **Motor de IA (Google Gemini)**: A resposta e condução das conversas é gerida pelo Google Gemini (`gemini-1.5-flash`). Obtenha uma chave gratuita em [Google AI Studio](https://aistudio.google.com/app/apikey) e adicione no `.env` em `GEMINI_API_KEY`. Se a chave não for configurada, o agente aciona o fallback local seguro usando as informações cadastradas.
 - A confirmação final de venda/agendamento é manual pelo proprietário. A aplicação regista pedidos pendentes e mostra-os no dashboard.
 - Antes de produção: usar HTTPS, configurar uma chave `SECRET_KEY` forte, configurar CORS/domínio, backups, limites de pedidos, política de privacidade e um provedor de e-mail/recuperação de senha. Este projeto é uma base funcional, não uma implantação de produção auditada.
