@@ -9,6 +9,8 @@ from backend.database import init_db, connect
 from backend.auth import hash_password, verify_password, create_token, decode_token
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
+from backend.routers.whatsapp import router as whatsapp_router
+from backend.routers.email import router as email_router
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,6 +22,9 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Drexier API", version="0.1.0", lifespan=lifespan)
+# Roteadores de canais de atendimento (Email ativo como canal principal; WhatsApp mantido como legado)
+app.include_router(email_router)
+app.include_router(whatsapp_router)
 
 app.add_middleware(
     CORSMiddleware,

@@ -83,4 +83,66 @@ def init_db():
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS whatsapp_integrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL UNIQUE,
+          waba_id TEXT NOT NULL,
+          phone_number_id TEXT NOT NULL UNIQUE,
+          phone_number TEXT DEFAULT '',
+          business_name TEXT DEFAULT '',
+          access_token TEXT DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'connected',
+          webhook_subscribed INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_phone_number_id ON whatsapp_integrations(phone_number_id);
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_waba_id ON whatsapp_integrations(waba_id);
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_user_id ON whatsapp_integrations(user_id);
+
+        -- Tabela de integração de email oficial (Google Gmail / Microsoft Outlook / SMTP)
+        CREATE TABLE IF NOT EXISTS email_integrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL UNIQUE,
+          provider TEXT NOT NULL CHECK(provider IN ('google', 'microsoft', 'smtp_imap')),
+          email_address TEXT NOT NULL,
+          display_name TEXT DEFAULT '',
+          access_token TEXT DEFAULT '',
+          refresh_token TEXT DEFAULT '',
+          token_expires_at TEXT,
+          status TEXT NOT NULL DEFAULT 'connected',
+          auto_reply_enabled INTEGER NOT NULL DEFAULT 1,
+          last_sync_at TEXT,
+          sync_cursor TEXT DEFAULT '',
+          smtp_host TEXT DEFAULT '',
+          smtp_port INTEGER DEFAULT 587,
+          smtp_user TEXT DEFAULT '',
+          smtp_password TEXT DEFAULT '',
+          imap_host TEXT DEFAULT '',
+          imap_port INTEGER DEFAULT 993,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_email_user_id ON email_integrations(user_id);
+        CREATE INDEX IF NOT EXISTS idx_email_address ON email_integrations(email_address);
+
+        -- Tabela de tópicos/threads de e-mail para manter histórico e contexto de conversa
+        CREATE TABLE IF NOT EXISTS email_threads (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          contact_id INTEGER NOT NULL,
+          provider TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          last_message_id TEXT NOT NULL,
+          subject TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(user_id, thread_id),
+          FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+          FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_email_threads_thread_id ON email_threads(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_email_threads_user_id ON email_threads(user_id);
         """)
