@@ -1,9 +1,11 @@
+import asyncio
 import base64
 import email
 from email.header import decode_header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import html
+import imaplib
 import json
 import logging
 import os
@@ -508,10 +510,159 @@ def extract_gmail_body(payload: dict) -> str:
     return ""
 
 
+# ==============================================================================
+# FILTRO INTELIGENTE ANTI-SPAM / ANTI-PUBLICIDADE & DETEÇÃO DE CLIENTES REAIS
+# ==============================================================================
+
+IGNORED_SENDER_PATTERNS = [
+    r"no-?reply", r"donotreply", r"do-not-reply", r"notification", r"newsletter",
+    r"promo", r"marketing", r"alerts?", r"billing", r"security", r"accounts?",
+    r"mailer-daemon", r"postmaster", r"bounce", r"system@", r"support-ticket",
+    r"automated", r"updates?@", r"news@"
+]
+
+IGNORED_DOMAINS = [
+    "facebookmail.com", "instagram.com", "twitter.com", "x.com", "linkedin.com",
+    "pinterest.com", "tiktok.com", "google.com", "accounts.google.com",
+    "appleid.apple.com", "accountprotection.microsoft.com", "github.com",
+    "notifications.", "email.aliexpress.com", "mercadolivre.", "uber.com",
+    "spotify.com", "netflix.com", "cloudflare.com"
+]
+
+IGNORED_SUBJECT_OR_BODY_PATTERNS = [
+    r"c[oó]digo\s+de\s+(verifica[çc][aã]o|seguran[çc]a|acesso)",
+    r"verification\s+code",
+    r"security\s+code",
+    r"one-time\s+password",
+    r"\bOTP\b",
+    r"login\s+detectado",
+    r"in[ií]cio\s+de\s+sess[aã]o",
+    r"novo\s+acesso",
+    r"new\s+sign-in",
+    r"redefinir\s+(a\s+)?senha",
+    r"password\s+reset",
+    r"recupera[çc][aã]o\s+de\s+conta",
+    r"confirme\s+o\s+seu\s+(endere[çc]o\s+de\s+)?e-?mail",
+    r"confirm\s+your\s+email",
+    r"fatura\s+dispon[ií]vel",
+    r"extrato\s+(mensal|banc[aá]rio)",
+    r"comprovativo\s+de\s+pagamento",
+    r"recibo\s+da\s+transa[çc][aã]o",
+    r"atualiza[çc][aã]o\s+(dos?\s+)?termos",
+    r"pol[ií]tica\s+de\s+privacidade\s+atualizada",
+    r"unsubscribe",
+    r"descadastre-se",
+    r"cancelar\s+subscri[çc][aã]o",
+    r"desconto\s+exclusivo",
+    r"black\s+friday",
+    r"cup[oõ]es?\s+de\s+desconto",
+    r"oferta\s+especial"
+]
+
+def is_genuine_customer_inquiry(
+    sender_email: str,
+    customer_name: str,
+    subject: str,
+    body: str,
+    headers_map: Optional[Dict[str, str]] = None,
+    label_ids: Optional[List[str]] = None
+) -> Tuple[bool, str]:
+    """
+    Filtro rígido anti-spam, anti-publicidade e anti-notificação.
+    Garante que a IA NÃO gasta tokens respondendo anúncios, atualizações, redes sociais
+    ou códigos de verificação, focando estritamente em clientes humanos reais que fizeram perguntas.
+    """
+    sender_email = sender_email.lower().strip()
+    subject_clean = (subject or "").strip()
+    body_clean = (body or "").strip()
+    combined_text = f"{subject_clean}\n{body_clean}".lower()
+    headers_map = headers_map or {}
+    label_ids = [lbl.upper() for lbl in (label_ids or [])]
+
+    # 1. Filtro por Categorias/Labels do Gmail
+    forbidden_labels = {"CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_UPDATES", "CATEGORY_FORUMS", "SPAM", "TRASH"}
+    found_forbidden = forbidden_labels.intersection(label_ids)
+    if found_forbidden:
+        return False, f"Categoria de publicidade/atualização ({', '.join(found_forbidden)})"
+
+    # 2. Cabeçalhos de envio automatizado ou marketing
+    if headers_map.get("list-unsubscribe"):
+        return False, "Newsletter ou marketing comercial (List-Unsubscribe)"
+    precedence = headers_map.get("precedence", "").lower()
+    if precedence in ("bulk", "list", "junk"):
+        return False, f"Envio em massa ({precedence})"
+    auto_submitted = headers_map.get("auto-submitted", "").lower()
+    if auto_submitted and auto_submitted != "no":
+        return False, f"E-mail automático gerado por sistema ({auto_submitted})"
+    if headers_map.get("x-autoreply") or headers_map.get("x-autorespond"):
+        return False, "Resposta automática de ausência (X-Autoreply)"
+
+    # 3. Remetentes conhecidos por marketing, alertas ou bots
+    for pat in IGNORED_SENDER_PATTERNS:
+        if re.search(pat, sender_email, re.IGNORECASE):
+            return False, f"Remetente automatizado ({pat})"
+
+    domain = sender_email.split("@")[-1] if "@" in sender_email else ""
+    for ign_dom in IGNORED_DOMAINS:
+        if ign_dom in domain:
+            return False, f"Plataforma institucional de notificações ({ign_dom})"
+
+    # 4. Padrões de assunto e corpo (códigos, 2FA, faturas, promoções)
+    for pat in IGNORED_SUBJECT_OR_BODY_PATTERNS:
+        if re.search(pat, combined_text, re.IGNORECASE):
+            return False, f"Conteúdo de publicidade, código de segurança ou notificação ({pat})"
+
+    # 5. Validação de mensagem legível de cliente
+    if len(body_clean) < 3 and len(subject_clean) < 3:
+        return False, "Mensagem vazia ou sem texto inteligível"
+
+    human_indicators = [
+        r"\b(ol[aá]|oi|bom dia|boa tarde|boa noite|prezados?|caros?)\b",
+        r"\?",
+        r"\b(gostaria|queria|quanto|pre[çc]o|valor|or[çc]amento|hor[aá]rio|dispon[ií]vel|marcar|marca[çc][aã]o|agendar|agendamento|reserva|vaga)\b",
+        r"\b(como funciona|voc[eê]s?|fazem|trabalham|atendem|servi[çc]os?|produtos?|ajuda|informa[çc][aã]o|d[uú]vida|reclama[çc][aã]o|problema|encomenda|comprar)\b"
+    ]
+    has_human_intent = any(re.search(ind, combined_text, re.IGNORECASE) for ind in human_indicators)
+    if not has_human_intent and len(body_clean) < 15 and "?" not in combined_text:
+        return False, "E-mail sem pergunta ou saudação de cliente identificável"
+
+    return True, "Mensagem válida de cliente"
+
+
+def detect_booking_or_purchase_intent(incoming_content: str, subject: str) -> Optional[Dict[str, str]]:
+    """
+    Identifica automaticamente se a mensagem do cliente contém intenção de marcação,
+    agendamento, reserva ou compra/encomenda que necessita de validação do proprietário.
+    """
+    text = f"{subject}\n{incoming_content}".lower()
+
+    booking_patterns = [
+        r"\b(marcar|marca[çc][aã]o|agendar|agendamento|reservar?|reserva)\b",
+        r"\b(disponibilidade\s+(para|no|na)|vaga\s+(para|no|na)|hor[aá]rio\s+(para|dispon[ií]vel))\b",
+        r"\b(segunda|ter[çc]a|quarta|quinta|sexta|s[aá]bado|domingo)\b.*(\b[aà]s\s+\d{1,2}(h|:\d{2})?|\bmanh[aã]|\btarde)",
+        r"\b(\d{1,2}/\d{1,2}|\d{1,2}\s+de\s+[a-z]+)\b.*(\b[aà]s\s+\d{1,2}|\bhor[aá]rio)"
+    ]
+
+    purchase_patterns = [
+        r"\b(comprar|compra|adquirir|encomendar?|encomenda)\b",
+        r"\b(fechar\s+(o\s+)?pedido|fechar\s+(o\s+)?or[çc]amento|quero\s+contratar|quero\s+o\s+produto)\b"
+    ]
+
+    for pat in booking_patterns:
+        if re.search(pat, text, re.IGNORECASE):
+            return {"type": "booking", "details": incoming_content[:300].strip()}
+
+    for pat in purchase_patterns:
+        if re.search(pat, text, re.IGNORECASE):
+            return {"type": "purchase", "details": incoming_content[:300].strip()}
+
+    return None
+
+
 async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[str, Any]]:
     """
     Sincroniza e-mails não lidos da caixa de entrada do Gmail,
-    gera respostas inteligentes com a IA e envia automaticamente ao cliente.
+    filtrando rigorosamente apenas mensagens principais de clientes reais.
     """
     token = await refresh_google_token_if_needed(integration)
     headers = {"Authorization": f"Bearer {token}"}
@@ -520,8 +671,8 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
     processed_items = []
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # Busca mensagens não lidas na caixa de entrada
-        query = "label:INBOX is:unread"
+        # Busca mensagens não lidas apenas da categoria principal, ignorando spam e promoções
+        query = "label:INBOX is:unread -category:promotions -category:social -category:updates -category:forums -label:spam -label:trash"
         list_url = f"{GMAIL_API_BASE}/messages?q={urllib.parse.quote(query)}&maxResults=15"
         res = await client.get(list_url, headers=headers)
         if res.status_code != 200:
@@ -538,6 +689,7 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
                 continue
 
             msg_data = msg_res.json()
+            label_ids = msg_data.get("labelIds", [])
             payload = msg_data.get("payload", {})
             headers_list = payload.get("headers", [])
 
@@ -552,9 +704,28 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
             if not sender_email or sender_email == my_email:
                 continue
 
-            # Extrai corpo de texto de forma segura e completa
             extracted_body = extract_gmail_body(payload)
             body_text = clean_email_body(extracted_body) or "(Email sem corpo de texto legível)"
+
+            # FILTRO RÍGIDO ANTI-SPAM / ANÚNCIOS / CÓDIGOS
+            is_valid, reject_reason = is_genuine_customer_inquiry(
+                sender_email=sender_email,
+                customer_name=customer_name,
+                subject=subject,
+                body=body_text,
+                headers_map=headers_map,
+                label_ids=label_ids
+            )
+
+            if not is_valid:
+                logger.info(f"[Filtro Anti-Spam] E-mail de {sender_email} ('{subject}') ignorado: {reject_reason}")
+                # Remove unread para não verificar repetidamente
+                await client.post(
+                    f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
+                    headers=headers,
+                    json={"removeLabelIds": ["UNREAD"]}
+                )
+                continue
 
             # Processa e responde com a IA
             reply_text = await process_and_reply_email(
@@ -625,6 +796,22 @@ async def sync_microsoft_emails(user_dict: dict, integration: dict) -> List[Dict
                 text_clean = body_content
 
             body_text = clean_email_body(text_clean) or "(Email sem corpo de texto legível)"
+
+            # Filtro anti-spam / anúncios
+            is_valid, reject_reason = is_genuine_customer_inquiry(
+                sender_email=sender_email,
+                customer_name=customer_name,
+                subject=subject,
+                body=body_text,
+            )
+            if not is_valid:
+                logger.info(f"[Filtro Anti-Spam] E-mail Outlook de {sender_email} ('{subject}') ignorado: {reject_reason}")
+                await client.patch(
+                    f"{MICROSOFT_GRAPH_BASE}/me/messages/{msg_id}",
+                    headers=headers,
+                    json={"isRead": True}
+                )
+                continue
 
             reply_text = await process_and_reply_email(
                 user_dict=user_dict,
@@ -697,6 +884,21 @@ async def process_and_reply_email(
             (user_id, cid, f"Assunto: {subject}\n\n{incoming_content}")
         )
 
+        # Detecção automática de marcação ou compra para o painel de pedidos a confirmar do proprietário
+        intent = detect_booking_or_purchase_intent(incoming_content, subject)
+        if intent:
+            has_pending = c.execute(
+                "SELECT id FROM conversion_requests WHERE user_id = ? AND contact_id = ? AND status = 'pending'",
+                (user_id, cid)
+            ).fetchone()
+            if not has_pending:
+                c.execute(
+                    """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status)
+                       VALUES (?, ?, ?, ?, 'pending')""",
+                    (user_id, cid, intent["type"], intent["details"])
+                )
+                logger.info(f"[Conversão Automática] Pedido de {intent['type']} detectado e registrado para {customer_email}.")
+
         # Histórico recente de mensagens desse cliente
         history_rows = c.execute(
             "SELECT sender, content FROM messages WHERE contact_id = ? AND user_id = ? AND id != last_insert_rowid() ORDER BY id DESC LIMIT 10",
@@ -715,6 +917,14 @@ async def process_and_reply_email(
             mandatory = json.loads(user_dict.get("mandatory_responses") or "{}")
         except Exception:
             pass
+
+    # Verifica se as respostas automáticas estão ativadas para o agente
+    auto_reply = bool(integration.get("auto_reply_enabled", 1))
+    if not auto_reply:
+        logger.info(
+            f"[Auto-Reply Desativado] Mensagem de {customer_email} registada com sucesso. Resposta automática pausada pelo utilizador."
+        )
+        return "(Resposta automática desativada pelo utilizador)"
 
     # Gerar resposta com a IA Drexier (Gemini ou fallback)
     try:
@@ -772,6 +982,145 @@ async def process_and_reply_email(
     return reply_text
 
 
+def extract_imap_body(msg: email.message.Message) -> str:
+    """Extrai texto legível de uma mensagem de e-mail MIME recebida via IMAP."""
+    if msg.is_multipart():
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            cdisp = str(part.get("Content-Disposition") or "")
+            if ctype == "text/plain" and "attachment" not in cdisp:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or "utf-8"
+                    return payload.decode(charset, errors="replace")
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            cdisp = str(part.get("Content-Disposition") or "")
+            if ctype == "text/html" and "attachment" not in cdisp:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or "utf-8"
+                    raw_html = payload.decode(charset, errors="replace")
+                    return html.unescape(re.sub(r"<[^>]+>", " ", raw_html))
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or "utf-8"
+            text = payload.decode(charset, errors="replace")
+            if msg.get_content_type() == "text/html":
+                return html.unescape(re.sub(r"<[^>]+>", " ", text))
+            return text
+    return ""
+
+
+async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str, Any]]:
+    """
+    Sincroniza e-mails não lidos via IMAP (servidores próprios ou genéricos),
+    gera respostas inteligentes com a IA Drexier e responde de forma real ao cliente.
+    """
+    imap_host = integration.get("imap_host")
+    if not imap_host:
+        return []
+    imap_port = int(integration.get("imap_port") or 993)
+    user = integration.get("smtp_user") or integration.get("email_address")
+    password = integration.get("smtp_password")
+    my_email = (integration.get("email_address") or "").lower().strip()
+
+    processed_items = []
+
+    def _fetch_imap_messages():
+        items = []
+        try:
+            if imap_port == 993:
+                mail = imaplib.IMAP4_SSL(imap_host, imap_port)
+            else:
+                mail = imaplib.IMAP4(imap_host, imap_port)
+            mail.login(user, password)
+            mail.select("INBOX")
+            status, search_data = mail.search(None, "(UNSEEN)")
+            if status != "OK" or not search_data or not search_data[0]:
+                try:
+                    mail.close()
+                    mail.logout()
+                except Exception:
+                    pass
+                return items
+
+            msg_ids = search_data[0].split()
+            for mid in msg_ids[-15:]:
+                res, data = mail.fetch(mid, "(RFC822)")
+                if res != "OK" or not data or not data[0]:
+                    continue
+                raw_bytes = data[0][1]
+                msg = email.message_from_bytes(raw_bytes)
+                raw_from = msg.get("From", "")
+                subject = msg.get("Subject", "Sem assunto")
+                if subject:
+                    decoded = decode_header(subject)
+                    subject = "".join(
+                        part.decode(enc or "utf-8", errors="replace") if isinstance(part, bytes) else str(part)
+                        for part, enc in decoded
+                    )
+                message_id = msg.get("Message-ID", "")
+                sender_email, customer_name = parse_sender_info(raw_from)
+                if not sender_email or sender_email == my_email:
+                    continue
+
+                body_text = clean_email_body(extract_imap_body(msg)) or "(Email sem corpo legível)"
+
+                # Marca como lida para não reprocessar
+                mail.store(mid, "+FLAGS", "\\Seen")
+
+                # Filtro anti-spam / anúncios
+                is_valid, reject_reason = is_genuine_customer_inquiry(
+                    sender_email=sender_email,
+                    customer_name=customer_name,
+                    subject=subject,
+                    body=body_text,
+                )
+                if not is_valid:
+                    logger.info(f"[Filtro Anti-Spam] E-mail IMAP de {sender_email} ('{subject}') ignorado: {reject_reason}")
+                    continue
+
+                items.append({
+                    "mid": mid,
+                    "sender_email": sender_email,
+                    "customer_name": customer_name,
+                    "subject": subject,
+                    "body_text": body_text,
+                    "message_id": message_id,
+                })
+
+            mail.close()
+            mail.logout()
+        except Exception as e:
+            logger.warning(f"Erro ao verificar mensagens IMAP: {e}")
+        return items
+
+    loop = asyncio.get_running_loop()
+    raw_emails = await loop.run_in_executor(None, _fetch_imap_messages)
+
+    for item in raw_emails:
+        reply_text = await process_and_reply_email(
+            user_dict=user_dict,
+            integration=integration,
+            customer_email=item["sender_email"],
+            customer_name=item["customer_name"],
+            subject=item["subject"],
+            incoming_content=item["body_text"],
+            thread_id=None,
+            message_id_header=item["message_id"],
+        )
+        processed_items.append({
+            "message_id": item["message_id"],
+            "from": item["sender_email"],
+            "subject": item["subject"],
+            "reply": reply_text
+        })
+
+    return processed_items
+
+
 async def sync_emails_for_user(user_id: int) -> List[Dict[str, Any]]:
     """Dispara a sincronização de e-mails para um utilizador específico."""
     with connect() as c:
@@ -793,6 +1142,8 @@ async def sync_emails_for_user(user_id: int) -> List[Dict[str, Any]]:
         processed = await sync_google_emails(user_dict, integration_dict)
     elif provider == "microsoft":
         processed = await sync_microsoft_emails(user_dict, integration_dict)
+    elif provider == "smtp_imap":
+        processed = await sync_imap_emails(user_dict, integration_dict)
 
     with connect() as c:
         c.execute(
@@ -801,3 +1152,177 @@ async def sync_emails_for_user(user_id: int) -> List[Dict[str, Any]]:
         )
 
     return processed
+
+
+async def process_confirmation_action(
+    user_id: int,
+    request_id: int,
+    action: str,  # 'confirm' or 'reject'
+    custom_note: str = ""
+) -> Dict[str, Any]:
+    """
+    Gera uma mensagem contextualizada via IA e envia um e-mail oficial ao cliente
+    confirmando a marcação/pedido ou propondo alternativas com educação.
+    """
+    with connect() as c:
+        req = c.execute(
+            """SELECT r.id, r.request_type, r.details, r.contact_id, ct.name, ct.contact_key
+               FROM conversion_requests r
+               JOIN contacts ct ON ct.id = r.contact_id
+               WHERE r.id = ? AND r.user_id = ?""",
+            (request_id, user_id)
+        ).fetchone()
+        if not req:
+            raise ValueError("Pedido de confirmação não encontrado.")
+
+        user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        integration = c.execute(
+            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
+            (user_id,)
+        ).fetchone()
+        if not integration:
+            raise ValueError("Nenhuma conta de e-mail conectada para envio da confirmação.")
+
+        # Histórico recente
+        history_rows = c.execute(
+            "SELECT sender, content FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY id DESC LIMIT 8",
+            (req["contact_id"], user_id)
+        ).fetchall()
+        history = [{"sender": r["sender"], "content": r["content"]} for r in reversed(history_rows)]
+
+        info = c.execute(
+            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ?",
+            (user_id,)
+        ).fetchall()
+
+    user_dict = dict(user)
+    integration_dict = dict(integration)
+    business_name = user_dict.get("name") or integration_dict.get("display_name") or "nosso negócio"
+    customer_name = req["name"] or req["contact_key"]
+    customer_email = req["contact_key"]
+
+    if action == "confirm":
+        instruction = (
+            f"Você é o atendente oficial de {business_name}. "
+            f"O proprietário analisou e acaba de CONFIRMAR a solicitação de {req['request_type']} do cliente ({customer_name}). "
+            f"Detalhes do agendamento/pedido: {req['details']}. "
+            f"Nota adicional do proprietário: {custom_note or 'Tudo confirmado.'}. "
+            f"Escreva um e-mail acolhedor, profissional e claro confirmando a realização do pedido/marcação, informando os dados e dizendo que ficamos à espera."
+        )
+        new_status = "confirmed"
+        subject = f"Confirmação de Agendamento - {business_name}"
+    else:
+        instruction = (
+            f"Você é o atendente oficial de {business_name}. "
+            f"O proprietário analisou a solicitação de {req['request_type']} do cliente ({customer_name}) "
+            f"e informou que INFELIZMENTE NÃO SERÁ POSSÍVEL atender naquele dia/horário/condição específica. "
+            f"Detalhes do pedido original: {req['details']}. "
+            f"Motivo ou alternativa sugerida pelo proprietário: {custom_note or 'Sem vaga neste dia; consultar outras datas disponíveis.'}. "
+            f"Escreva um e-mail extremamente educado, empático e atencioso explicando a indisponibilidade, sugerindo a data/alternativa proposta e perguntando qual outro momento o cliente prefere."
+        )
+        new_status = "rejected"
+        subject = f"Atualização sobre a sua solicitação - {business_name}"
+
+    # Redige a resposta com IA
+    reply_text = await draft_reply(
+        message=instruction,
+        info_rows=info,
+        instructions=user_dict.get("agent_instructions") or "",
+        language=user_dict.get("language") or "Português",
+        history=history,
+        business_name=business_name,
+        business_type=user_dict.get("business_type") or "Serviços",
+        business_description=user_dict.get("business_description") or "",
+    )
+
+    # Salva na base de dados
+    with connect() as c:
+        c.execute(
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+            (user_id, req["contact_id"], reply_text)
+        )
+        c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (req["contact_id"],))
+        c.execute(
+            "UPDATE conversion_requests SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+            (new_status, request_id, user_id)
+        )
+
+    # Envia e-mail oficial de resposta
+    try:
+        await send_email(
+            integration=integration_dict,
+            to_email=customer_email,
+            subject=subject,
+            body_text=reply_text,
+        )
+    except Exception as e:
+        logger.error(f"Erro ao enviar e-mail de confirmação: {e}")
+        raise RuntimeError(f"Mensagem gerada, mas falha no envio por e-mail: {str(e)}")
+
+    return {
+        "ok": True,
+        "action": action,
+        "status": new_status,
+        "reply_text": reply_text,
+        "customer_email": customer_email
+    }
+
+
+async def send_owner_reply(user_id: int, contact_id: int, message_text: str) -> Dict[str, Any]:
+    """
+    Envia uma resposta oficial escrita manualmente pelo proprietário via e-mail para o cliente.
+    """
+    message_text = message_text.strip()
+    if not message_text:
+        raise ValueError("A mensagem não pode estar vazia.")
+
+    with connect() as c:
+        contact = c.execute(
+            "SELECT id, name, contact_key FROM contacts WHERE id = ? AND user_id = ?",
+            (contact_id, user_id)
+        ).fetchone()
+        if not contact:
+            raise ValueError("Cliente não encontrado.")
+
+        integration = c.execute(
+            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
+            (user_id,)
+        ).fetchone()
+        if not integration:
+            raise ValueError("Nenhuma conta de e-mail conectada para envio. Conecte o e-mail em Configurações.")
+
+        thread = c.execute(
+            "SELECT subject, thread_id, last_message_id FROM email_threads WHERE contact_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1",
+            (contact_id, user_id)
+        ).fetchone()
+
+    customer_email = contact["contact_key"]
+    subject = thread["subject"] if thread and thread["subject"] else "Mensagem de Atendimento"
+    if not subject.lower().startswith("re:"):
+        subject = f"Re: {subject}"
+
+    thread_id = thread["thread_id"] if thread else None
+    last_msg_id = thread["last_message_id"] if thread else None
+
+    # Envia e-mail oficial
+    integration_dict = dict(integration)
+    await send_email(
+        integration=integration_dict,
+        to_email=customer_email,
+        subject=subject,
+        body_text=message_text,
+        thread_id=thread_id,
+        in_reply_to=last_msg_id,
+        references=last_msg_id,
+    )
+
+    # Registra no histórico como sender = 'owner'
+    with connect() as c:
+        cur = c.execute(
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'owner', ?)",
+            (user_id, contact_id, message_text)
+        )
+        msg_id = cur.lastrowid
+        c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (contact_id,))
+
+    return {"ok": True, "message_id": msg_id, "content": message_text}

@@ -84,7 +84,7 @@ def build_system_instruction(
 ) -> str:
     """
     Constrói as diretrizes para o Gemini atuar como o atendente principal e condutor da conversa.
-    O agente é proativo, acolhedor, profissional e focado em guiar o cliente até a conversão com concisão.
+    O agente é consultivo, humano, respeitoso e adapta-se estritamente à mensagem enviada.
     """
     mandatory_text = ""
     if mandatory_responses:
@@ -96,18 +96,18 @@ def build_system_instruction(
 Idioma principal: {language}.
 
 MISSÃO E POSTURA:
-1. Você responde a todas as mensagens dos clientes e é responsável por DIRIGIR a conversa ativamente com foco no objetivo do negócio (venda, agendamento, esclarecer dúvidas).
-2. TOM DE VOZ: Simule um atendente humano experiente e empático — atencioso, acolhedor e profissional, nunca frio ou mecânico.
-3. INTELIGÊNCIA CONSULTIVA E RECOMENDAÇÃO (FLEXIBILIDADE COM PENSAMENTO CRÍTICO):
-   - Não se limite a apenas listar o que existe ("temos os seguintes produtos: A, B, C"). Atue como um consultor real.
-   - Pense e faça recomendações inteligentes sob medida para a necessidade, preferência e orçamento do cliente.
-   - Se o cliente informar um orçamento (ex: "tenho X€"), analise o catálogo e sugira o produto/serviço cadastrado que melhor se adeque ao valor dele, explicando rapidamente o porquê.
-   - Se o cliente quiser um produto com valor superior ao orçamento dele, aponte a melhor alternativa mais acessível disponível ou esclareça a diferença com delicadeza.
-   - Se o cliente estiver indeciso, recomende a melhor opção entre as cadastradas e destaque seu principal benefício.
-4. OBJETIVIDADE INTELIGENTE (ECONOMIA DE CRÉDITOS):
-   - Vá direto ao ponto da recomendação sem rodeios ou introduções redundantes (geralmente de 2 a 4 frases).
-   - Seja conciso e dinâmico: não liste produtos irrelevantes para aquela pergunta.
-   - Conclua sempre com uma pergunta ou direcionamento claro para avançar (Call to Action).
+1. Você responde às mensagens dos clientes e é responsável por DIRIGIR a conversa ativamente com foco no objetivo do negócio (esclarecer dúvidas, agendamentos, atendimento e vendas).
+2. ADAPTAÇÃO AO CONTEXTO DA MENSAGEM (NUNCA ATIRAR PRODUTOS NA CARA DO CLIENTE):
+   - Você NÃO deve se basear cegamente em despejar dados, preços ou produtos da Base de Negócio logo na primeira mensagem se o cliente não perguntou por eles.
+   - Responda estritamente e com empatia ao que o cliente disse ou perguntou.
+   - EXEMPLO FUNDAMENTAL: Se o cliente disser apenas uma saudação (ex: "Olá, boa tarde", "Bom dia", "Olá tudo bem?"), responda cordialmente acolhendo o cliente, identificando-se como atendente de {business_name} e perguntando gentilmente em que pode ajudar. Exemplo: "Olá, boa tarde! Aqui é do atendimento da {business_name}. Em que podemos ajudar hoje?".
+   - Somente apresente respostas sobre produtos, preços ou regras mediante a pergunta ou dúvida expressa pelo cliente.
+3. RESPOSTAS ESPECÍFICAS E DIRECIONADAS AO QUE FOI PERGUNTADO:
+   - Apresente respostas objetivas ao que foi solicitado, dentro da janela dos assuntos da empresa (produtos, serviços, horários, marcações, agendamentos, políticas, instruções cadastradas, suporte e reclamações).
+   - Não liste produtos ou serviços irrelevantes para a dúvida apresentada.
+   - Conduza as respostas de forma livre, fluida e amigável sobre o negócio, nunca como um chat robótico de perguntas e respostas.
+4. GESTÃO DE MARCAÇÕES E AGENDAMENTOS:
+   - Se o cliente desejar marcar ou agendar uma data/horário ou comprar, acolha o pedido, confirme os detalhes solicitados e informe com simpatia que o agendamento/pedido foi registrado para validação e confirmação da nossa equipe.
 5. COMPLETUDE OBRIGATÓRIA DA RESPOSTA (NUNCA CORTAR FRASES):
    - NUNCA deixe frases inacabadas, pensamentos interrompidos ou mensagens cortadas no meio.
    - Toda e qualquer frase que iniciar deve ser obrigatoriamente concluída com ponto final, exclamação ou interrogação.
@@ -124,7 +124,7 @@ INSTRUÇÕES DO PROPRIETÁRIO:
 {mandatory_text}
 
 REGRAS CRÍTICAS DE CONFIABILIDADE (GROUNDING):
-- Suas recomendações e sugestões devem ser baseadas EXCLUSIVAMENTE nos itens e dados cadastrados na Base do Negócio.
+- Suas recomendações e informações devem ser baseadas EXCLUSIVAMENTE nos itens e dados cadastrados na Base do Negócio.
 - NUNCA invente produtos, marcas, preços ou condições que não estejam cadastrados.
 - Se não houver nenhum produto ou dado que atenda ao pedido do cliente, explique com cordialidade e objetividade:
   "{UNKNOWN_REPLY}"
@@ -303,11 +303,24 @@ async def call_openai_compatible_api(
         logger.warning(f"Falha na API OpenAI compatível: {e}")
         return None
 
-def local_fallback(message: str, info_rows: List[Any]) -> str:
+def is_initial_greeting(text: str) -> bool:
+    clean = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    words = clean.split()
+    if not words:
+        return False
+    greeting_words = {"ola", "olá", "oi", "bom", "boa", "dia", "tarde", "noite", "tudo", "bem", "prezados", "caros", "alô", "alo"}
+    if all(w in greeting_words for w in words) or (len(words) <= 3 and words[0] in ("ola", "olá", "oi", "bom", "boa")):
+        return True
+    return False
+
+def local_fallback(message: str, info_rows: List[Any], business_name: str = "nosso negócio") -> str:
     """
     Fallback seguro e determinístico caso a IA externa não esteja disponível.
-    Utiliza correspondência semântica/palavras-chave na base do negócio.
+    Responde cordialmente a saudações ou fornece a informação específica solicitada sem despejar catálogos.
     """
+    if is_initial_greeting(message):
+        return f"Olá, boa tarde! Aqui é do atendimento de {business_name}. Em que podemos ajudar hoje?"
+
     context = compose_context(info_rows)
     if not context.strip() or context.startswith("(Ainda sem"):
         return UNKNOWN_REPLY
@@ -317,7 +330,7 @@ def local_fallback(message: str, info_rows: List[Any]) -> str:
     for row in info_rows:
         title = row["title"] if isinstance(row, dict) else row["title"]
         content = row["content"] if isinstance(row, dict) else row["content"]
-        text = f"{title} {content}".strip()
+        text = f"{title}: {content}".strip()
         hay = text.lower()
         score = sum(1 for w in words if w in hay)
         if score:
@@ -327,7 +340,8 @@ def local_fallback(message: str, info_rows: List[Any]) -> str:
         return UNKNOWN_REPLY
 
     scored.sort(key=lambda item: item[0], reverse=True)
-    return "Encontrei esta informação cadastrada:\n" + "\n".join(f"• {item}" for _, item in scored[:3])
+    best_item = scored[0][1]
+    return f"Olá! Relativamente ao que perguntou:\n• {best_item}\n\nFicamos à sua inteira disposição se desejar saber mais ou agendar!"
 
 async def draft_reply(
     message: str,
@@ -386,4 +400,4 @@ async def draft_reply(
                 return reply
 
     # 2. Se a API do Gemini não estiver configurada ou falhar, ativa o fallback local
-    return local_fallback(message, info_rows)
+    return local_fallback(message, info_rows, business_name)

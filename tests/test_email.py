@@ -260,3 +260,42 @@ async def test_email_sync_triggers_ai_and_records_conversation(auth_client):
         data = res.json()
         assert data["ok"] is True
         assert data["processed_count"] == 1
+
+
+def test_toggle_auto_reply(auth_client):
+    client, token, user_id = auth_client
+
+    # Conectar integração
+    with connect() as c:
+        c.execute(
+            """INSERT INTO email_integrations (user_id, provider, email_address, display_name, status, auto_reply_enabled)
+               VALUES (?, 'google', 'empresa@gmail.com', 'Empresa Silva', 'connected', 1)""",
+            (user_id,),
+        )
+
+    # 1. Desativar respostas automáticas
+    res_disable = client.post(
+        "/api/email/auto-reply",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"enabled": False},
+    )
+    assert res_disable.status_code == 200
+    assert res_disable.json()["ok"] is True
+    assert res_disable.json()["auto_reply_enabled"] is False
+
+    # Verifica status
+    status_res = client.get("/api/email/status", headers={"Authorization": f"Bearer {token}"})
+    assert status_res.status_code == 200
+    assert status_res.json()["integration"]["auto_reply_enabled"] is False
+
+    # 2. Reativar respostas automáticas
+    res_enable = client.post(
+        "/api/email/auto-reply",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"enabled": True},
+    )
+    assert res_enable.status_code == 200
+    assert res_enable.json()["auto_reply_enabled"] is True
+
+    status_res2 = client.get("/api/email/status", headers={"Authorization": f"Bearer {token}"})
+    assert status_res2.json()["integration"]["auto_reply_enabled"] is True

@@ -54,6 +54,10 @@ class ManualEmailConnectPayload(BaseModel):
     imap_port: Optional[int] = 993
 
 
+class ToggleAutoReplyPayload(BaseModel):
+    enabled: bool
+
+
 class TestEmailSendPayload(BaseModel):
     to: EmailStr
     subject: str = Field(default="Teste de Integração Drexier AI", min_length=1, max_length=200)
@@ -293,6 +297,33 @@ def connect_manual_email(
         )
 
     return {"ok": True, "message": "Email configurado com sucesso via SMTP!"}
+
+
+@router.post("/auto-reply")
+def toggle_auto_reply(
+    payload: ToggleAutoReplyPayload,
+    user: dict = Depends(get_current_user),
+):
+    """Ativa ou desativa as respostas automáticas da IA para a integração de e-mail."""
+    with connect() as c:
+        row = c.execute(
+            "SELECT id FROM email_integrations WHERE user_id = ? AND status = 'connected'",
+            (user["id"],)
+        ).fetchone()
+        if not row:
+            raise HTTPException(400, "Nenhuma integração de e-mail conectada nesta conta.")
+
+        c.execute(
+            "UPDATE email_integrations SET auto_reply_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (1 if payload.enabled else 0, row["id"]),
+        )
+
+    status_str = "ativadas" if payload.enabled else "desativadas"
+    return {
+        "ok": True,
+        "auto_reply_enabled": payload.enabled,
+        "message": f"Respostas automáticas do agente {status_str} com sucesso.",
+    }
 
 
 @router.post("/disconnect")

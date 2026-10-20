@@ -108,3 +108,85 @@ def test_full_auth_and_business_flow():
     }, headers=headers)
     assert res_agent.status_code == 200
 
+    # 13. Delete individual message
+    messages = client.get(f"/api/contacts/{contact_id}/messages", headers=headers).json()
+    first_msg_id = messages[0]["id"]
+    res_del_msg = client.delete(f"/api/messages/{first_msg_id}", headers=headers)
+    assert res_del_msg.status_code == 200
+    messages_after = client.get(f"/api/contacts/{contact_id}/messages", headers=headers).json()
+    assert len(messages_after) == len(messages) - 1
+
+    # 14. Delete entire contact/conversation
+    res_del_contact = client.delete(f"/api/contacts/{contact_id}", headers=headers)
+    assert res_del_contact.status_code == 200
+    contacts_after = client.get("/api/contacts", headers=headers).json()
+    assert not any(c["id"] == contact_id for c in contacts_after)
+
+
+def test_owner_reply_and_conversion_actions():
+    from unittest.mock import patch, AsyncMock
+    from backend.database import connect
+
+    email = "owner_test@example.com"
+    pwd = "SecurePassword123"
+    client.post("/api/auth/signup", json={
+        "name": "Dono da Loja",
+        "email": email,
+        "password": pwd,
+        "confirm_password": pwd,
+        "business_type": "Comércio"
+    })
+    res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+    token = res_login.json()["token"]
+    user_id = res_login.json()["user_id"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Conecta integração de e-mail simulada
+    with connect() as c:
+        c.execute(
+            """INSERT INTO email_integrations (user_id, provider, email_address, display_name, status)
+               VALUES (?, 'smtp_imap', 'dono@empresa.com', 'Dono da Loja', 'connected')""",
+            (user_id,)
+        )
+
+    with patch("backend.services.email_service.send_email", new_callable=AsyncMock) as mock_send, \
+         patch("backend.services.agent.draft_reply", new_callable=AsyncMock) as mock_draft:
+        mock_send.return_value = True
+        mock_draft.return_value = "Olá! A sua marcação para amanhã às 14h foi confirmada com sucesso!"
+
+        # Simula mensagem de cliente
+        res_msg = client.post("/api/simulate/incoming", json={
+            "contact_key": "cliente@externo.com",
+            "customer_name": "Ana Silva",
+            "message": "Gostaria de agendar para amanhã às 14h"
+        }, headers=headers)
+        assert res_msg.status_code == 200
+        contact_id = res_msg.json()["contact_id"]
+
+        # 1. Proprietário envia resposta manual diretamente
+        res_reply = client.post(f"/api/contacts/{contact_id}/reply", json={
+            "message": "Olá Ana, vou verificar a nossa disponibilidade para si."
+        }, headers=headers)
+        assert res_reply.status_code == 200
+        messages = client.get(f"/api/contacts/{contact_id}/messages", headers=headers).json()
+        owner_msgs = [m for m in messages if m["sender"] == "owner"]
+        assert len(owner_msgs) == 1
+        assert "Olá Ana" in owner_msgs[0]["content"]
+
+        # 2. Cria pedido de conversão pendente
+        res_conv = client.post(f"/api/contacts/{contact_id}/conversion", json={
+            "request_type": "marcação",
+            "details": "Marcação para amanhã às 14h"
+        }, headers=headers)
+        conv_id = res_conv.json()["id"]
+
+        # 3. Ação de confirmar pedido com IA
+        res_action_confirm = client.post(f"/api/conversions/{conv_id}/action", json={
+            "action": "confirm",
+            "note": "Horário reservado com sucesso"
+        }, headers=headers)
+        assert res_action_confirm.status_code == 200
+        assert res_action_confirm.json()["action"] == "confirm"
+
+
+

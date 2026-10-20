@@ -134,6 +134,7 @@ async function boot() {
   try {
     me = await api("/api/me");
     openApp();
+    startLivePolling();
     $("#side-user").textContent = me.name;
     $("#top-user").textContent = me.email;
     fillSettings();
@@ -168,6 +169,7 @@ async function boot() {
 }
 
 function logoutNow() {
+  stopLivePolling();
   token = "";
   me = null;
   localStorage.removeItem("drexier_token");
@@ -202,7 +204,14 @@ async function navigate(page) {
   $(".sidebar").classList.remove("open");
   try {
     if (page === "dashboard") await loadDashboard();
-    if (page === "messages") await loadContacts();
+    if (page === "messages") {
+      if (!selectedContact) {
+        $("#messages-chat-view")?.classList.add("hidden");
+        $("#messages-inbox-view")?.classList.remove("hidden");
+      }
+      await loadContacts();
+      await loadEmailStatus();
+    }
     if (page === "reports") await loadReports();
     if (page === "business") await loadInfo();
     if (page === "settings") {
@@ -280,7 +289,11 @@ async function loadDashboard() {
   metrics.forEach((m, i) => {
     m.classList.add("clickable-card");
     m.title = "Clique para expandir";
-    m.onclick = () => expandMetricCard(metricData[i].title, metricData[i].val, metricData[i].desc);
+    if (i === 3 || m.id === "card-metric-pending") {
+      m.onclick = () => openPendingConfirmationsModal();
+    } else {
+      m.onclick = () => expandMetricCard(metricData[i].title, metricData[i].val, metricData[i].desc);
+    }
   });
 
   renderBars("#dashboard-chart", [{ date: "Ontem", count: d.yesterday_contacts }, { date: "Hoje", count: d.today_contacts }]);
@@ -303,10 +316,22 @@ async function loadDashboard() {
     p.textContent = r.details || "Sem detalhes adicionais";
     info.append(h, p);
 
-    const btn = document.createElement("button");
-    btn.className = "btn outline small";
-    btn.textContent = "Marcar como tratado";
-    btn.onclick = async e => {
+    const btnGroup = document.createElement("div");
+    btnGroup.style.display = "flex";
+    btnGroup.style.gap = "8px";
+
+    const btnManage = document.createElement("button");
+    btnManage.className = "btn primary small";
+    btnManage.textContent = "Validar com IA";
+    btnManage.onclick = e => {
+      e.stopPropagation();
+      openPendingConfirmationsModal();
+    };
+
+    const btnResolve = document.createElement("button");
+    btnResolve.className = "btn outline small";
+    btnResolve.textContent = "Tratado";
+    btnResolve.onclick = async e => {
       e.stopPropagation();
       try {
         await api(`/api/conversions/${r.id}/resolve`, { method: "POST" });
@@ -317,130 +342,369 @@ async function loadDashboard() {
       }
     };
 
-    // Expandir pedido ao clicar no card
-    card.onclick = () => {
-      openModal(`
-        <div class="expanded-header">
-          <div class="expanded-header-left">
-            <div class="expanded-header-kbadge"><span class="expanded-header-kbadge-dot"></span>PEDIDO PENDENTE</div>
-            <h2 class="expanded-header-title">${escapeHtml(r.name || r.contact_key)}</h2>
-          </div>
-          <button class="expanded-close" id="modal-close-btn">✕</button>
-        </div>
-        <div class="expanded-body">
-          <div class="modal-section">
-            <div class="modal-section-label">Informações do pedido</div>
-            <div class="modal-info-row">
-              <div class="modal-info-row-label">TIPO</div>
-              <div class="modal-info-row-value">${escapeHtml(r.request_type)}</div>
-            </div>
-            <div class="modal-info-row">
-              <div class="modal-info-row-label">CONTACTO</div>
-              <div class="modal-info-row-value">${escapeHtml(r.contact_key)}</div>
-            </div>
-          </div>
-          <div class="modal-section">
-            <div class="modal-section-label">Detalhes registados pelo agente</div>
-            <div class="modal-text-block">${escapeHtml(r.details || 'Sem detalhes específicos informados.')}</div>
-          </div>
-        </div>
-        <div class="expanded-footer">
-          <button class="btn outline small danger" id="modal-resolve-btn">Marcar como tratado</button>
-          <button class="btn primary" id="modal-done-btn">Fechar</button>
-        </div>
-      `);
-      $("#modal-close-btn").onclick = closeModal;
-      $("#modal-done-btn").onclick = closeModal;
-      $("#modal-resolve-btn").onclick = async () => {
-        try {
-          await api(`/api/conversions/${r.id}/resolve`, { method: "POST" });
-          showNotice("Pedido marcado como tratado.");
-          closeModal();
-          loadDashboard();
-        } catch (err) {
-          showNotice(err.message, true);
-        }
-      };
+    btnGroup.append(btnManage, btnResolve);
+
+    // Expandir modal de validação ao clicar no card
+    card.onclick = () => openPendingConfirmationsModal();
+
+    card.append(info, btnGroup);
+    list.append(card);
+  });
+}
+
+$("#btn-open-pending-modal")?.addEventListener("click", () => openPendingConfirmationsModal());
+
+/* Modal Centralizado de Confirmação Automática / Alternativa com IA */
+async function openPendingConfirmationsModal() {
+  const modal = $("#pending-expand-modal");
+  const modalBody = $("#pending-modal-body");
+  if (!modal || !modalBody) return;
+
+  modal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  modalBody.innerHTML = '<div class="empty">A carregar pedidos pendentes...</div>';
+
+  try {
+    const d = await api("/api/dashboard");
+    const requests = d.pending_requests || [];
+    renderPendingModalList(requests);
+  } catch (err) {
+    modalBody.innerHTML = `<div class="empty">Erro ao carregar pedidos: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function closePendingConfirmationsModal() {
+  const modal = $("#pending-expand-modal");
+  if (modal) modal.classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+$("#close-pending-modal")?.addEventListener("click", closePendingConfirmationsModal);
+$("#pending-expand-modal")?.addEventListener("click", e => {
+  if (e.target === $("#pending-expand-modal")) closePendingConfirmationsModal();
+});
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("#pending-expand-modal")?.classList.contains("hidden")) {
+    closePendingConfirmationsModal();
+  }
+});
+
+function renderPendingModalList(requests) {
+  const modalBody = $("#pending-modal-body");
+  modalBody.innerHTML = "";
+  if (!requests.length) {
+    modalBody.innerHTML = '<div class="empty">Nenhum pedido pendente de validação no momento. Todos os pedidos e agendamentos foram tratados.</div>';
+    return;
+  }
+
+  requests.forEach(r => {
+    const card = document.createElement("div");
+    card.className = "pending-action-card";
+
+    const header = document.createElement("div");
+    header.className = "pending-action-card-header";
+
+    const clientInfo = document.createElement("div");
+    clientInfo.innerHTML = `<strong>${escapeHtml(r.name || r.contact_key)}</strong> <span class="muted" style="font-size:12px;">(${escapeHtml(r.contact_key)})</span>`;
+
+    const typeBadge = document.createElement("span");
+    typeBadge.className = "pending-action-type";
+    typeBadge.textContent = r.request_type || "Pedido";
+
+    header.append(clientInfo, typeBadge);
+
+    const detailsBox = document.createElement("div");
+    detailsBox.className = "modal-text-block";
+    detailsBox.style.background = "#ffffff";
+    detailsBox.style.padding = "10px 14px";
+    detailsBox.style.border = "1px solid var(--border)";
+    detailsBox.style.borderRadius = "var(--radius-sm)";
+    detailsBox.style.fontSize = "13px";
+    detailsBox.style.lineHeight = "1.5";
+    detailsBox.textContent = r.details || "Pedido aguardando confirmação do proprietário.";
+
+    const noteBox = document.createElement("div");
+    noteBox.className = "pending-note-box";
+    const noteLabel = document.createElement("label");
+    noteLabel.style.fontSize = "12px";
+    noteLabel.style.fontWeight = "600";
+    noteLabel.style.color = "var(--gray-600)";
+    noteLabel.textContent = "Observação ou instrução para a resposta da IA (opcional):";
+    const noteInput = document.createElement("textarea");
+    noteInput.rows = 2;
+    noteInput.placeholder = "Ex: 'Confirmar para as 15h', 'Informar que temos vaga às 16h', ou 'Sugerir modelo alternativo'...";
+    noteBox.append(noteLabel, noteInput);
+
+    const actions = document.createElement("div");
+    actions.className = "pending-action-buttons";
+
+    const btnConfirm = document.createElement("button");
+    btnConfirm.className = "btn-confirm-action";
+    btnConfirm.innerHTML = "✓ Confirmar (Enviar E-mail via IA)";
+    btnConfirm.onclick = async () => {
+      btnConfirm.disabled = true;
+      btnReject.disabled = true;
+      btnConfirm.textContent = "A gerar e enviar e-mail oficial...";
+      try {
+        const res = await api(`/api/conversions/${r.id}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "confirm", note: noteInput.value.trim() })
+        });
+        showNotice(res.detail || "Confirmação enviada por e-mail ao cliente com sucesso!");
+        await openPendingConfirmationsModal();
+        await loadDashboard();
+      } catch (err) {
+        showNotice(err.message, true);
+        btnConfirm.disabled = false;
+        btnReject.disabled = false;
+        btnConfirm.innerHTML = "✓ Confirmar (Enviar E-mail via IA)";
+      }
     };
 
-    card.append(info, btn);
-    list.append(card);
+    const btnReject = document.createElement("button");
+    btnReject.className = "btn-reject-action";
+    btnReject.innerHTML = "✕ Não Disponível / Sugerir Outro (IA)";
+    btnReject.onclick = async () => {
+      btnConfirm.disabled = true;
+      btnReject.disabled = true;
+      btnReject.textContent = "A gerar e enviar e-mail oficial...";
+      try {
+        const res = await api(`/api/conversions/${r.id}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "reject", note: noteInput.value.trim() })
+        });
+        showNotice(res.detail || "Resposta alternativa enviada por e-mail ao cliente com sucesso!");
+        await openPendingConfirmationsModal();
+        await loadDashboard();
+      } catch (err) {
+        showNotice(err.message, true);
+        btnConfirm.disabled = false;
+        btnReject.disabled = false;
+        btnReject.innerHTML = "✕ Não Disponível / Sugerir Outro (IA)";
+      }
+    };
+
+    const btnResolveDirect = document.createElement("button");
+    btnResolveDirect.className = "btn outline small";
+    btnResolveDirect.textContent = "Apenas Marcar Tratado";
+    btnResolveDirect.style.marginLeft = "auto";
+    btnResolveDirect.onclick = async () => {
+      try {
+        await api(`/api/conversions/${r.id}/resolve`, { method: "POST" });
+        showNotice("Pedido marcado como tratado.");
+        await openPendingConfirmationsModal();
+        await loadDashboard();
+      } catch (err) {
+        showNotice(err.message, true);
+      }
+    };
+
+    actions.append(btnConfirm, btnReject, btnResolveDirect);
+
+    card.append(header, detailsBox, noteBox, actions);
+    modalBody.append(card);
   });
 }
 
 /* Mensagens */
 let contactsCache = [];
-async function loadContacts() {
+
+async function loadContacts(keepChatOpen = true) {
   contactsCache = await api("/api/contacts");
   const list = $("#contacts-list");
+  if (!list) return;
+
   list.innerHTML = "";
   if (!contactsCache.length) {
-    list.className = "empty";
-    list.textContent = "Ainda não existem conversas.";
+    list.className = "contact-card-grid empty";
+    list.textContent = "Ainda não existem conversas. Quando um cliente enviar um e-mail, ele aparecerá aqui.";
     return;
   }
-  list.className = "contact-list";
+  list.className = "contact-card-grid";
+
   contactsCache.forEach(c => {
-    const b = document.createElement("button");
-    b.className = "contact-item" + (selectedContact === c.id ? " selected" : "");
-    const strong = document.createElement("strong");
-    strong.textContent = c.name || c.contact_key;
-    const small = document.createElement("small");
-    small.textContent = c.contact_key;
-    const span = document.createElement("span");
-    span.textContent = c.last_message || "Sem mensagens";
-    b.append(strong, small, span);
-    b.onclick = () => openConversation(c.id);
-    list.append(b);
+    const card = document.createElement("article");
+    card.className = "contact-card-item";
+
+    const initial = (c.name || c.contact_key || "C").trim()[0]?.toUpperCase() || "C";
+    const avatar = document.createElement("div");
+    avatar.className = "contact-card-avatar";
+    avatar.textContent = initial;
+
+    const info = document.createElement("div");
+    info.className = "contact-card-info";
+
+    const name = document.createElement("div");
+    name.className = "contact-card-name";
+    name.textContent = c.name || c.contact_key;
+
+    const email = document.createElement("div");
+    email.className = "contact-card-meta";
+    email.textContent = c.contact_key;
+
+    const lastMsg = document.createElement("div");
+    lastMsg.className = "contact-card-last-msg";
+    lastMsg.textContent = c.last_message ? (c.last_message.slice(0, 85) + (c.last_message.length > 85 ? "..." : "")) : "Sem mensagens ainda";
+
+    info.append(name, email, lastMsg);
+
+    const arrow = document.createElement("div");
+    arrow.className = "contact-card-arrow";
+    arrow.textContent = "→";
+
+    card.append(avatar, info, arrow);
+    card.onclick = () => openConversation(c.id);
+    list.append(card);
   });
-  if (selectedContact && contactsCache.some(c => c.id === selectedContact)) {
-    await openConversation(selectedContact);
+
+  if (keepChatOpen && selectedContact && contactsCache.some(c => c.id === selectedContact)) {
+    if (!$("#messages-chat-view")?.classList.contains("hidden")) {
+      await renderConversationMessages(selectedContact, false);
+    }
   }
 }
-$("#refresh-contacts").addEventListener("click", () => loadContacts().catch(e => showNotice(e.message, true)));
+
+$("#refresh-contacts")?.addEventListener("click", () => loadContacts(true).catch(e => showNotice(e.message, true)));
 
 async function openConversation(id) {
   selectedContact = id;
   const c = contactsCache.find(x => x.id === id);
+
+  // Alterna as visualizações: fecha a lista de cards e abre a sala de chat do cliente
+  $("#messages-inbox-view")?.classList.add("hidden");
+  $("#messages-chat-view")?.classList.remove("hidden");
+
   $("#conversation-title").textContent = c ? (c.name || c.contact_key) : "Conversa";
-  $$(".contact-item").forEach((b, i) => b.classList.toggle("selected", contactsCache[i]?.id === id));
-  const msgs = await api(`/api/contacts/${id}/messages`);
-  const el = $("#conversation");
-  el.innerHTML = "";
-  el.className = "conversation";
-  if (!msgs.length) {
-    el.className = "conversation empty";
-    el.textContent = "Sem mensagens.";
-  }
-  msgs.forEach(m => {
-    const b = document.createElement("div");
-    b.className = `bubble ${m.sender}`;
-    b.textContent = m.content;
-    const time = document.createElement("small");
-    time.textContent = `${m.sender === "customer" ? "Cliente" : m.sender === "agent" ? "Agente" : "Proprietário"} · ${m.created_at}`;
-    b.append(time);
-    el.append(b);
-  });
-  el.scrollTop = el.scrollHeight;
-  $("#conversion-form").classList.remove("hidden");
+  $("#conversation-subtitle").textContent = c ? `E-mail oficial: ${c.contact_key}` : "";
+  $("#btn-delete-conversation")?.classList.remove("hidden");
+
+  await renderConversationMessages(id, true);
 }
 
-$("#incoming-form").addEventListener("submit", async e => {
-  e.preventDefault();
-  const d = Object.fromEntries(new FormData(e.target));
+async function renderConversationMessages(id, autoScroll = true) {
+  const el = $("#conversation");
+  if (!el) return;
+
   try {
-    const r = await api("/api/simulate/incoming", { method: "POST", body: JSON.stringify(d) });
-    selectedContact = r.contact_id;
-    e.target.reset();
-    await loadContacts();
-    await openConversation(r.contact_id);
-    showNotice("Mensagem respondida com sucesso.");
+    const msgs = await api(`/api/contacts/${id}/messages`);
+    el.innerHTML = "";
+    el.className = "conversation";
+
+    if (!msgs.length) {
+      el.className = "conversation empty";
+      el.textContent = "Sem mensagens nesta conversa.";
+      return;
+    }
+
+    msgs.forEach(m => {
+      const b = document.createElement("div");
+      b.className = `bubble ${m.sender}`;
+
+      const textNode = document.createElement("div");
+      textNode.textContent = m.content;
+      b.append(textNode);
+
+      const footer = document.createElement("div");
+      footer.className = "bubble-footer";
+
+      const time = document.createElement("small");
+      const senderLabel = m.sender === "customer" ? "Cliente" : m.sender === "agent" ? "IA Drexier" : "Proprietário (Você)";
+      time.textContent = `${senderLabel} · ${m.created_at || ""}`;
+      footer.append(time);
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn-delete-msg";
+      delBtn.title = "Eliminar esta mensagem";
+      delBtn.textContent = "🗑️";
+      delBtn.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (!confirm("Tem a certeza de que deseja eliminar esta mensagem?")) return;
+        try {
+          await api(`/api/messages/${m.id}`, { method: "DELETE" });
+          showNotice("Mensagem eliminada com sucesso.");
+          await renderConversationMessages(id, false);
+          await loadContacts(true);
+        } catch (err) {
+          showNotice(err.message, true);
+        }
+      };
+      footer.append(delBtn);
+
+      b.append(footer);
+      el.append(b);
+    });
+
+    if (autoScroll) {
+      el.scrollTop = el.scrollHeight;
+    }
+  } catch (err) {
+    el.className = "conversation empty";
+    el.textContent = `Erro ao carregar mensagens: ${err.message}`;
+  }
+}
+
+// Botão para voltar à lista de clientes (Cards)
+$("#btn-back-to-inbox")?.addEventListener("click", () => {
+  selectedContact = null;
+  $("#messages-chat-view")?.classList.add("hidden");
+  $("#messages-inbox-view")?.classList.remove("hidden");
+  loadContacts(false);
+});
+
+// Envio de resposta oficial direta do proprietário por e-mail
+$("#owner-reply-form")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!selectedContact) {
+    showNotice("Selecione um cliente primeiro.", true);
+    return;
+  }
+  const input = $("#owner-reply-input");
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  const btn = $("#btn-send-owner-reply");
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "A enviar por e-mail...";
+
+  try {
+    const res = await api(`/api/contacts/${selectedContact}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ message: msg })
+    });
+    input.value = "";
+    showNotice(res.detail || "Resposta oficial entregue com sucesso no e-mail do cliente!");
+    await renderConversationMessages(selectedContact, true);
+    await loadContacts(true);
+  } catch (err) {
+    showNotice(err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+});
+
+$("#btn-delete-conversation")?.addEventListener("click", async () => {
+  if (!selectedContact) return;
+  const c = contactsCache.find(x => x.id === selectedContact);
+  const name = c ? (c.name || c.contact_key) : "este cliente";
+  if (!confirm(`Tem a certeza de que deseja eliminar todas as mensagens e o histórico de ${name}?`)) return;
+  try {
+    await api(`/api/contacts/${selectedContact}`, { method: "DELETE" });
+    showNotice("Conversa eliminada com sucesso.");
+    selectedContact = null;
+    $("#messages-chat-view")?.classList.add("hidden");
+    $("#messages-inbox-view")?.classList.remove("hidden");
+    await loadContacts(false);
+    await loadDashboard();
   } catch (err) {
     showNotice(err.message, true);
   }
 });
 
-$("#conversion-form").addEventListener("submit", async e => {
+// Suporte retrocompatível se existir algum formulário residual de conversão
+$("#conversion-form")?.addEventListener("submit", async e => {
   e.preventDefault();
   if (!selectedContact) {
     showNotice("Selecione um cliente primeiro.", true);
@@ -1107,8 +1371,10 @@ async function loadEmailStatus() {
         infoLastSync.textContent = it.last_sync_at ? new Date(it.last_sync_at).toLocaleString("pt-PT") : "Ainda não sincronizado";
       }
 
+      updateAutoReplyUI(Boolean(it.auto_reply_enabled), true);
       connectedView.classList.remove("hidden");
     } else {
+      updateAutoReplyUI(false, false);
       if (badge) {
         badge.textContent = "Desconectado";
         badge.className = "badge badge-disconnected";
@@ -1225,307 +1491,122 @@ async function handleEmailSync(triggerBtn) {
 $("#btn-email-sync")?.addEventListener("click", (e) => handleEmailSync(e.target));
 $("#btn-sync-emails-messages")?.addEventListener("click", (e) => handleEmailSync(e.target));
 
-// Teste de envio de e-mail
-$("#email-test-form")?.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const form = e.target;
-  const btn = $("#btn-email-test-submit");
-  const resultEl = $("#email-test-result");
-  const to = form.elements.test_to.value.trim();
-  const subject = form.elements.test_subject.value.trim();
-  const message = form.elements.test_message.value.trim();
+// Controlo de Respostas Automáticas do Agente
+function updateAutoReplyUI(enabled, connected = true) {
+  const autoReplyText = $("#email-info-auto-reply");
+  const autoReplyBtn = $("#btn-toggle-auto-reply");
+  const msgToggleBtn = $("#btn-toggle-auto-reply-messages");
+  const liveStatusDot = $("#live-status-dot");
+  const liveStatusBar = $("#conversation-live-status");
+  const liveStatusText = $("#live-status-text");
 
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "A enviar e-mail...";
-  }
-  if (resultEl) {
-    resultEl.classList.add("hidden");
-    resultEl.className = "wa-test-result";
+  if (!connected) {
+    if (autoReplyText) {
+      autoReplyText.textContent = "Desconectado";
+      autoReplyText.className = "wa-text-gray";
+    }
+    if (autoReplyBtn) {
+      autoReplyBtn.textContent = "Desativado";
+      autoReplyBtn.disabled = true;
+    }
+    if (msgToggleBtn) {
+      msgToggleBtn.textContent = "Respostas IA: Desconectado";
+      msgToggleBtn.className = "btn outline small";
+    }
+    return;
   }
 
+  if (autoReplyBtn) autoReplyBtn.disabled = false;
+
+  if (enabled) {
+    if (autoReplyText) {
+      autoReplyText.textContent = "Ativa";
+      autoReplyText.className = "wa-text-green";
+    }
+    if (autoReplyBtn) {
+      autoReplyBtn.textContent = "Desativar";
+    }
+    if (msgToggleBtn) {
+      msgToggleBtn.textContent = "Respostas IA: Ativas";
+      msgToggleBtn.className = "btn outline small";
+      msgToggleBtn.style.borderColor = "#10b981";
+      msgToggleBtn.style.color = "#059669";
+    }
+    if (liveStatusDot) liveStatusDot.className = "live-pulse-dot";
+    if (liveStatusBar) liveStatusBar.className = "conversation-live-bar";
+    if (liveStatusText) {
+      liveStatusText.textContent = "Atendimento oficial por e-mail ativo · A IA Drexier responde automaticamente em tempo real a todas as mensagens enviadas ao seu e-mail vinculado.";
+    }
+  } else {
+    if (autoReplyText) {
+      autoReplyText.textContent = "Pausada";
+      autoReplyText.className = "wa-text-gray";
+    }
+    if (autoReplyBtn) {
+      autoReplyBtn.textContent = "Ativar";
+    }
+    if (msgToggleBtn) {
+      msgToggleBtn.textContent = "Respostas IA: Pausadas";
+      msgToggleBtn.className = "btn outline small";
+      msgToggleBtn.style.borderColor = "#f59e0b";
+      msgToggleBtn.style.color = "#d97706";
+    }
+    if (liveStatusDot) liveStatusDot.className = "live-pulse-dot paused";
+    if (liveStatusBar) liveStatusBar.className = "conversation-live-bar paused";
+    if (liveStatusText) {
+      liveStatusText.textContent = "Respostas automáticas pausadas · As mensagens são recebidas no painel, mas a IA não enviará respostas automáticas por e-mail.";
+    }
+  }
+}
+
+async function toggleAutoReply() {
   try {
-    const res = await api("/api/email/test-send", {
-      method: "POST",
-      body: JSON.stringify({ to, subject, message })
-    });
-    if (resultEl) {
-      resultEl.classList.remove("hidden");
-      resultEl.classList.add("success");
-      resultEl.textContent = `✅ ${res.message || "E-mail enviado com sucesso!"}`;
-    }
-  } catch (err) {
-    if (resultEl) {
-      resultEl.classList.remove("hidden");
-      resultEl.classList.add("error");
-      resultEl.textContent = `❌ Falha no envio do e-mail: ${err.message}`;
-    }
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Enviar Teste";
-    }
-  }
-});
-
-
-/* ════════════════════════════════════════════════════════════
-   INTEGRAÇÃO WHATSAPP OFICIAL COM META EMBEDDED SIGNUP
-   ════════════════════════════════════════════════════════════ */
-let metaConfig = null;
-let fbSdkLoaded = false;
-let lastEmbeddedSignupData = null;
-
-// Escuta eventos postMessage emitidos pela Meta durante o fluxo Embedded Signup
-window.addEventListener("message", (event) => {
-  if (typeof event.origin !== "string") return;
-  if (!event.origin.endsWith("facebook.com") && !event.origin.endsWith("meta.com")) return;
-
-  try {
-    const raw = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-    if (raw && raw.type === "WA_EMBEDDED_SIGNUP") {
-      console.log("[Drexier] Evento Embedded Signup recebido da Meta:", raw);
-      if (raw.event === "FINISH" && raw.data) {
-        lastEmbeddedSignupData = {
-          phone_number_id: raw.data.phone_number_id || "",
-          waba_id: raw.data.waba_id || ""
-        };
-      }
-    }
-  } catch (err) {
-    // Ignora eventos não formatados em JSON
-  }
-});
-
-// Inicialização dinâmica do SDK do Facebook
-async function initMetaSdk() {
-  if (fbSdkLoaded && window.FB) return;
-  try {
-    metaConfig = await api("/api/whatsapp/config");
-    if (!metaConfig || !metaConfig.app_id) {
+    const statusData = await api("/api/email/status");
+    if (!statusData.connected) {
+      showNotice("Conecte primeiro o seu e-mail nas configurações para gerir as respostas automáticas.", true);
       return;
     }
-
-    if (!window.FB) {
-      window.fbAsyncInit = function() {
-        window.FB.init({
-          appId: metaConfig.app_id,
-          autoLogAppEvents: true,
-          xfbml: true,
-          version: metaConfig.version || "v21.0"
-        });
-        fbSdkLoaded = true;
-      };
-
-      if (!document.getElementById("facebook-jssdk")) {
-        const js = document.createElement("script");
-        js.id = "facebook-jssdk";
-        js.src = "https://connect.facebook.net/pt_PT/sdk.js";
-        js.async = true;
-        js.defer = true;
-        document.body.appendChild(js);
-      }
-    } else {
-      window.FB.init({
-        appId: metaConfig.app_id,
-        autoLogAppEvents: true,
-        xfbml: true,
-        version: metaConfig.version || "v21.0"
-      });
-      fbSdkLoaded = true;
-    }
-  } catch (err) {
-    console.warn("[Drexier] Falha ao carregar SDK da Meta:", err);
-  }
-}
-
-// Carregar o estado da integração WhatsApp
-async function loadWhatsAppStatus() {
-  const loading = $("#wa-loading-state");
-  const envWarning = $("#wa-env-warning");
-  const disconnectedView = $("#wa-disconnected-view");
-  const connectedView = $("#wa-connected-view");
-  const badge = $("#wa-status-badge");
-
-  if (!loading || !disconnectedView || !connectedView) return;
-
-  loading.classList.remove("hidden");
-  envWarning.classList.add("hidden");
-  disconnectedView.classList.add("hidden");
-  connectedView.classList.add("hidden");
-
-  try {
-    await initMetaSdk();
-
-    if (!metaConfig || !metaConfig.configured) {
-      envWarning.classList.remove("hidden");
-    }
-
-    const data = await api("/api/whatsapp/status");
-    loading.classList.add("hidden");
-
-    if (data.connected && data.integration) {
-      const it = data.integration;
-      badge.textContent = "Conectado";
-      badge.className = "badge badge-connected";
-
-      $("#wa-display-name").textContent = it.business_name || "WhatsApp Oficial";
-      $("#wa-display-phone").textContent = it.phone_number || it.phone_number_id;
-      $("#wa-display-phone-id").textContent = it.phone_number_id;
-      $("#wa-display-waba-id").textContent = it.waba_id;
-      $("#wa-display-webhook").textContent = it.webhook_subscribed ? "Subscrito & Ativo" : "Pendente";
-      $("#wa-display-date").textContent = it.created_at ? new Date(it.created_at).toLocaleDateString("pt-PT") : "-";
-
-      connectedView.classList.remove("hidden");
-    } else {
-      badge.textContent = "Desconectado";
-      badge.className = "badge badge-disconnected";
-      disconnectedView.classList.remove("hidden");
-    }
-  } catch (err) {
-    loading.classList.add("hidden");
-    disconnectedView.classList.remove("hidden");
-    showNotice("Não foi possível carregar o estado do WhatsApp: " + err.message, true);
-  }
-}
-
-// Iniciar fluxo oficial do Embedded Signup da Meta
-function startMetaEmbeddedSignup() {
-  const statusEl = $("#wa-connect-status");
-  const btn = $("#btn-wa-connect");
-
-  if (!metaConfig || !metaConfig.app_id) {
-    showNotice("Preencha o META_APP_ID no seu ficheiro .env antes de iniciar.", true);
-    $("#wa-manual-box").classList.remove("hidden");
-    return;
-  }
-
-  if (!window.FB) {
-    showNotice("O SDK da Meta não pôde ser carregado. Pode utilizar a ligação direta por chaves abaixo.", true);
-    $("#wa-manual-box").classList.remove("hidden");
-    return;
-  }
-
-  statusEl.textContent = "A abrir janela oficial da Meta...";
-  btn.disabled = true;
-
-  const loginParams = {
-    scope: "whatsapp_business_management,whatsapp_business_messaging",
-    response_type: "code",
-    override_default_response_type: true,
-    extras: {
-      feature: "whatsapp_embedded_signup",
-      version: 2,
-      sessionInfoVersion: "3"
-    }
-  };
-
-  if (metaConfig.config_id) {
-    loginParams.config_id = metaConfig.config_id;
-  }
-
-  window.FB.login(async (response) => {
-    btn.disabled = false;
-    if (response.authResponse && response.authResponse.code) {
-      statusEl.textContent = "Autenticado na Meta! A concluir ligação e a subscrever webhook...";
-      try {
-        const payload = {
-          code: response.authResponse.code,
-          phone_number_id: lastEmbeddedSignupData ? lastEmbeddedSignupData.phone_number_id : undefined,
-          waba_id: lastEmbeddedSignupData ? lastEmbeddedSignupData.waba_id : undefined
-        };
-        const result = await api("/api/whatsapp/connect", {
-          method: "POST",
-          body: JSON.stringify(payload)
-        });
-        statusEl.textContent = "";
-        showNotice(result.message || "WhatsApp oficial ligado com sucesso!");
-        await loadWhatsAppStatus();
-      } catch (err) {
-        statusEl.textContent = "";
-        showNotice("Erro ao concluir ligação na Meta: " + err.message, true);
-      }
-    } else {
-      statusEl.textContent = "";
-      if (response.status === "not_authorized" || response.error) {
-        showNotice("Ligação cancelada ou não autorizada na Meta.", true);
-      }
-    }
-  }, loginParams);
-}
-
-// Conexão manual / direta por credenciais
-$("#btn-toggle-manual-wa")?.addEventListener("click", () => {
-  $("#wa-manual-box").classList.toggle("hidden");
-});
-$("#btn-cancel-manual-wa")?.addEventListener("click", () => {
-  $("#wa-manual-box").classList.add("hidden");
-});
-
-$("#wa-manual-form")?.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const d = Object.fromEntries(new FormData(e.target));
-  try {
-    const res = await api("/api/whatsapp/connect", {
+    const currentEnabled = Boolean(statusData.integration.auto_reply_enabled);
+    const newEnabled = !currentEnabled;
+    const res = await api("/api/email/auto-reply", {
       method: "POST",
-      body: JSON.stringify(d)
+      body: JSON.stringify({ enabled: newEnabled })
     });
-    showNotice(res.message || "WhatsApp ligado com sucesso!");
-    $("#wa-manual-box").classList.add("hidden");
-    e.target.reset();
-    await loadWhatsAppStatus();
+    showNotice(res.message);
+    updateAutoReplyUI(newEnabled, true);
+    await loadEmailStatus();
   } catch (err) {
     showNotice(err.message, true);
   }
-});
+}
 
-// Desconectar WhatsApp
-$("#btn-wa-disconnect")?.addEventListener("click", async () => {
-  if (!confirm("Tem a certeza de que deseja desconectar o WhatsApp oficial desta conta? A IA deixará de responder às mensagens até voltar a conectar.")) {
-    return;
+$("#btn-toggle-auto-reply")?.addEventListener("click", toggleAutoReply);
+$("#btn-toggle-auto-reply-messages")?.addEventListener("click", toggleAutoReply);
+
+// Monitorização e atualização contínua em segundo plano (tempo real)
+let livePollTimer = null;
+
+function startLivePolling() {
+  if (livePollTimer) clearInterval(livePollTimer);
+  livePollTimer = setInterval(async () => {
+    if (!token) return;
+    try {
+      if (activePage === "messages") {
+        await loadContacts();
+      } else if (activePage === "dashboard") {
+        await loadDashboard();
+      }
+    } catch (e) {
+      // Ignora falhas temporárias na atualização automática
+    }
+  }, 15000);
+}
+
+function stopLivePolling() {
+  if (livePollTimer) {
+    clearInterval(livePollTimer);
+    livePollTimer = null;
   }
-  try {
-    await api("/api/whatsapp/disconnect", { method: "POST" });
-    showNotice("WhatsApp desconectado com sucesso.");
-    await loadWhatsAppStatus();
-  } catch (err) {
-    showNotice(err.message, true);
-  }
-});
-
-// Teste de envio oficial via Meta Cloud API
-$("#wa-test-form")?.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const form = e.target;
-  const btn = $("#btn-wa-test-submit");
-  const resultEl = $("#wa-test-result");
-  const to = form.elements.test_to.value.trim();
-  const message = form.elements.test_message.value.trim();
-
-  btn.disabled = true;
-  btn.textContent = "A enviar...";
-  resultEl.classList.add("hidden");
-  resultEl.className = "wa-test-result";
-
-  try {
-    const res = await api("/api/whatsapp/test-send", {
-      method: "POST",
-      body: JSON.stringify({ to, message })
-    });
-    resultEl.classList.remove("hidden");
-    resultEl.classList.add("success");
-    const metaMsgId = res.meta_response?.messages?.[0]?.id || "ok";
-    resultEl.textContent = "✅ Mensagem enviada com sucesso pela Meta Cloud API! ID da Meta: " + metaMsgId;
-  } catch (err) {
-    resultEl.classList.remove("hidden");
-    resultEl.classList.add("error");
-    resultEl.textContent = "❌ Falha no envio: " + err.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Enviar Teste";
-  }
-});
-
-$("#btn-wa-connect")?.addEventListener("click", startMetaEmbeddedSignup);
+}
 
 if (token) boot();

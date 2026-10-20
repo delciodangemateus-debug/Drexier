@@ -1,4 +1,4 @@
-import json, re
+import asyncio, json, logging, re
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends, Header
@@ -9,17 +9,55 @@ from backend.database import init_db, connect
 from backend.auth import hash_password, verify_password, create_token, decode_token
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
+from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
 from backend.routers.whatsapp import router as whatsapp_router
 from backend.routers.email import router as email_router
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
+logger = logging.getLogger("drexier.main")
 ROOT = Path(__file__).resolve().parent.parent
+
+async def background_email_worker():
+    """
+    Worker contínuo em background para funcionamento pleno da automação:
+    Verifica a caixa de entrada dos emails integrados de todos os utilizadores,
+    gera respostas inteligentes com a IA Drexier e responde de forma 100% real.
+    """
+    logger.info("Worker contínuo de atendimento por e-mail via IA Drexier iniciado.")
+    await asyncio.sleep(2)
+    while True:
+        try:
+            with connect() as c:
+                active_users = c.execute(
+                    "SELECT DISTINCT user_id FROM email_integrations WHERE status = 'connected'"
+                ).fetchall()
+            
+            for row in active_users:
+                uid = row["user_id"]
+                try:
+                    processed = await sync_emails_for_user(uid)
+                    if processed:
+                        logger.info(f"[IA Drexier] {len(processed)} e-mail(s) real(is) processado(s) e respondido(s) para user_id {uid}.")
+                except Exception as ex:
+                    logger.warning(f"[IA Drexier] Erro na verificação periódica de e-mails para utilizador {uid}: {ex}")
+        except Exception as e:
+            logger.error(f"[IA Drexier] Erro no ciclo do worker de e-mails: {e}")
+        
+        await asyncio.sleep(15)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
+    worker_task = asyncio.create_task(background_email_worker())
+    try:
+        yield
+    finally:
+        worker_task.cancel()
+        try:
+            await worker_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 app = FastAPI(title="Drexier API", version="0.1.0", lifespan=lifespan)
 # Roteadores de canais de atendimento (Email ativo como canal principal; WhatsApp mantido como legado)
@@ -99,6 +137,13 @@ class ConversionIn(BaseModel):
     request_type: str = "purchase_or_booking"
     details: str = ""
 
+class OwnerReplyIn(BaseModel):
+    message: str = Field(min_length=1, max_length=10000)
+
+class ConversionActionIn(BaseModel):
+    action: str = Field(pattern="^(confirm|reject)$")
+    custom_note: Optional[str] = ""
+
 @app.post("/api/auth/signup")
 def signup(data: Signup):
     if data.password != data.confirm_password:
@@ -173,6 +218,30 @@ def contact_messages(contact_id:int,user=Depends(current_user)):
         if not own: raise HTTPException(404,"Cliente não encontrado.")
         rows=c.execute("SELECT id,sender,content,created_at FROM messages WHERE contact_id=? AND user_id=? ORDER BY id",(contact_id,user["id"])).fetchall()
     return [dict(x) for x in rows]
+
+@app.delete("/api/messages/{message_id}")
+def delete_message(message_id: int, user=Depends(current_user)):
+    with connect() as c:
+        row = c.execute("SELECT id, contact_id FROM messages WHERE id=? AND user_id=?", (message_id, user["id"])).fetchone()
+        if not row:
+            raise HTTPException(404, "Mensagem não encontrada.")
+        c.execute("DELETE FROM messages WHERE id=? AND user_id=?", (message_id, user["id"]))
+        last_msg = c.execute("SELECT created_at FROM messages WHERE contact_id=? ORDER BY id DESC LIMIT 1", (row["contact_id"],)).fetchone()
+        last_time = last_msg["created_at"] if last_msg else None
+        c.execute("UPDATE contacts SET last_message_at=? WHERE id=?", (last_time, row["contact_id"]))
+    return {"ok": True, "message": "Mensagem eliminada com sucesso."}
+
+@app.delete("/api/contacts/{contact_id}")
+def delete_contact(contact_id: int, user=Depends(current_user)):
+    with connect() as c:
+        row = c.execute("SELECT id FROM contacts WHERE id=? AND user_id=?", (contact_id, user["id"])).fetchone()
+        if not row:
+            raise HTTPException(404, "Cliente não encontrado.")
+        c.execute("DELETE FROM messages WHERE contact_id=? AND user_id=?", (contact_id, user["id"]))
+        c.execute("DELETE FROM conversion_requests WHERE contact_id=? AND user_id=?", (contact_id, user["id"]))
+        c.execute("DELETE FROM email_threads WHERE contact_id=? AND user_id=?", (contact_id, user["id"]))
+        c.execute("DELETE FROM contacts WHERE id=? AND user_id=?", (contact_id, user["id"]))
+    return {"ok": True, "message": "Conversa eliminada com sucesso."}
 
 @app.get("/api/business-info")
 def get_business_info(user=Depends(current_user)):
@@ -254,6 +323,17 @@ async def incoming(data:IncomingMessage,user=Depends(current_user)):
         c.execute("UPDATE contacts SET last_message_at=CURRENT_TIMESTAMP WHERE id=?",(cid,))
     return {"contact_id":cid,"reply":reply}
 
+@app.post("/api/contacts/{contact_id}/reply")
+async def owner_reply(contact_id: int, data: OwnerReplyIn, user=Depends(current_user)):
+    try:
+        res = await send_owner_reply(user["id"], contact_id, data.message)
+        return res
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Erro ao enviar resposta do proprietário: {e}")
+        raise HTTPException(500, f"Falha no envio do e-mail: {str(e)}")
+
 @app.post("/api/contacts/{contact_id}/conversion")
 def create_conversion(contact_id:int,data:ConversionIn,user=Depends(current_user)):
     with connect() as c:
@@ -262,6 +342,22 @@ def create_conversion(contact_id:int,data:ConversionIn,user=Depends(current_user
         cur=c.execute("INSERT INTO conversion_requests(user_id,contact_id,request_type,details) VALUES(?,?,?,?)",
           (user["id"],contact_id,data.request_type,data.details))
     return {"id":cur.lastrowid,"status":"pending"}
+
+@app.post("/api/conversions/{request_id}/action")
+async def conversion_action(request_id: int, data: ConversionActionIn, user=Depends(current_user)):
+    try:
+        res = await process_confirmation_action(
+            user_id=user["id"],
+            request_id=request_id,
+            action=data.action,
+            custom_note=data.custom_note or ""
+        )
+        return res
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        logger.error(f"Erro na ação de confirmação: {e}")
+        raise HTTPException(500, str(e))
 
 @app.post("/api/conversions/{request_id}/resolve")
 def resolve_conversion(request_id:int,user=Depends(current_user)):

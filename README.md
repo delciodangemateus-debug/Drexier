@@ -79,9 +79,11 @@ O Drexier atende clientes, tira dúvidas e conduz conversas **exclusivamente por
    - Ao receber e-mails de clientes na caixa de entrada, o Drexier lê a dúvida, localiza o cliente, constrói o histórico da conversa e as diretrizes do negócio.
    - O motor de IA (Google Gemini) formula a resposta inteligente e atenciosa.
    - A resposta é enviada de volta ao e-mail do cliente mantendo a linha de assunto (`Re: ...`) e a conversa no painel.
+   - **Controlo de Respostas Automáticas**: O utilizador pode a qualquer momento pausar ou reativar as respostas automáticas da IA tanto na aba **Mensagens** (botão direto `Respostas IA: Ativas / Pausadas`) quanto em **Configurações > Integração**. Quando pausado, as mensagens continuam a ser recebidas e organizadas no painel, mas a IA não envia e-mails automaticamente.
+   - **Gestão e Eliminação de Mensagens**: Na aba **Mensagens**, é possível eliminar mensagens individuais (botão `🗑️` em cada balão de mensagem) ou eliminar conversas inteiras com um clique (`Eliminar Conversa`).
 
-## Integração WhatsApp (Desativada no Painel / Legado)
-- A pedido do utilizador, a automação por WhatsApp foi **desativada no fluxo ativo**, mas todo o seu código backend, modelos e endpoints foram **preservados sem apagar** para fins de histórico e contingência.
+## Integração WhatsApp (Removida da Interface do Cliente)
+- A opção de integração com WhatsApp foi **completamente eliminada da interface do cliente**. O atendimento oficial e ativo da plataforma é focado exclusivamente em e-mail (Gmail & Outlook). O backend mantém suporte legado e webhooks de contingência.
 
 ## Notas importantes
 - A base de dados isola as ligações de e-mail, contactos, mensagens e informações de negócio por utilizador (`user_id`).

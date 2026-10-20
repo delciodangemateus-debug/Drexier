@@ -45,17 +45,68 @@
         <article class="metric"><span>Mensagens respondidas</span><strong id="metric-messages">0</strong></article>
         <article class="metric"><span>Clientes adquiridos</span><strong id="metric-contacts">0</strong></article>
         <article class="metric"><span>Novos clientes hoje</span><strong id="metric-today">0</strong><small id="compare-yesterday">Dia anterior: 0</small></article>
-        <article class="metric"><span>Pedidos para confirmar</span><strong id="metric-pending">0</strong></article>
+        <article class="metric clickable" id="card-metric-pending" title="Clique para expandir e gerir pedidos a confirmar"><span>Pedidos para confirmar</span><strong id="metric-pending">0</strong><small class="muted" style="display:block;margin-top:4px;font-size:11px;">🔍 Clique para gerir</small></article>
       </div>
       <div class="panel"><div class="panel-heading"><h2>Aquisição de clientes</h2><span class="muted">Hoje vs. dia anterior</span></div><div id="dashboard-chart" class="chart"></div></div>
-      <div class="panel"><div class="panel-heading"><h2>Pedidos aguardando confirmação manual</h2><button class="btn outline small" data-goto="messages">Ver mensagens</button></div><div id="pending-list" class="empty">Nenhum pedido pendente.</div></div>
+      <div class="panel" id="panel-pending-confirmations">
+        <div class="panel-heading">
+          <div>
+            <h2>Pedidos aguardando confirmação</h2>
+            <p class="muted" style="margin:2px 0 0;font-size:12.5px;">Detectados automaticamente pela IA em e-mails recebidos de clientes.</p>
+          </div>
+          <button class="btn primary small" id="btn-open-pending-modal">Gerir Pedidos</button>
+        </div>
+        <div id="pending-list" class="empty">Nenhum pedido pendente.</div>
+      </div>
     </section>
     <section id="page-messages" class="page hidden">
-      <div class="two-col messages-layout"><div class="panel contact-panel"><div class="panel-heading"><h2>Clientes</h2><div style="display:flex;gap:6px;"><button class="btn primary small" id="btn-sync-emails-messages" title="Verificar novos e-mails recebidos e responder com a IA">Sincronizar E-mails</button><button class="btn outline small" id="refresh-contacts">Atualizar</button></div></div><div id="contacts-list" class="contact-list empty">Ainda não existem conversas.</div></div>
-      <div class="panel conversation-panel"><div class="panel-heading"><h2 id="conversation-title">Conversa</h2></div><div id="conversation" class="conversation empty">Selecione um cliente para ver a interação.</div>
-      <form id="incoming-form" class="inline-form"><h3>Simular E-mail / Mensagem Recebida</h3><p class="muted">Ferramenta de teste: simula a chegada de uma dúvida ou mensagem de cliente para validar a condução e tom de voz da IA.</p><label>E-mail ou Identificador do cliente<input name="contact_key" placeholder="cliente@exemplo.com ou telefone" required></label><label>Nome do cliente<input name="customer_name" placeholder="Ex: João Silva"></label><label>Mensagem ou Dúvida do cliente<textarea name="message" required rows="3" placeholder="Ex: Olá, gostaria de saber os horários de funcionamento e se têm o serviço de consultoria disponível."></textarea></label><button class="btn primary" type="submit">Processar com IA Drexier</button></form>
-      <form id="conversion-form" class="inline-form hidden"><h3>Registar intenção de compra/marcação</h3><label>Tipo<select name="request_type"><option value="purchase">Compra</option><option value="booking">Marcação</option><option value="other">Outro pedido</option></select></label><label>Detalhes<textarea name="details" rows="2"></textarea></label><button class="btn primary" type="submit">Notificar proprietário</button></form>
-      </div></div>
+      <!-- Visão 1: Lista de Clientes (Cards tipo Chat App) -->
+      <div id="messages-inbox-view" class="panel messages-inbox-panel">
+        <div class="panel-heading" style="flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h2>Clientes & Mensagens</h2>
+            <p class="muted" style="margin:2px 0 0;">Selecione um cliente para abrir a conversa e acompanhar a IA em tempo real.</p>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn outline small" id="btn-toggle-auto-reply-messages" title="Ativar ou desativar o envio automático de respostas pelo agente">Respostas IA: Ativas</button>
+            <button class="btn primary small" id="btn-sync-emails-messages" title="Verificar novos e-mails recebidos e responder com a IA">Sincronizar E-mails</button>
+            <button class="btn outline small" id="refresh-contacts">Atualizar</button>
+          </div>
+        </div>
+        <div id="contacts-list" class="contact-card-grid empty">Ainda não existem conversas.</div>
+      </div>
+
+      <!-- Visão 2: Chat com o Cliente (Aberto ao clicar no card do cliente) -->
+      <div id="messages-chat-view" class="panel messages-chat-panel hidden">
+        <div class="chat-header">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <button class="btn outline small" id="btn-back-to-inbox" title="Voltar à lista de clientes">← Voltar</button>
+            <div>
+              <h2 id="conversation-title" style="margin:0; font-size:16px;">Conversa</h2>
+              <span id="conversation-subtitle" class="muted" style="font-size:12px;"></span>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="btn outline small danger" id="btn-delete-conversation" title="Eliminar toda a conversa deste cliente">Eliminar Conversa</button>
+          </div>
+        </div>
+
+        <div id="conversation-live-status" class="conversation-live-bar">
+          <span class="live-pulse-dot" id="live-status-dot"></span>
+          <span id="live-status-text">Atendimento oficial por e-mail ativo · A IA Drexier responde automaticamente em tempo real a todas as mensagens deste cliente.</span>
+        </div>
+
+        <div id="conversation" class="conversation empty">A carregar mensagens...</div>
+
+        <!-- Local onde o proprietário pode escrever e responder diretamente por e-mail -->
+        <form id="owner-reply-form" class="owner-reply-box">
+          <textarea id="owner-reply-input" name="reply_message" rows="3" placeholder="Escreva aqui a sua resposta oficial ao cliente... (será enviada diretamente para o e-mail dele)" required></textarea>
+          <div class="owner-reply-actions">
+            <span class="muted" style="font-size:12px;">✉️ Esta resposta será entregue no e-mail do cliente e registrada como Proprietário.</span>
+            <button class="btn primary small" type="submit" id="btn-send-owner-reply">Enviar por E-mail</button>
+          </div>
+        </form>
+      </div>
     </section>
     <section id="page-reports" class="page hidden">
       <div class="panel"><div class="panel-heading"><h2>Clientes adquiridos por dia</h2><span class="muted">Dados reais da conta · últimos 14 dias</span></div><div id="reports-chart" class="chart line-chart"></div><div id="chart-labels" class="chart-labels"></div></div>
@@ -200,7 +251,10 @@
               </div>
               <div class="wa-info-item">
                 <span class="wa-info-label">Automação de Respostas</span>
-                <strong class="wa-text-green">Ativa & Conduzida por IA</strong>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:2px;">
+                  <strong id="email-info-auto-reply" class="wa-text-green">Ativa</strong>
+                  <button type="button" class="btn outline small" id="btn-toggle-auto-reply" style="padding: 2px 8px; font-size: 11px;">Desativar</button>
+                </div>
               </div>
               <div class="wa-info-item">
                 <span class="wa-info-label">Última Sincronização</span>
@@ -208,50 +262,20 @@
               </div>
             </div>
 
-            <!-- Teste de Envio por E-mail -->
-            <div class="wa-test-section">
-              <h4>Testar Envio de E-mail Oficial</h4>
-              <p class="muted">Envie um e-mail de teste para validar a conectividade e garantir que as respostas aos clientes serão entregues com perfeição.</p>
-              <form id="email-test-form" class="inline-form" style="margin-top: 10px;">
-                <label>E-mail de Destino<input name="test_to" type="email" placeholder="seu-email@gmail.com" required></label>
-                <label>Assunto<input name="test_subject" value="Teste de Integração Drexier AI" required></label>
-                <label>Mensagem de Teste<input name="test_message" value="Olá! Esta é uma mensagem de teste enviada pela IA Drexier via integração oficial de e-mail." required></label>
-                <button class="btn primary" type="submit" id="btn-email-test-submit">Enviar Teste</button>
-              </form>
-              <div id="email-test-result" class="wa-test-result hidden"></div>
+            <!-- Informação Operacional e Respostas Reais -->
+            <div class="email-operational-banner">
+              <div class="status-indicator-live">
+                <span class="live-pulse-dot"></span>
+                <div>
+                  <strong>Funcionamento Pleno & Atendimento 100% Real:</strong>
+                  <span style="font-size: 13px; color: #065f46; display: block; margin-top: 3px;">
+                    O Drexier monitoriza continuamente a caixa de entrada do seu e-mail vinculado. Quando um cliente envia uma mensagem ou dúvida para o seu e-mail, a IA formula a resposta oficial com as diretrizes do seu negócio e responde de forma real diretamente ao remetente.
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-
-        <!-- Bloco WhatsApp: DESATIVADO NO FLUXO PRINCIPAL, MAS PRESERVADO CONFORME SOLICITADO -->
-        <details class="legacy-accordion" style="margin-top: 24px; border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 10px 14px; background: #fafafa;">
-          <summary style="cursor: pointer; font-size: 13px; font-weight: 600; color: #64748b;">
-            Integração WhatsApp (Desativada / Legado - Não apagada)
-          </summary>
-          <div style="margin-top: 12px; opacity: 0.85;">
-            <p class="muted" style="font-size: 12px; margin-bottom: 12px;">
-              ℹ️ A automação principal do Drexier agora é exclusivamente por e-mail. A integração de WhatsApp está desativada no fluxo ativo, mas os seus componentes de contingência foram mantidos intactos.
-            </p>
-            <div id="wa-status-badge" class="badge badge-disconnected" style="display:none;">Desconectado</div>
-            <div id="wa-loading-state" class="hidden"></div>
-            <div id="wa-env-warning" class="hidden"></div>
-            <div id="wa-disconnected-view" class="hidden">
-              <button id="btn-wa-connect" style="display:none;"></button>
-              <button id="btn-toggle-manual-wa" style="display:none;"></button>
-              <div id="wa-manual-box" class="hidden"><form id="wa-manual-form"></form></div>
-            </div>
-            <div id="wa-connected-view" class="hidden">
-              <span id="wa-display-name"></span>
-              <span id="wa-display-phone"></span>
-              <span id="wa-display-phone-id"></span>
-              <span id="wa-display-waba-id"></span>
-              <span id="wa-display-webhook"></span>
-              <span id="wa-display-date"></span>
-              <button id="btn-wa-disconnect" style="display:none;"></button>
-              <form id="wa-test-form" style="display:none;"></form>
-            </div>
-          </div>
-        </details>
 
       </div>
       <div id="setting-instructions" class="panel setting-panel hidden"><h2>Instruções ao agente</h2><p class="muted">Defina o tom, o estilo e as regras gerais de atendimento.</p><form id="instructions-form" class="form"><label>Instruções personalizadas<textarea name="instructions" rows="8" placeholder="Escreva as instruções para o agente."></textarea></label><button class="btn primary" type="submit">Guardar instruções</button></form></div>
@@ -264,6 +288,21 @@
 <div id="confirm-modal" class="modal hidden"><div class="modal-card"><h2>Confirmar saída?</h2><p>Tem a certeza de que deseja sair da sua conta?</p><div class="actions"><button class="btn outline" id="cancel-logout">Cancelar</button><button class="btn primary" id="confirm-logout">Sair</button></div></div></div>
 <div id="card-expand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" tabindex="-1">
   <div class="expanded-card-shell" id="expanded-card-content"></div>
+</div>
+<!-- Modal Centralizado para Validação de Pedidos / Marcações -->
+<div id="pending-expand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" tabindex="-1">
+  <div class="modal-card modal-card-large">
+    <div class="modal-header">
+      <div>
+        <h2 style="margin:0;">Pedidos Aguardando Validação</h2>
+        <p class="muted" style="margin:3px 0 0;font-size:13px;">Confirme ou sugira alternativas — a IA enviará a resposta oficial por e-mail no contexto da conversa.</p>
+      </div>
+      <button class="modal-close-btn" id="close-pending-modal" aria-label="Fechar">&times;</button>
+    </div>
+    <div id="pending-modal-body" class="pending-modal-list">
+      <div class="empty">Nenhum pedido pendente de validação.</div>
+    </div>
+  </div>
 </div>
 <script type="module" src="./app.js"></script>
 </body></html>
