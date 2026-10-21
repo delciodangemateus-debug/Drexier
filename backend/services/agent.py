@@ -38,11 +38,17 @@ def get_gemini_config() -> Dict[str, str]:
     }
 
 def compose_context(info_rows: List[Any]) -> str:
-    """Formata o conhecimento do negócio cadastrado para ser consumido pela IA."""
+    """
+    Formata o conhecimento do negócio cadastrado para ser consumido pela IA.
+    Estrutura cards de negócio e delimita tópicos de treinamento isolados para
+    garantir máxima precisão e evitar confusão entre assuntos.
+    """
     if not info_rows:
         return "(Ainda sem informações detalhadas cadastradas)"
     
-    entries = []
+    business_entries = []
+    training_entries = []
+    
     for r in info_rows:
         kind = r["kind"] if isinstance(r, dict) else r["kind"]
         title = r["title"] if isinstance(r, dict) else r["title"]
@@ -53,6 +59,30 @@ def compose_context(info_rows: List[Any]) -> str:
                 meta = json.loads(meta or "{}")
             except Exception:
                 meta = {}
+                
+        # Tratamento especial para Sub-aba de Treinamentos e Documentos
+        if kind == "treinamento":
+            is_isolated = meta.get("is_isolated_topic", True) if isinstance(meta, dict) else True
+            category_tag = meta.get("category_tag", "Tópico Específico") if isinstance(meta, dict) else "Tópico Específico"
+            doc_file = meta.get("filename", "") if isinstance(meta, dict) else ""
+            file_badge = f" [Documento Anexo: {doc_file}]" if doc_file else ""
+            
+            if is_isolated:
+                training_entries.append(
+                    f"=== [TÓPICO ISOLADO DE TREINAMENTO: {title.upper()}{file_badge}] ===\n"
+                    f"CLASSIFICAÇÃO: Diretriz e Regulamento Oficial ({category_tag})\n"
+                    f"{content}\n"
+                    f"=== [FIM DO TÓPICO: {title.upper()}] ==="
+                )
+            else:
+                training_entries.append(
+                    f"=== [MATERIAL DE APOIO / POLÍTICA: {title}{file_badge}] ===\n"
+                    f"{content}\n"
+                    f"=== [FIM DO MATERIAL: {title}] ==="
+                )
+            continue
+
+        # Cards padrão da base de negócio
         items = meta.get("items") if isinstance(meta, dict) else None
         if items and isinstance(items, list):
             item_lines = []
@@ -62,16 +92,32 @@ def compose_context(info_rows: List[Any]) -> str:
                 details = it.get("details") or it.get("description", "")
                 parts = [name]
                 if price:
-                    parts.append(f"Preço: {price}")
+                    parts.append(f"Preço/Condição: {price}")
                 if details:
                     parts.append(f"Detalhes: {details}")
                 if name:
                     item_lines.append("  • " + " | ".join(parts))
+            general_note = meta.get("generalNote", "") if isinstance(meta, dict) else ""
+            if general_note:
+                item_lines.append(f"  • Regras gerais / Políticas: {general_note}")
             if item_lines:
-                entries.append(f"[{kind.upper()}] {title}:\n" + "\n".join(item_lines))
+                business_entries.append(f"[{kind.upper()}] {title}:\n" + "\n".join(item_lines))
                 continue
-        entries.append(f"[{kind.upper()}] {title}: {content}")
-    return "\n\n".join(entries)
+        if content and content.strip():
+            business_entries.append(f"[{kind.upper()}] {title}: {content}")
+            
+    sections = []
+    if business_entries:
+        sections.append("ESTRUTURA E DADOS DE NEGÓCIO:\n" + "\n\n".join(business_entries))
+    if training_entries:
+        sections.append(
+            "TREINAMENTO PROFUNDO, REGULAMENTOS E POLÍTICAS OFICIAIS (TÓPICOS INDEPENDENTES):\n"
+            "DIRETRIZ CRÍTICA DE PRECISÃO: Cada tópico abaixo foi delimitado como uma unidade independente de regras da empresa. "
+            "NUNCA misture, confunda ou aplique as cláusulas de um tópico a outro diferente. Trate cada assunto de forma exata e cirúrgica.\n\n"
+            + "\n\n".join(training_entries)
+        )
+        
+    return "\n\n".join(sections) if sections else "(Ainda sem informações detalhadas cadastradas)"
 
 def build_system_instruction(
     business_context: str,
@@ -124,8 +170,9 @@ INSTRUÇÕES DO PROPRIETÁRIO:
 {mandatory_text}
 
 REGRAS CRÍTICAS DE CONFIABILIDADE (GROUNDING):
-- Suas recomendações e informações devem ser baseadas EXCLUSIVAMENTE nos itens e dados cadastrados na Base do Negócio.
+- Suas recomendações e informações devem ser baseadas EXCLUSIVAMENTE nos itens e dados cadastrados na Base do Negócio e Treinamentos Oficiais.
 - NUNCA invente produtos, marcas, preços ou condições que não estejam cadastrados.
+- Se existirem Tópicos Isolados de Treinamento, respeite rigorosamente cada tópico de forma independente. NUNCA misture regras de tópicos distintos nem confunda políticas diferentes da loja.
 - Se não houver nenhum produto ou dado que atenda ao pedido do cliente, explique com cordialidade e objetividade:
   "{UNKNOWN_REPLY}"
 """

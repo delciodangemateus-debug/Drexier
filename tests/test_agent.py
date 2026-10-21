@@ -164,3 +164,28 @@ def test_call_gemini_api_handles_multiple_parts():
         assert "Raciocínio interno" not in reply
         assert "Parte um da resposta." in reply
         assert "Parte dois que completa o pensamento com sucesso!" in reply
+
+def test_compose_context_with_isolated_training_topics():
+    from backend.services.agent import compose_context
+    info_rows = [
+        {
+            "kind": "horarios",
+            "title": "Horários de Atendimento",
+            "content": "",
+            "metadata": {"items": [{"name": "Segunda a Sexta", "price": "09h às 19h"}]}
+        },
+        {
+            "kind": "treinamento",
+            "title": "Regulamento de Devoluções 2026",
+            "content": "Artigo 1: As devoluções são aceites em até 30 dias com recibo original.",
+            "metadata": {"is_isolated_topic": True, "category_tag": "Políticas e Trocas"}
+        }
+    ]
+    context = compose_context(info_rows)
+    assert "ESTRUTURA E DADOS DE NEGÓCIO" in context
+    assert "Horários de Atendimento" in context
+    assert "09h às 19h" in context
+    assert "TREINAMENTO PROFUNDO, REGULAMENTOS E POLÍTICAS OFICIAIS" in context
+    assert "TÓPICO ISOLADO DE TREINAMENTO: REGULAMENTO DE DEVOLUÇÕES 2026" in context
+    assert "Artigo 1: As devoluções são aceites" in context
+    assert "NUNCA misture, confunda ou aplique as cláusulas de um tópico a outro diferente" in context

@@ -127,7 +127,9 @@ def test_owner_reply_and_conversion_actions():
     from unittest.mock import patch, AsyncMock
     from backend.database import connect
 
-    email = "owner_test@example.com"
+    import time
+    email = f"owner_test_{int(time.time()*1000)}@example.com"
+    contact_key = f"cliente_{int(time.time()*1000)}@externo.com"
     pwd = "SecurePassword123"
     client.post("/api/auth/signup", json={
         "name": "Dono da Loja",
@@ -143,6 +145,7 @@ def test_owner_reply_and_conversion_actions():
 
     # Conecta integração de e-mail simulada
     with connect() as c:
+        c.execute("DELETE FROM email_integrations WHERE user_id=?", (user_id,))
         c.execute(
             """INSERT INTO email_integrations (user_id, provider, email_address, display_name, status)
                VALUES (?, 'smtp_imap', 'dono@empresa.com', 'Dono da Loja', 'connected')""",
@@ -156,7 +159,7 @@ def test_owner_reply_and_conversion_actions():
 
         # Simula mensagem de cliente
         res_msg = client.post("/api/simulate/incoming", json={
-            "contact_key": "cliente@externo.com",
+            "contact_key": contact_key,
             "customer_name": "Ana Silva",
             "message": "Gostaria de agendar para amanhã às 14h"
         }, headers=headers)
@@ -187,6 +190,47 @@ def test_owner_reply_and_conversion_actions():
         }, headers=headers)
         assert res_action_confirm.status_code == 200
         assert res_action_confirm.json()["action"] == "confirm"
+
+def test_training_document_upload_and_isolated_topics():
+    import time
+    email = f"training_test_{int(time.time()*1000)}@example.com"
+    pwd = "SecurePassword123"
+    client.post("/api/auth/signup", json={
+        "name": "Gestor de Treinamento",
+        "email": email,
+        "password": pwd,
+        "confirm_password": pwd,
+        "business_type": "Comércio"
+    })
+    res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+    token = res_login.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Teste de upload de documento em texto plano
+    file_content = b"Regulamento Interno da Empresa 2026.\nArtigo 1: Os clientes tem 15 dias de garantia total.\nArtigo 2: Entregas gratuitas em compras superiores a 50 euros."
+    files = {"file": ("regulamento_loja.txt", file_content, "text/plain")}
+    res_upload = client.post("/api/business-info/upload-document", files=files, headers=headers)
+    assert res_upload.status_code == 200
+    data = res_upload.json()
+    assert "Regulamento Loja" in data["suggested_title"]
+    assert "garantia total" in data["text"]
+    assert data["word_count"] > 10
+
+    # 2. Salva como tópico de treinamento isolado
+    res_create = client.post("/api/business-info", json={
+        "kind": "treinamento",
+        "title": data["suggested_title"],
+        "content": data["text"],
+        "metadata": {
+            "is_isolated_topic": True,
+            "filename": data["filename"],
+            "word_count": data["word_count"]
+        }
+    }, headers=headers)
+    assert res_create.status_code == 200
+    created = res_create.json()
+    assert created["kind"] == "treinamento"
+    assert created["metadata"]["is_isolated_topic"] is True
 
 
 

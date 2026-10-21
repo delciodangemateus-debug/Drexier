@@ -7,15 +7,201 @@ if (initialParams.get("token")) {
 let token = localStorage.getItem("drexier_token") || "";
 let me = null, selectedContact = null, infoCache = [], activePage = "dashboard";
 let currentExpandedCardId = null, currentEditingItemIndex = null;
+let currentBusinessSubtab = "cards"; // "cards" | "training"
+let currentUploadedFile = "";
 
 const kindNames = {
-  horarios: "Horários",
-  productos: "Produtos e preços",
-  marcacoes: "Tempo para marcações",
-  campanhas: "Campanhas",
-  servicos: "Serviços e disponibilidade",
-  personalizado: "Personalizado"
+  productos: "Produtos e Preços",
+  servicos: "Serviços e Procedimentos",
+  horarios: "Horários de Atendimento",
+  marcacoes: "Tempo e Regras de Marcações",
+  pagamentos: "Formas de Pagamento e Faturação",
+  campanhas: "Campanhas e Descontos",
+  devolucoes: "Trocas, Devoluções e Garantia",
+  entregas: "Envios, Prazos de Entrega e Fretes",
+  faq: "Perguntas Frequentes (FAQ)",
+  localizacao: "Localização e Morada",
+  contactos: "Canais Oficiais de Contacto",
+  regras_atendimento: "Regras de Suporte e Atendimento",
+  personalizado: "Personalizado",
+  treinamento: "Tópico de Treinamento"
 };
+
+const kindIcons = {
+  productos: "📦",
+  servicos: "⚙️",
+  horarios: "🕐",
+  marcacoes: "📅",
+  pagamentos: "💳",
+  campanhas: "🎯",
+  devolucoes: "🔄",
+  entregas: "🚚",
+  faq: "❓",
+  localizacao: "📍",
+  contactos: "📞",
+  regras_atendimento: "🛡️",
+  personalizado: "✏️",
+  treinamento: "🧠"
+};
+
+const PRESET_BUSINESS_CARDS = [
+  {
+    kind: "productos",
+    title: "Produtos e Preços",
+    icon: "📦",
+    category: "Catálogo & Vendas",
+    description: "Nomes de produtos, variantes, tamanhos, cores, estoque e preços exatos.",
+    hint: "Cadastre todos os seus produtos para que a IA informe preços e feche vendas com facilidade.",
+    placeholders: {
+      name: "Ex: Ténis Casual Branco ou Perfume Floral 100ml",
+      price: "Ex: 49.90€ ou 85€",
+      details: "Ex: Tamanhos do 36 ao 44, stock imediato, garantia de 2 anos"
+    }
+  },
+  {
+    kind: "servicos",
+    title: "Serviços e Procedimentos",
+    icon: "⚙️",
+    category: "Prestação de Serviços",
+    description: "Tabela de serviços oferecidos, etapas de realização, duração e valores.",
+    hint: "Detalhe como cada serviço é realizado e quanto custa para orientar os clientes.",
+    placeholders: {
+      name: "Ex: Consultoria Inicial ou Manutenção Preventiva",
+      price: "Ex: 60€ / sessão ou Sob Consulta",
+      details: "Ex: Duração aproximada de 45 minutos, inclui diagnóstico por escrito"
+    }
+  },
+  {
+    kind: "horarios",
+    title: "Horários de Atendimento",
+    icon: "🕐",
+    category: "Funcionamento",
+    description: "Dias da semana, horários de abertura e fecho, fins de semana e feriados.",
+    hint: "Indique exatamente quando o negócio está aberto para que a IA nunca informe horários errados.",
+    placeholders: {
+      name: "Ex: Segunda a Sexta-feira",
+      price: "Ex: 09:00 às 19:00",
+      details: "Ex: Pausa de almoço das 13h às 14h. Sábados abertos das 09h às 13h"
+    }
+  },
+  {
+    kind: "marcacoes",
+    title: "Tempo e Regras de Marcações",
+    icon: "📅",
+    category: "Agendamento",
+    description: "Antecedência mínima, políticas de tolerância, remarcação e cancelamento.",
+    hint: "Defina como os agendamentos devem ser solicitados para evitar furos de agenda.",
+    placeholders: {
+      name: "Ex: Marcações com Antecedência Mínima",
+      price: "Ex: 24 horas de antecedência",
+      details: "Ex: Tolerância de 15 minutos de atraso; cancelamentos sem custo até 6h antes"
+    }
+  },
+  {
+    kind: "pagamentos",
+    title: "Formas de Pagamento e Faturação",
+    icon: "💳",
+    category: "Financeiro",
+    description: "Meios aceites (MBWay/Pix, Cartão, Transferência), parcelamento e dados para fatura.",
+    hint: "Deixe claro os métodos de pagamento para acelerar o fechamento de pedidos.",
+    placeholders: {
+      name: "Ex: Cartão Multibanco / Crédito / MBWay",
+      price: "Ex: Pagamento no ato ou em até 3x sem juros",
+      details: "Ex: Emitimos fatura com NIF. Aceitamos transferências bancárias com envio de comprovativo"
+    }
+  },
+  {
+    kind: "campanhas",
+    title: "Campanhas e Descontos",
+    icon: "🎯",
+    category: "Promoções",
+    description: "Promoções sazonais vigentes, cupons de desconto válidos e condições especiais.",
+    hint: "A IA poderá oferecer condições especiais aos clientes interessados.",
+    placeholders: {
+      name: "Ex: Desconto de Primeira Compra",
+      price: "Ex: 10% de desconto imediato",
+      details: "Ex: Válido para compras superiores a 30€ com cupom BEMVINDO"
+    }
+  },
+  {
+    kind: "devolucoes",
+    title: "Trocas, Devoluções e Garantia",
+    icon: "🔄",
+    category: "Pós-Venda",
+    description: "Prazos para trocas, regras de embalagem original, reembolso e garantia.",
+    hint: "Regras claras de troca trazem segurança aos clientes e evitam reclamações.",
+    placeholders: {
+      name: "Ex: Prazo de Troca de Artigos",
+      price: "Ex: 30 dias após a compra",
+      details: "Ex: Apresentação de recibo/fatura, produto sem marcas de uso e na embalagem original"
+    }
+  },
+  {
+    kind: "entregas",
+    title: "Envios, Prazos de Entrega e Fretes",
+    icon: "🚚",
+    category: "Logística",
+    description: "Regiões atendidas, valor de frete/portes, prazos médios de entrega e transportadora.",
+    hint: "A IA responderá na hora o valor e prazo de envio quando o cliente perguntar.",
+    placeholders: {
+      name: "Ex: Envio Padrão Nacional",
+      price: "Ex: 4.50€ (Grátis acima de 50€)",
+      details: "Ex: Entrega em 24h a 48h úteis via CTT Expresso em Portugal Continental"
+    }
+  },
+  {
+    kind: "faq",
+    title: "Perguntas Frequentes (FAQ)",
+    icon: "❓",
+    category: "Dúvidas Frequentes",
+    description: "Perguntas mais repetidas pelos clientes acompanhadas das respostas oficiais.",
+    hint: "Economize tempo respondendo instantaneamente às dúvidas mais comuns.",
+    placeholders: {
+      name: "Ex: Os produtos têm garantia?",
+      price: "Ex: Sim, garantia oficial de 3 anos",
+      details: "Ex: Cobre defeitos de fabricação com assistência técnica autorizada"
+    }
+  },
+  {
+    kind: "localizacao",
+    title: "Localização e Morada",
+    icon: "📍",
+    category: "Endereço & Acesso",
+    description: "Morada da loja/escritório, pontos de referência, transporte e estacionamento.",
+    hint: "Facilite para o cliente encontrar o seu estabelecimento físico.",
+    placeholders: {
+      name: "Ex: Morada Principal da Loja",
+      price: "Ex: Rua Central nº 120, Lisboa",
+      details: "Ex: Em frente ao metro, contamos com estacionamento gratuito para clientes"
+    }
+  },
+  {
+    kind: "contactos",
+    title: "Canais Oficiais de Contacto",
+    icon: "📞",
+    category: "Canais Diretos",
+    description: "Telefone fixo, telemóvel/WhatsApp, e-mails específicos e horários de suporte.",
+    hint: "Permite que a IA informe o contacto humano quando necessário.",
+    placeholders: {
+      name: "Ex: Linha Telefónica de Apoio",
+      price: "Ex: +351 912 345 678",
+      details: "Ex: Atendimento de apoio técnico de Segunda a Sexta das 10h às 18h"
+    }
+  },
+  {
+    kind: "regras_atendimento",
+    title: "Regras de Suporte e Atendimento",
+    icon: "🛡️",
+    category: "Diretrizes",
+    description: "Instruções de tom de voz, tratamento de reclamações e encaminhamento a supervisores.",
+    hint: "Oriente o agente como lidar com situações delicadas ou exigências especiais.",
+    placeholders: {
+      name: "Ex: Protocolo em Reclamações",
+      price: "Ex: Atendimento Prioritário",
+      details: "Ex: Manter tom empático, pedir desculpas pelo transtorno e escalar ao gerente"
+    }
+  }
+];
 
 function escapeHtml(str) {
   if (!str) return "";
@@ -350,6 +536,9 @@ async function loadDashboard() {
     card.append(info, btnGroup);
     list.append(card);
   });
+
+  // Atualiza banner de indução de conhecimento e precisão da IA
+  await updateDashboardKnowledgeBanner();
 }
 
 $("#btn-open-pending-modal")?.addEventListener("click", () => openPendingConfirmationsModal());
@@ -861,6 +1050,183 @@ function compileItemsToContent(items, generalNote = "") {
   return lines.join("\n");
 }
 
+/* ────────────────────────────────────────────────────────────
+   CÁLCULO DE PRECISÃO DA IA & INDUÇÃO DE CONHECIMENTO
+   ─────────────────────────────────────────────────────────── */
+function calculateKnowledgeAccuracy() {
+  const trainingTopics = infoCache.filter(x => x.kind === "treinamento");
+
+  // Verifica quais dos 12 cards pré-gerados estão configurados
+  const configuredPresets = PRESET_BUSINESS_CARDS.filter(preset => {
+    const found = infoCache.find(x => x.kind === preset.kind);
+    if (!found) return false;
+    const items = found.metadata?.items || [];
+    const note = found.metadata?.generalNote || "";
+    const content = found.content || "";
+    return items.length > 0 || note.trim().length > 0 || (content.trim().length > 0 && !content.startsWith("Lista de"));
+  });
+
+  // Outros cards personalizados
+  const customCards = infoCache.filter(x => 
+    x.kind !== "treinamento" && !PRESET_BUSINESS_CARDS.some(p => p.kind === x.kind)
+  );
+
+  // Contagem de palavras do treinamento
+  let trainingWords = 0;
+  trainingTopics.forEach(t => {
+    const meta = t.metadata || {};
+    const w = meta.word_count || (t.content ? t.content.split(/\s+/).filter(Boolean).length : 0);
+    trainingWords += w;
+  });
+
+  // Base de 15%
+  let score = 15;
+  score += Math.min(60, configuredPresets.length * 5); // até +60% com os 12 cards
+  score += Math.min(15, customCards.length * 3);        // até +15% com cards customizados
+  score += Math.min(15, trainingTopics.length * 5);     // até +15% com tópicos de treinamento
+  if (trainingWords > 200) score += 5;
+  if (trainingWords > 800) score += 5;
+  score = Math.min(100, Math.max(15, score));
+
+  let levelTag = "Calibração Inicial (Básico)";
+  let levelDesc = "O seu agente de IA dispõe de poucas informações reais. Insira um volume massivo de dados para evitar hesitações e garantir 100% de precisão.";
+  if (score >= 40 && score < 70) {
+    levelTag = "Conhecimento Moderado";
+    levelDesc = "A IA já compreende a rotina da sua empresa, mas ainda precisa de regulamentos e mais detalhes para atingir a excelência.";
+  } else if (score >= 70 && score < 90) {
+    levelTag = "Alta Precisão e Assertividade";
+    levelDesc = "Excelente base de conhecimento! A IA responde com segurança e fidelidade às diretrizes do negócio.";
+  } else if (score >= 90) {
+    levelTag = "Modo Expert / Precisão Máxima 🔥";
+    levelDesc = "Base de dados ultra rica! O agente tem conhecimento profundo para responder com perfeição a qualquer dúvida de cliente.";
+  }
+
+  const emptyPresets = PRESET_BUSINESS_CARDS.filter(p => !configuredPresets.some(cp => cp.kind === p.kind));
+
+  return {
+    score,
+    levelTag,
+    levelDesc,
+    configuredPresetsCount: configuredPresets.length,
+    totalPresetsCount: PRESET_BUSINESS_CARDS.length,
+    trainingTopicsCount: trainingTopics.length,
+    trainingWords,
+    emptyPresets
+  };
+}
+
+async function updateDashboardKnowledgeBanner() {
+  if (!infoCache || !infoCache.length) {
+    try {
+      infoCache = await api("/api/business-info");
+    } catch (e) {
+      infoCache = [];
+    }
+  }
+
+  const stats = calculateKnowledgeAccuracy();
+
+  const fillEl = $("#dash-knowledge-fill");
+  const pctEl = $("#dash-knowledge-percent-text");
+  const statusEl = $("#dash-knowledge-status-text");
+  const levelEl = $("#dash-knowledge-level-tag");
+  const descEl = $("#dash-knowledge-desc");
+  const pillsEl = $("#dash-missing-pills");
+
+  if (fillEl) fillEl.style.width = `${stats.score}%`;
+  if (pctEl) pctEl.textContent = `${stats.score}% Precisão`;
+  if (statusEl) statusEl.textContent = `Cards configurados: ${stats.configuredPresetsCount} / ${stats.totalPresetsCount} · Treinamentos: ${stats.trainingTopicsCount}`;
+  if (levelEl) levelEl.textContent = stats.levelTag;
+  if (descEl) descEl.innerHTML = stats.levelDesc;
+
+  if (pillsEl) {
+    pillsEl.innerHTML = "";
+    if (stats.emptyPresets.length === 0) {
+      pillsEl.innerHTML = '<span class="stat-pill" style="color:#059669;background:#d1fae5;">✓ Todos os 12 cards preenchidos!</span>';
+    } else {
+      stats.emptyPresets.slice(0, 5).forEach(preset => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "knowledge-pill-btn";
+        btn.textContent = `+ ${preset.title}`;
+        btn.onclick = async () => {
+          await navigate("business");
+          switchBusinessSubtab("cards");
+          await openPresetCardDirectly(preset);
+        };
+        pillsEl.append(btn);
+      });
+      if (stats.emptyPresets.length > 5) {
+        const moreSpan = document.createElement("span");
+        moreSpan.className = "muted";
+        moreSpan.style.fontSize = "11.5px";
+        moreSpan.textContent = `+${stats.emptyPresets.length - 5} outros`;
+        pillsEl.append(moreSpan);
+      }
+    }
+  }
+
+  // Hook botões do Dashboard
+  const btnFill = $("#dash-btn-fill-cards");
+  if (btnFill) {
+    btnFill.onclick = async () => {
+      await navigate("business");
+      switchBusinessSubtab("cards");
+    };
+  }
+
+  const btnTrain = $("#dash-btn-open-training");
+  if (btnTrain) {
+    btnTrain.onclick = async () => {
+      await navigate("business");
+      switchBusinessSubtab("training");
+    };
+  }
+
+  const linkMsg = $("#link-go-business-from-msg");
+  if (linkMsg) {
+    linkMsg.onclick = async (e) => {
+      e.preventDefault();
+      await navigate("business");
+    };
+  }
+}
+
+function updateBusinessPageKnowledgeUI() {
+  const stats = calculateKnowledgeAccuracy();
+
+  // Atualizar badges nas sub-abas
+  const cardsBadge = $("#badge-cards-stat");
+  if (cardsBadge) cardsBadge.textContent = `${stats.configuredPresetsCount} / ${stats.totalPresetsCount} preenchidos`;
+
+  const trainBadge = $("#badge-training-stat");
+  if (trainBadge) trainBadge.textContent = `${stats.trainingTopicsCount} ${stats.trainingTopicsCount === 1 ? 'tópico' : 'tópicos'}`;
+
+  // Atualizar banner dentro de Negócios
+  const fillEl = $("#business-ai-fill");
+  const pctEl = $("#business-ai-pct");
+  const titleEl = $("#business-ai-title");
+  const descEl = $("#business-ai-desc");
+
+  if (fillEl) fillEl.style.width = `${stats.score}%`;
+  if (pctEl) pctEl.textContent = `${stats.score}% Precisão`;
+  if (titleEl) {
+    titleEl.textContent = `Potência da Base da IA: ${stats.score}% (${stats.levelTag})`;
+  }
+  if (descEl) {
+    descEl.textContent = `Volume atual: ${stats.configuredPresetsCount} cards configurados e ${stats.trainingTopicsCount} tópicos (${stats.trainingWords} palavras de treino). Quanto mais dados detalhados inserir, mais certeira e humanizada será a resposta da IA.`;
+  }
+}
+
+function switchBusinessSubtab(subtab) {
+  currentBusinessSubtab = subtab;
+  $$(".business-subtab").forEach(b => {
+    b.classList.toggle("active", b.dataset.subtab === subtab);
+  });
+  $("#subview-cards")?.classList.toggle("hidden", subtab !== "cards");
+  $("#subview-training")?.classList.toggle("hidden", subtab !== "training");
+}
+
 function renderBusinessCardItemsHtml(it, editingIndex = null) {
   const meta = it.metadata || {};
   const items = Array.isArray(meta.items) ? meta.items : [];
@@ -872,7 +1238,7 @@ function renderBusinessCardItemsHtml(it, editingIndex = null) {
     itemsHtml = `
       <div class="item-entry-empty">
         Nenhum item adicionado a este card ainda.<br>
-        <span class="muted">Adicione todos os seus produtos, serviços ou horários aqui em baixo para que a IA os utilize nas respostas.</span>
+        <span class="muted">Adicione todos os detalhes, produtos, valores ou regras abaixo para que a IA utilize nas respostas aos clientes.</span>
       </div>
     `;
   } else {
@@ -894,10 +1260,11 @@ function renderBusinessCardItemsHtml(it, editingIndex = null) {
     `).join("") + `</div>`;
   }
 
-  const isProductOrService = ["productos", "servicos"].includes(it.kind);
-  const namePlaceholder = isProductOrService ? "Ex: Ténis Running Pro ou Corte Clássico" : "Ex: Segunda a Sexta ou Campanha Verão";
-  const pricePlaceholder = isProductOrService ? "Ex: 80€ ou 15€" : "Ex: 09h às 18h ou 20% Desc.";
-  const detailsPlaceholder = isProductOrService ? "Ex: Tamanhos 38 ao 44, cores preto e azul" : "Ex: Válido para marcações online até fim do mês";
+  // Obter placeholders específicos do preset se existirem
+  const preset = PRESET_BUSINESS_CARDS.find(p => p.kind === it.kind);
+  const namePlaceholder = preset ? preset.placeholders.name : "Ex: Nome ou Título";
+  const pricePlaceholder = preset ? preset.placeholders.price : "Ex: Preço, Valor ou Horário";
+  const detailsPlaceholder = preset ? preset.placeholders.details : "Ex: Detalhes, regras ou condições adicionais";
 
   return `
     <div class="expanded-header">
@@ -935,7 +1302,7 @@ function renderBusinessCardItemsHtml(it, editingIndex = null) {
         <div class="modal-section-label">Definições do card</div>
         <div class="modal-card-settings">
           <div class="modal-card-settings-label">Título do Card<input id="card-title-field" value="${escapeHtml(it.title)}"></div>
-          <div class="modal-card-settings-label">Observações gerais ou políticas<textarea id="card-general-notes" rows="2" placeholder="Ex: Entregas em 24h em Portugal continental...">${escapeHtml(meta.generalNote || '')}</textarea></div>
+          <div class="modal-card-settings-label">Observações gerais ou políticas<textarea id="card-general-notes" rows="2" placeholder="Ex: Regras gerais de entrega, exceções ou notas da loja...">${escapeHtml(meta.generalNote || '')}</textarea></div>
         </div>
       </div>
     </div>
@@ -944,6 +1311,28 @@ function renderBusinessCardItemsHtml(it, editingIndex = null) {
       <button class="btn primary" id="modal-done-btn">Concluído</button>
     </div>
   `;
+}
+
+async function openPresetCardDirectly(preset) {
+  let existing = infoCache.find(x => x.kind === preset.kind);
+  if (!existing) {
+    try {
+      existing = await api("/api/business-info", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: preset.kind,
+          title: preset.title,
+          content: `Lista de ${preset.title}`,
+          metadata: { items: [], generalNote: "" }
+        })
+      });
+      await loadInfo();
+    } catch (err) {
+      showNotice(err.message, true);
+      return;
+    }
+  }
+  openExpandBusinessCard(existing.id);
 }
 
 function openExpandBusinessCard(cardId, editingIdx = null) {
@@ -1088,117 +1477,485 @@ async function saveCardGeneralData(cardId) {
 
 async function loadInfo() {
   infoCache = await api("/api/business-info");
+
+  // Atualiza indicadores de precisão e gauges
+  updateBusinessPageKnowledgeUI();
+  updateDashboardKnowledgeBanner();
+
+  // Renderizar Grid de Cards (Sub-aba 1)
   const list = $("#info-list");
-  list.innerHTML = "";
-  if (!infoCache.length) {
-    list.className = "card-grid empty";
-    list.textContent = "Ainda não existem informações cadastradas.";
-    return;
-  }
-  list.className = "card-grid";
+  if (list) {
+    list.innerHTML = "";
+    list.className = "card-grid";
 
-  const kindIcons = {
-    horarios: "🕐", productos: "📦", marcacoes: "📅",
-    campanhas: "🎯", servicos: "⚙️", personalizado: "✏️"
-  };
+    // 1. Renderiza os 12 cards pré-elaborados
+    PRESET_BUSINESS_CARDS.forEach(preset => {
+      const savedCard = infoCache.find(x => x.kind === preset.kind);
+      const meta = savedCard?.metadata || {};
+      const items = Array.isArray(meta.items) ? meta.items : [];
+      const hasContent = items.length > 0 || (meta.generalNote && meta.generalNote.trim()) || (savedCard?.content && !savedCard.content.startsWith("Lista de") && savedCard.content.trim().length > 0);
 
-  infoCache.forEach(it => {
-    const meta = it.metadata || {};
-    const items = Array.isArray(meta.items) ? meta.items : [];
+      const card = document.createElement("article");
+      card.className = hasContent ? "info-card is-preset-configured clickable-card" : "info-card is-preset-empty clickable-card";
 
-    const card = document.createElement("article");
-    card.className = "info-card";
+      // Faixa no topo
+      const stripe = document.createElement("div");
+      stripe.className = "info-card-stripe";
 
-    // Accent stripe
-    const stripe = document.createElement("div");
-    stripe.className = "info-card-stripe";
+      // Corpo
+      const body = document.createElement("div");
+      body.className = "info-card-body";
 
-    // Body
-    const body = document.createElement("div");
-    body.className = "info-card-body";
+      // Top row
+      const top = document.createElement("div");
+      top.className = "info-card-top";
 
-    // Top row: kind badge + chevron
-    const top = document.createElement("div");
-    top.className = "info-card-top";
+      const kindBadge = document.createElement("div");
+      kindBadge.className = "card-kind-badge";
+      const icon = document.createElement("span");
+      icon.className = "card-kind-icon";
+      icon.textContent = preset.icon;
+      kindBadge.append(icon, document.createTextNode(preset.category));
 
-    const kindBadge = document.createElement("div");
-    kindBadge.className = "card-kind-badge";
-    const icon = document.createElement("span");
-    icon.className = "card-kind-icon";
-    icon.textContent = kindIcons[it.kind] || "📋";
-    kindBadge.append(icon, document.createTextNode(kindNames[it.kind] || it.kind));
+      const chevron = document.createElement("span");
+      chevron.className = "card-chevron";
+      chevron.textContent = "›";
 
-    const chevron = document.createElement("span");
-    chevron.className = "card-chevron";
-    chevron.textContent = "›";
+      top.append(kindBadge, chevron);
 
-    top.append(kindBadge, chevron);
+      // Título
+      const h = document.createElement("h3");
+      h.className = "info-card-title";
+      h.textContent = savedCard ? savedCard.title : preset.title;
 
-    // Title
-    const h = document.createElement("h3");
-    h.className = "info-card-title";
-    h.textContent = it.title;
+      // Preview / Status
+      const preview = document.createElement("div");
+      preview.className = "info-card-preview";
 
-    // Preview
-    const preview = document.createElement("div");
-    preview.className = "info-card-preview";
+      if (hasContent) {
+        const count = document.createElement("div");
+        count.className = "info-card-count";
+        count.textContent = `${items.length} ${items.length === 1 ? "item cadastrado" : "itens cadastrados"}`;
 
-    if (items.length > 0) {
+        const chips = document.createElement("div");
+        chips.className = "preview-chips";
+        items.slice(0, 3).forEach(item => {
+          const chip = document.createElement("span");
+          chip.className = "preview-chip";
+          const name = document.createElement("span");
+          name.className = "preview-chip-name";
+          name.textContent = item.name || "Item";
+          chip.append(name);
+          if (item.price) {
+            const price = document.createElement("span");
+            price.className = "preview-chip-price";
+            price.textContent = item.price;
+            chip.append(price);
+          }
+          chips.append(chip);
+        });
+        if (items.length > 3) {
+          const more = document.createElement("span");
+          more.className = "preview-chip-more";
+          more.textContent = `+${items.length - 3} mais`;
+          chips.append(more);
+        }
+        preview.append(count, chips);
+      } else {
+        const tag = document.createElement("span");
+        tag.className = "preset-empty-tag";
+        tag.textContent = "⚠️ Sem dados (+8% Precisão IA)";
+
+        const desc = document.createElement("p");
+        desc.className = "preset-guide-text";
+        desc.textContent = preset.description;
+
+        preview.append(tag, desc);
+      }
+
+      body.append(top, h, preview);
+
+      // Rodapé
+      const footer = document.createElement("div");
+      footer.className = "info-card-footer";
+      const cta = document.createElement("span");
+      cta.className = hasContent ? "info-card-cta" : "info-card-cta preset-cta-empty";
+      cta.textContent = hasContent ? "Gerir itens" : "+ Preencher card";
+      const arrow = document.createElement("span");
+      arrow.className = "info-card-arrow";
+      arrow.textContent = "→";
+      footer.append(cta, arrow);
+
+      card.append(stripe, body, footer);
+      card.onclick = () => openPresetCardDirectly(preset);
+      list.append(card);
+    });
+
+    // 2. Renderiza cards personalizados adicionais criados pelo utilizador
+    const customCards = infoCache.filter(x => 
+      x.kind !== "treinamento" && !PRESET_BUSINESS_CARDS.some(p => p.kind === x.kind)
+    );
+    customCards.forEach(it => {
+      const meta = it.metadata || {};
+      const items = Array.isArray(meta.items) ? meta.items : [];
+
+      const card = document.createElement("article");
+      card.className = "info-card clickable-card";
+
+      const stripe = document.createElement("div");
+      stripe.className = "info-card-stripe";
+
+      const body = document.createElement("div");
+      body.className = "info-card-body";
+
+      const top = document.createElement("div");
+      top.className = "info-card-top";
+
+      const kindBadge = document.createElement("div");
+      kindBadge.className = "card-kind-badge";
+      const icon = document.createElement("span");
+      icon.className = "card-kind-icon";
+      icon.textContent = kindIcons[it.kind] || "📋";
+      kindBadge.append(icon, document.createTextNode(kindNames[it.kind] || it.kind));
+
+      const chevron = document.createElement("span");
+      chevron.className = "card-chevron";
+      chevron.textContent = "›";
+      top.append(kindBadge, chevron);
+
+      const h = document.createElement("h3");
+      h.className = "info-card-title";
+      h.textContent = it.title;
+
+      const preview = document.createElement("div");
+      preview.className = "info-card-preview";
       const count = document.createElement("div");
       count.className = "info-card-count";
       count.textContent = `${items.length} ${items.length === 1 ? "item cadastrado" : "itens cadastrados"}`;
+      preview.append(count);
 
-      const chips = document.createElement("div");
-      chips.className = "preview-chips";
-      items.slice(0, 3).forEach(item => {
-        const chip = document.createElement("span");
-        chip.className = "preview-chip";
-        const name = document.createElement("span");
-        name.className = "preview-chip-name";
-        name.textContent = item.name || "Item";
-        chip.append(name);
-        if (item.price) {
-          const price = document.createElement("span");
-          price.className = "preview-chip-price";
-          price.textContent = item.price;
-          chip.append(price);
-        }
-        chips.append(chip);
-      });
-      if (items.length > 3) {
-        const more = document.createElement("span");
-        more.className = "preview-chip-more";
-        more.textContent = `+${items.length - 3} mais`;
-        chips.append(more);
-      }
-      preview.append(count, chips);
+      body.append(top, h, preview);
+
+      const footer = document.createElement("div");
+      footer.className = "info-card-footer";
+      const cta = document.createElement("span");
+      cta.className = "info-card-cta";
+      cta.textContent = "Gerir card";
+      const arrow = document.createElement("span");
+      arrow.className = "info-card-arrow";
+      arrow.textContent = "→";
+      footer.append(cta, arrow);
+
+      card.append(stripe, body, footer);
+      card.onclick = () => openExpandBusinessCard(it.id);
+      list.append(card);
+    });
+  }
+
+  // Renderizar Sub-aba de Treinamento
+  renderTrainingTopics();
+}
+
+/* ────────────────────────────────────────────────────────────
+   SUB-ABA DE TREINAMENTOS & DOCUMENTOS
+   ─────────────────────────────────────────────────────────── */
+function updateTrainingMeter() {
+  const content = $("#training-content-input")?.value || "";
+  const words = content.trim().split(/\s+/).filter(Boolean).length;
+  const chars = content.length;
+
+  const wordsEl = $("#training-words-count");
+  const charsEl = $("#training-chars-count");
+  const statusEl = $("#training-gauge-status");
+  const descEl = $("#training-gauge-desc");
+
+  if (wordsEl) wordsEl.textContent = `${words} palavras`;
+  if (charsEl) charsEl.textContent = `${chars} caracteres`;
+
+  if (statusEl && descEl) {
+    if (words === 0) {
+      statusEl.className = "gauge-pill gauge-empty";
+      statusEl.textContent = "Sem texto";
+      descEl.textContent = "Insira dados massivos para calibrar a IA";
+    } else if (words < 60) {
+      statusEl.className = "gauge-pill gauge-low";
+      statusEl.textContent = "⚠️ Volume Básico";
+      descEl.textContent = "Precisão baixa. Adicione mais cláusulas e detalhes";
+    } else if (words < 200) {
+      statusEl.className = "gauge-pill gauge-mid";
+      statusEl.textContent = "🟡 Volume Médio";
+      descEl.textContent = "Bom começo! Inclua regras de exceção e perguntas frequentes";
+    } else if (words < 600) {
+      statusEl.className = "gauge-pill gauge-good";
+      statusEl.textContent = "🟢 Bom Volume";
+      descEl.textContent = "Excelente volume! A IA responderá com autoridade sobre este tópico";
     } else {
-      const p = document.createElement("p");
-      p.className = "info-card-text-preview";
-      p.textContent = it.content ? (it.content.slice(0, 110) + (it.content.length > 110 ? "…" : "")) : "Sem itens cadastrados.";
-      preview.append(p);
+      statusEl.className = "gauge-pill gauge-epic";
+      statusEl.textContent = "🔥 Volume Massivo!";
+      descEl.textContent = "Nível máximo de riqueza! Zero risco de confusão e máxima assertividade";
+    }
+  }
+}
+
+function resetTrainingForm() {
+  const form = $("#training-form");
+  if (form) form.reset();
+  $("#training-edit-id").value = "";
+  $("#training-is-topic-checkbox").checked = true;
+  currentUploadedFile = "";
+  const notice = $("#training-file-notice");
+  if (notice) notice.classList.add("hidden");
+  updateTrainingMeter();
+  const btnSave = $("#btn-save-training");
+  if (btnSave) btnSave.textContent = "Guardar Tópico de Treinamento";
+}
+
+function editTrainingTopic(topic) {
+  switchBusinessSubtab("training");
+  $("#training-edit-id").value = topic.id;
+  $("#training-title-input").value = topic.title;
+  $("#training-content-input").value = topic.content || "";
+  const meta = topic.metadata || {};
+  $("#training-is-topic-checkbox").checked = meta.is_isolated_topic !== false;
+  currentUploadedFile = meta.filename || "";
+
+  const notice = $("#training-file-notice");
+  if (meta.filename && notice) {
+    notice.className = "upload-feedback success";
+    notice.textContent = `Documento vinculado: ${meta.filename}`;
+    notice.classList.remove("hidden");
+  } else if (notice) {
+    notice.classList.add("hidden");
+  }
+
+  updateTrainingMeter();
+  const btnSave = $("#btn-save-training");
+  if (btnSave) btnSave.textContent = "Atualizar Tópico de Treinamento";
+  $("#training-form").scrollIntoView({ behavior: "smooth" });
+}
+
+async function handleTrainingFileUpload(file) {
+  if (!file) return;
+  const notice = $("#training-file-notice");
+  if (notice) {
+    notice.className = "upload-feedback";
+    notice.textContent = `A carregar e extrair texto de "${file.name}"...`;
+    notice.classList.remove("hidden");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const res = await fetch("/api/business-info/upload-document", {
+      method: "POST",
+      headers: authHeaders(false),
+      body: formData
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Erro ao carregar documento." }));
+      throw new Error(err.detail || "Erro ao carregar documento.");
+    }
+    const data = await res.json();
+    currentUploadedFile = data.filename;
+
+    if (!$("#training-title-input").value.trim()) {
+      $("#training-title-input").value = data.suggested_title;
+    }
+    const existing = $("#training-content-input").value.trim();
+    $("#training-content-input").value = existing ? `${existing}\n\n${data.text}` : data.text;
+    updateTrainingMeter();
+
+    if (notice) {
+      notice.className = "upload-feedback success";
+      notice.textContent = `✓ Documento "${data.filename}" extraído com sucesso! (${data.word_count} palavras adicionadas).`;
+    }
+    showNotice(`Documento "${data.filename}" carregado com sucesso.`);
+  } catch (err) {
+    if (notice) {
+      notice.className = "upload-feedback error";
+      notice.textContent = `Erro no carregamento: ${err.message}`;
+    }
+    showNotice(err.message, true);
+  }
+}
+
+function renderTrainingTopics() {
+  const container = $("#training-topics-list");
+  if (!container) return;
+  const topics = infoCache.filter(x => x.kind === "treinamento");
+
+  if (!topics.length) {
+    container.className = "training-list empty";
+    container.textContent = "Ainda não cadastrou tópicos de treinamento. Use o formulário acima para escrever ou transferir o seu primeiro regulamento!";
+    return;
+  }
+
+  container.className = "training-list";
+  container.innerHTML = "";
+
+  topics.forEach(t => {
+    const meta = t.metadata || {};
+    const words = meta.word_count || (t.content ? t.content.split(/\s+/).filter(Boolean).length : 0);
+    const isIsolated = meta.is_isolated_topic !== false;
+
+    const card = document.createElement("div");
+    card.className = "training-topic-card";
+
+    const header = document.createElement("div");
+    header.className = "training-topic-header";
+
+    const badges = document.createElement("div");
+    badges.className = "training-topic-badges";
+
+    const tagBadge = document.createElement("span");
+    tagBadge.className = "topic-tag-badge";
+    tagBadge.textContent = isIsolated ? "🏷️ Tópico Isolado" : "📄 Conhecimento Geral";
+    badges.append(tagBadge);
+
+    if (meta.filename) {
+      const fileBadge = document.createElement("span");
+      fileBadge.className = "topic-file-badge";
+      fileBadge.textContent = `📎 ${meta.filename}`;
+      badges.append(fileBadge);
     }
 
-    body.append(top, h, preview);
+    const wordsTag = document.createElement("span");
+    wordsTag.className = "stat-pill";
+    wordsTag.textContent = `${words} palavras`;
+    badges.append(wordsTag);
 
-    // Footer
+    header.append(badges);
+
+    const title = document.createElement("h4");
+    title.className = "training-topic-title";
+    title.textContent = t.title;
+
+    const preview = document.createElement("p");
+    preview.className = "training-topic-preview";
+    preview.textContent = t.content || "Sem conteúdo de texto.";
+
     const footer = document.createElement("div");
-    footer.className = "info-card-footer";
-    const cta = document.createElement("span");
-    cta.className = "info-card-cta";
-    cta.textContent = "Gerir itens";
-    const arrow = document.createElement("span");
-    arrow.className = "info-card-arrow";
-    arrow.textContent = "→";
-    footer.append(cta, arrow);
+    footer.className = "training-topic-footer";
 
-    card.append(stripe, body, footer);
-    card.onclick = () => openExpandBusinessCard(it.id);
-    list.append(card);
+    const updated = document.createElement("span");
+    const dateStr = t.updated_at ? new Date(t.updated_at).toLocaleDateString("pt-PT") : "Recentemente";
+    updated.textContent = `Atualizado: ${dateStr}`;
+
+    const actions = document.createElement("div");
+    actions.className = "training-topic-actions";
+
+    const btnEdit = document.createElement("button");
+    btnEdit.className = "btn xs outline";
+    btnEdit.textContent = "Editar";
+    btnEdit.onclick = () => editTrainingTopic(t);
+
+    const btnDel = document.createElement("button");
+    btnDel.className = "btn xs danger";
+    btnDel.textContent = "Eliminar";
+    btnDel.onclick = async () => {
+      if (!confirm(`Eliminar o tópico de treinamento "${t.title}"?`)) return;
+      try {
+        await api(`/api/business-info/${t.id}`, { method: "DELETE" });
+        showNotice("Tópico de treinamento eliminado.");
+        await loadInfo();
+      } catch (err) {
+        showNotice(err.message, true);
+      }
+    };
+
+    actions.append(btnEdit, btnDel);
+    footer.append(updated, actions);
+
+    card.append(header, title, preview, footer);
+    container.append(card);
   });
 }
 
-// Botão Nova Informação / Seletor de Tipo
+// Sub-abas de negócio
+$$(".business-subtab").forEach(b => b.addEventListener("click", () => switchBusinessSubtab(b.dataset.subtab)));
+
+// Eventos do formulário de treinamento
+$("#training-content-input")?.addEventListener("input", updateTrainingMeter);
+$("#btn-cancel-training")?.addEventListener("click", resetTrainingForm);
+$("#btn-toggle-training-form")?.addEventListener("click", () => {
+  switchBusinessSubtab("training");
+  $("#training-title-input")?.focus();
+});
+
+// Upload de ficheiros de treino
+$("#btn-trigger-file-picker")?.addEventListener("click", () => $("#training-file-picker")?.click());
+$("#training-drop-zone")?.addEventListener("click", e => {
+  if (e.target.id !== "btn-trigger-file-picker") {
+    $("#training-file-picker")?.click();
+  }
+});
+$("#training-file-picker")?.addEventListener("change", e => {
+  if (e.target.files?.[0]) handleTrainingFileUpload(e.target.files[0]);
+});
+
+$("#training-drop-zone")?.addEventListener("dragover", e => {
+  e.preventDefault();
+  $("#training-drop-zone").classList.add("dragover");
+});
+$("#training-drop-zone")?.addEventListener("dragleave", () => {
+  $("#training-drop-zone")?.classList.remove("dragover");
+});
+$("#training-drop-zone")?.addEventListener("drop", e => {
+  e.preventDefault();
+  $("#training-drop-zone")?.classList.remove("dragover");
+  if (e.dataTransfer.files?.[0]) {
+    handleTrainingFileUpload(e.dataTransfer.files[0]);
+  }
+});
+
+// Envio do formulário de treino
+$("#training-form")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  const editId = $("#training-edit-id").value;
+  const title = $("#training-title-input").value.trim();
+  const content = $("#training-content-input").value.trim();
+  const isTopic = $("#training-is-topic-checkbox").checked;
+
+  if (!title || !content) {
+    showNotice("Por favor preencha o título e o conteúdo do treinamento.", true);
+    return;
+  }
+
+  const wordsCount = content.split(/\s+/).filter(Boolean).length;
+  const payload = {
+    kind: "treinamento",
+    title: title,
+    content: content,
+    metadata: {
+      is_isolated_topic: isTopic,
+      filename: currentUploadedFile || "",
+      word_count: wordsCount
+    }
+  };
+
+  try {
+    if (editId) {
+      await api(`/api/business-info/${editId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+      showNotice("Tópico de treinamento atualizado com sucesso.");
+    } else {
+      await api("/api/business-info", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      showNotice("Tópico de treinamento adicionado à base da IA!");
+    }
+    resetTrainingForm();
+    await loadInfo();
+  } catch (err) {
+    showNotice(err.message, true);
+  }
+});
+
+// Botão Nova Informação / Seletor de Tipo para Cards Personalizados
 $("#new-info").addEventListener("click", () => {
   $("#info-kind-picker").classList.toggle("hidden");
 });

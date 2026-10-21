@@ -1,7 +1,7 @@
 import asyncio, json, logging, re
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -114,8 +114,8 @@ class Login(BaseModel):
 
 class BusinessInfoIn(BaseModel):
     kind: str
-    title: str = Field(min_length=1, max_length=180)
-    content: str = Field(min_length=1, max_length=12000)
+    title: str = Field(min_length=1, max_length=250)
+    content: str = Field(default="", max_length=500000)
     metadata: dict = {}
 
 class ProfileUpdate(BaseModel):
@@ -272,6 +272,80 @@ def delete_business_info(item_id:int,user=Depends(current_user)):
         cur=c.execute("DELETE FROM business_info WHERE id=? AND user_id=?",(item_id,user["id"]))
     if not cur.rowcount: raise HTTPException(404,"Informação não encontrada.")
     return {"ok":True}
+
+@app.post("/api/business-info/upload-document")
+async def upload_training_document(file: UploadFile = File(...), user=Depends(current_user)):
+    """
+    Extrai o texto integral de arquivos enviados pelo utilizador (PDF, Word DOCX, TXT, MD, CSV)
+    para alimentar a base massiva de treinamento profundo da IA Drexier.
+    """
+    import os, io
+    filename = file.filename or "documento"
+    content_bytes = await file.read()
+
+    if len(content_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(400, "O ficheiro excede o limite máximo permitido de 20MB.")
+
+    extracted_text = ""
+    lower_name = filename.lower()
+
+    if lower_name.endswith(".pdf"):
+        try:
+            import pypdfium2 as pdfium
+            pdf = pdfium.PdfDocument(content_bytes)
+            pages = []
+            for page in pdf:
+                txt = page.get_textpage().get_text_range()
+                if txt.strip():
+                    pages.append(txt.strip())
+            extracted_text = "\n\n".join(pages)
+        except Exception as e:
+            raise HTTPException(400, f"Falha ao ler documento PDF: {str(e)}")
+
+    elif lower_name.endswith(".docx"):
+        try:
+            import zipfile, xml.etree.ElementTree as ET
+            with zipfile.ZipFile(io.BytesIO(content_bytes)) as z:
+                xml_content = z.read("word/document.xml")
+            tree = ET.fromstring(xml_content)
+            paras = []
+            for elem in tree.iter():
+                if elem.tag.endswith("p"):
+                    t = "".join(elem.itertext()).strip()
+                    if t:
+                        paras.append(t)
+            extracted_text = "\n".join(paras)
+        except Exception as e:
+            raise HTTPException(400, f"Falha ao ler documento Word DOCX: {str(e)}")
+
+    elif lower_name.endswith((".txt", ".md", ".csv", ".json", ".rtf")):
+        try:
+            extracted_text = content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                extracted_text = content_bytes.decode("latin-1")
+            except Exception as e:
+                raise HTTPException(400, f"Falha ao ler arquivo de texto: {str(e)}")
+    else:
+        try:
+            extracted_text = content_bytes.decode("utf-8")
+        except Exception:
+            raise HTTPException(400, "Formato não suportado. Carregue ficheiros PDF, DOCX, TXT, MD ou CSV.")
+
+    clean_text = extracted_text.strip()
+    if not clean_text:
+        raise HTTPException(400, "O documento parece não conter texto legível.")
+
+    words = len(clean_text.split())
+    base_title = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ").strip().title()
+
+    return {
+        "filename": filename,
+        "suggested_title": base_title,
+        "text": clean_text,
+        "word_count": words,
+        "char_count": len(clean_text)
+    }
 
 @app.put("/api/agent-settings")
 def update_agent_settings(data:AgentSettings,user=Depends(current_user)):

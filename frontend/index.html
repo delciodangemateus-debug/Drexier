@@ -41,6 +41,39 @@
     <header class="topbar"><button id="mobile-menu" class="btn outline small">Menu</button><div><h1 id="page-title">Dashboard</h1><p id="page-subtitle" class="muted">Visão geral do atendimento</p></div><div class="top-user" id="top-user"></div></header>
     <div id="notice" class="notice hidden" role="status"></div>
     <section id="page-dashboard" class="page">
+      <!-- Banner de Indução e Precisão da IA Baseado no Volume de Conhecimento -->
+      <div class="knowledge-hero-banner" id="dashboard-knowledge-banner">
+        <div class="knowledge-hero-content">
+          <div class="knowledge-hero-top">
+            <div class="knowledge-hero-badge"><span class="pulse-spark">⚡</span> Potência e Precisão da IA Drexier</div>
+            <span class="knowledge-level-tag" id="dash-knowledge-level-tag">Calibração Inicial</span>
+          </div>
+          <h2 class="knowledge-hero-title" id="dash-knowledge-title">Alimente a Base da IA para Máxima Precisão nas Respostas</h2>
+          <p class="knowledge-hero-desc" id="dash-knowledge-desc">
+            O seu agente depende de um <strong>volume massivo de dados reais</strong> sobre o negócio para atender os clientes com máxima assertividade e sem alucinações. Preencha os cards pré-gerados e envie regulamentos na aba Negócios.
+          </p>
+          <div class="knowledge-progress-bar-container">
+            <div class="knowledge-progress-bar">
+              <div class="knowledge-progress-fill" id="dash-knowledge-fill" style="width: 25%;"></div>
+            </div>
+            <div class="knowledge-progress-stats">
+              <span id="dash-knowledge-status-text">Cards configurados: 0 / 12 · Treinamentos: 0</span>
+              <strong id="dash-knowledge-percent-text">25% Precisão</strong>
+            </div>
+          </div>
+          <div class="knowledge-missing-pills-wrap" id="dash-missing-pills-wrap">
+            <span class="knowledge-pills-label">Cards prioritários aguardando preenchimento:</span>
+            <div class="knowledge-missing-pills" id="dash-missing-pills">
+              <!-- Preenchido dinamicamente com atalhos de clique direto -->
+            </div>
+          </div>
+        </div>
+        <div class="knowledge-hero-actions">
+          <button class="btn primary" id="dash-btn-fill-cards">📋 Completar Cards do Negócio</button>
+          <button class="btn outline" id="dash-btn-open-training">🧠 Enviar Regulamentos & Treinar IA</button>
+        </div>
+      </div>
+
       <div class="metric-grid">
         <article class="metric"><span>Mensagens respondidas</span><strong id="metric-messages">0</strong></article>
         <article class="metric"><span>Clientes adquiridos</span><strong id="metric-contacts">0</strong></article>
@@ -72,6 +105,9 @@
             <button class="btn primary small" id="btn-sync-emails-messages" title="Verificar novos e-mails recebidos e responder com a IA">Sincronizar E-mails</button>
             <button class="btn outline small" id="refresh-contacts">Atualizar</button>
           </div>
+        </div>
+        <div class="messages-accuracy-tip">
+          <span>💡 <strong>Dica de Precisão:</strong> O agente responde com muito mais detalhes e autoridade quanto maior for o volume de dados da sua empresa. <a href="#" id="link-go-business-from-msg">Enriqueça os cards e envie regulamentos na aba Negócios →</a></span>
         </div>
         <div id="contacts-list" class="contact-card-grid empty">Ainda não existem conversas.</div>
       </div>
@@ -113,12 +149,160 @@
       <div class="panel"><div class="panel-heading"><h2>Teste de estilos de resposta</h2><button class="btn primary small" id="add-variant">Novo estilo</button></div><p class="muted">Registe variantes para acompanhar os resultados. Os contadores só aumentam quando eventos reais forem ligados; não são criados resultados fictícios.</p><div id="variants-list" class="variant-list empty">Ainda não existem variantes.</div><form id="variant-form" class="form hidden"><label>Nome do estilo<input name="label" required></label><label>Texto da resposta<textarea name="response_text" rows="3" required></textarea></label><div class="actions"><button class="btn primary" type="submit">Guardar estilo</button><button class="btn outline" type="button" id="cancel-variant">Cancelar</button></div></form></div>
     </section>
     <section id="page-business" class="page hidden">
-      <div class="panel"><div class="panel-heading"><div><h2>Informações do negócio</h2><p class="muted">A IA utiliza apenas os dados que cadastrar aqui.</p></div><button class="btn primary" id="new-info">Nova informação</button></div>
-        <div id="info-kind-picker" class="kind-picker hidden"><p>Que tipo de informação deseja adicionar?</p><div class="kind-grid">
-          <button class="kind-option" data-kind="horarios">Horários</button><button class="kind-option" data-kind="productos">Produtos e preços</button><button class="kind-option" data-kind="marcacoes">Tempo para marcações</button><button class="kind-option" data-kind="campanhas">Campanhas</button><button class="kind-option" data-kind="servicos">Serviços e disponibilidade</button><button class="kind-option" data-kind="personalizado">Personalizado</button>
-        </div></div>
-        <form id="info-form" class="form hidden"><input type="hidden" name="id"><label>Tipo<select name="kind" required><option value="horarios">Horários</option><option value="productos">Produtos e preços</option><option value="marcacoes">Tempo para marcações</option><option value="campanhas">Campanhas</option><option value="servicos">Serviços e disponibilidade</option><option value="personalizado">Personalizado</option></select></label><label>Título<input name="title" required maxlength="180"></label><label>Informação completa<textarea name="content" rows="5" required placeholder="Insira os dados reais que o agente poderá consultar."></textarea></label><p class="muted">Para produtos, inclua nomes, preços e disponibilidade. Para horários/campanhas/marcações, inclua dias, datas e horas aplicáveis.</p><div class="actions"><button class="btn primary" type="submit">Guardar informação</button><button class="btn outline" id="cancel-info" type="button">Cancelar</button></div></form>
-        <div id="info-list" class="card-grid empty">Ainda não existem informações cadastradas.</div>
+      <!-- Sub-abas da Aba Negócio -->
+      <div class="business-subtabs-bar">
+        <button class="business-subtab active" data-subtab="cards" id="subtab-btn-cards">
+          <span class="subtab-icon">📋</span> Cards Estruturados <span class="subtab-pill" id="badge-cards-stat">0 / 12 preenchidos</span>
+        </button>
+        <button class="business-subtab" data-subtab="training" id="subtab-btn-training">
+          <span class="subtab-icon">🧠</span> Treinamento &amp; Documentos <span class="subtab-pill" id="badge-training-stat">0 tópicos</span>
+        </button>
+      </div>
+
+      <!-- Banner de Indução e Precisão da Base de Negócio -->
+      <div class="business-ai-banner">
+        <div class="business-ai-banner-content">
+          <div class="business-ai-badge"><span class="pulse-spark">⚡</span> Potência da Base de Dados da IA</div>
+          <div class="business-ai-text-block">
+            <h3 id="business-ai-title">Volume de Conhecimento: Insira Dados Massivos</h3>
+            <p id="business-ai-desc" class="muted">
+              Quanto maior o volume de informações, regulamentos, produtos e regras inseridos, mais infalível será o modelo ao atender os clientes da sua empresa, garantindo respostas ricas e livres de erros.
+            </p>
+          </div>
+          <div class="business-ai-progress-wrap">
+            <div class="business-ai-bar"><div class="business-ai-fill" id="business-ai-fill" style="width: 20%;"></div></div>
+            <span class="business-ai-pct" id="business-ai-pct">20% Precisão</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-visão 1: Cards do Negócio (12 Cards Pré-elaborados + Personalizados) -->
+      <div id="subview-cards" class="subview-container">
+        <div class="panel">
+          <div class="panel-heading" style="flex-wrap: wrap; gap: 12px;">
+            <div>
+              <h2>Cards Estruturados do Negócio</h2>
+              <p class="muted">12 cards pré-elaborados prontos para preenchimento. A IA utiliza todos os dados que cadastrar aqui.</p>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn primary" id="new-info">+ Novo Card Personalizado</button>
+            </div>
+          </div>
+
+          <div id="info-kind-picker" class="kind-picker hidden">
+            <p>Escolha uma categoria para o seu card personalizado:</p>
+            <div class="kind-grid">
+              <button class="kind-option" data-kind="productos">📦 Produtos e Preços</button>
+              <button class="kind-option" data-kind="servicos">⚙️ Serviços e Procedimentos</button>
+              <button class="kind-option" data-kind="horarios">🕐 Horários de Atendimento</button>
+              <button class="kind-option" data-kind="marcacoes">📅 Marcações e Agendamentos</button>
+              <button class="kind-option" data-kind="pagamentos">💳 Formas de Pagamento</button>
+              <button class="kind-option" data-kind="campanhas">🎯 Campanhas e Descontos</button>
+              <button class="kind-option" data-kind="devolucoes">🔄 Trocas e Devoluções</button>
+              <button class="kind-option" data-kind="entregas">🚚 Envios e Prazos</button>
+              <button class="kind-option" data-kind="faq">❓ Perguntas Frequentes (FAQ)</button>
+              <button class="kind-option" data-kind="localizacao">📍 Localização e Morada</button>
+              <button class="kind-option" data-kind="contactos">📞 Canais Oficiais de Contacto</button>
+              <button class="kind-option" data-kind="regras_atendimento">🛡️ Regras de Atendimento</button>
+              <button class="kind-option" data-kind="personalizado">✏️ Outro Personalizado</button>
+            </div>
+          </div>
+
+          <div id="info-list" class="card-grid">
+            <!-- Renderizado dinamicamente via app.js -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-visão 2: Treinamentos & Documentos Oficiais -->
+      <div id="subview-training" class="subview-container hidden">
+        <div class="panel">
+          <div class="panel-heading" style="flex-wrap: wrap; gap: 10px;">
+            <div>
+              <h2>Central de Treinamento Livre da IA &amp; Documentos</h2>
+              <p class="muted">Escreva livremente regulamentos, normas, contratos e políticas ou transfira documentos (PDF, DOCX, TXT). Quanto mais volume de texto inserir, mais perfeita será a IA.</p>
+            </div>
+            <button class="btn primary small" id="btn-toggle-training-form">+ Novo Tópico de Treinamento</button>
+          </div>
+
+          <!-- Banner persuasivo de indução de treino massivo -->
+          <div class="training-induce-box">
+            <div class="training-induce-icon">🎯</div>
+            <div class="training-induce-content">
+              <strong>Garanta 100% de precisão: Quanto mais dados fornecer, menor o risco de o agente hesitar.</strong>
+              <p>Ao marcar um treino como <em>Tópico Isolado</em>, a IA cria uma barreira contextual para que o assunto nunca seja confundido com outras regras da empresa. Cole manuais completos, roteiros, exceções de atendimento e perguntas de clientes.</p>
+            </div>
+          </div>
+
+          <!-- Formulário de Adicionar / Editar Treinamento -->
+          <form id="training-form" class="form training-form-card">
+            <input type="hidden" id="training-edit-id" value="">
+            
+            <div class="training-form-grid">
+              <label>
+                Título do Tópico / Regulamento
+                <input id="training-title-input" placeholder="Ex: Regulamento Interno da Loja 2026, Manual de Garantias e Trocas, Procedimento de Atendimento VIP..." required maxlength="240">
+              </label>
+
+              <!-- Opção Crítica: Marcar como Tópico Isolado de Conhecimento -->
+              <div class="topic-isolate-wrapper">
+                <label class="topic-checkbox-label">
+                  <input type="checkbox" id="training-is-topic-checkbox" checked>
+                  <div>
+                    <span class="topic-checkbox-title">🏷️ Marcar como Tópico Isolado de Conhecimento (Recomendado)</span>
+                    <small class="muted" style="display:block;margin-top:2px;">
+                      A IA delimitará este conteúdo de forma independente e estrita, garantindo que o agente <strong>nunca confunda nem misture</strong> este tópico com outros assuntos da empresa.
+                    </small>
+                  </div>
+                </label>
+              </div>
+
+              <!-- Upload / Transferência de Ficheiros -->
+              <div class="training-upload-zone" id="training-drop-zone">
+                <input type="file" id="training-file-picker" accept=".pdf,.docx,.txt,.md,.csv,.json" style="display:none;">
+                <div class="upload-zone-icon">📁</div>
+                <div class="upload-zone-text">
+                  <strong>Transferir / Carregar Documento Oficial (PDF, Word DOCX, TXT, MD, CSV)</strong>
+                  <p class="muted" style="margin:2px 0 0;font-size:12.5px;">Clique aqui ou arraste o regulamento/manual para carregar automaticamente o conteúdo para o campo livre.</p>
+                </div>
+                <button type="button" class="btn outline small" id="btn-trigger-file-picker">Selecionar Documento</button>
+              </div>
+              <div id="training-file-notice" class="upload-feedback hidden"></div>
+
+              <!-- Campo de Escrita Livre Massivo -->
+              <label>
+                Campo de Escrita Livre (Área de Texto Massiva e Sem Limites)
+                <textarea id="training-content-input" rows="9" required placeholder="Escreva aqui uma infinidade de informações sobre a empresa... Cole regulamentos completos, termos de compra, manuais da equipe, exceções de atendimento, políticas de preços para clientes fiéis, condições contratuais, tabelas detalhadas... Quanto mais volume de texto inserir, mais perfeito e assertivo será o atendimento da IA!"></textarea>
+              </label>
+
+              <!-- Medidor de Volume e Robustez do Treinamento -->
+              <div class="training-meter-bar">
+                <div class="training-stats-chips">
+                  <span class="stat-pill" id="training-words-count">0 palavras</span>
+                  <span class="stat-pill" id="training-chars-count">0 caracteres</span>
+                </div>
+                <div class="training-gauge-indicator">
+                  <span class="gauge-pill gauge-empty" id="training-gauge-status">⚠️ Volume Básico</span>
+                  <span class="gauge-desc muted" id="training-gauge-desc">Adicione mais dados para atingir o nível de treino ideal</span>
+                </div>
+              </div>
+
+              <div class="actions" style="margin-top:12px;">
+                <button class="btn primary" type="submit" id="btn-save-training">Guardar Tópico de Treinamento</button>
+                <button class="btn outline" type="button" id="btn-cancel-training">Cancelar</button>
+              </div>
+            </div>
+          </form>
+
+          <!-- Lista de Tópicos de Treinamento Cadastrados -->
+          <div class="training-topics-header" style="margin-top: 28px;">
+            <h3>Tópicos &amp; Regulamentos Cadastrados</h3>
+            <span class="muted" id="training-topics-sub">Diretrizes isoladas que a IA consulta com máxima fidelidade.</span>
+          </div>
+          <div id="training-topics-list" class="training-list empty">
+            Ainda não cadastrou tópicos de treinamento. Use o formulário acima para escrever ou transferir o seu primeiro regulamento!
+          </div>
+        </div>
       </div>
     </section>
     <section id="page-settings" class="page hidden">
