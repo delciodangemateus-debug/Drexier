@@ -50,6 +50,7 @@ class WhatsAppConnectPayload(BaseModel):
     phone_number: Optional[str] = None
     business_name: Optional[str] = None
     access_token: Optional[str] = None
+    use_env: Optional[bool] = False
 
 
 class TestSendPayload(BaseModel):
@@ -66,12 +67,15 @@ def get_whatsapp_public_config():
         "config_id": config["config_id"],
         "version": config["version"],
         "configured": bool(config["app_id"] and config["app_secret"]),
+        "has_env_credentials": bool(config.get("has_env_credentials")),
+        "verify_token": config.get("verify_token", ""),
     }
 
 
 @router.get("/whatsapp/status")
 def get_whatsapp_status(user: dict = Depends(get_current_user)):
     """Retorna o estado da ligação do WhatsApp da conta autenticada."""
+    config = get_meta_config()
     with connect() as c:
         row = c.execute(
             """SELECT id, user_id, waba_id, phone_number_id, phone_number,
@@ -85,6 +89,8 @@ def get_whatsapp_status(user: dict = Depends(get_current_user)):
         return {
             "connected": False,
             "integration": None,
+            "can_connect_env": bool(config.get("has_env_credentials")),
+            "env_phone_id": config.get("phone_number_id", ""),
         }
 
     return {
@@ -100,6 +106,7 @@ def get_whatsapp_status(user: dict = Depends(get_current_user)):
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         },
+        "can_connect_env": bool(config.get("has_env_credentials")),
     }
 
 
@@ -112,11 +119,27 @@ async def connect_whatsapp(
     Conclui o Embedded Signup da Meta ou a ligação com credenciais.
     Troca o código pelo token, subscreve os webhooks e armazena os identificadores no banco.
     """
-    token = payload.access_token or ""
+    config = get_meta_config()
+    token = (payload.access_token or "").strip()
     waba_id = (payload.waba_id or "").strip()
     phone_number_id = (payload.phone_number_id or "").strip()
     phone_number = (payload.phone_number or "").strip()
     business_name = (payload.business_name or "").strip()
+
+    # Se solicitado conexão via .env ou credenciais vazias mas existentes no .env
+    if payload.use_env or (not token and not phone_number_id and not payload.code):
+        if config.get("system_user_token"):
+            token = token or config["system_user_token"]
+        if config.get("phone_number_id"):
+            phone_number_id = phone_number_id or config["phone_number_id"]
+
+    # Se ainda não temos token mas temos system_user_token global
+    if not token and config.get("system_user_token"):
+        token = config["system_user_token"]
+
+    # Se ainda não temos phone_number_id mas temos no config global
+    if not phone_number_id and config.get("phone_number_id"):
+        phone_number_id = config["phone_number_id"]
 
     # Se recebemos um código OAuth do Embedded Signup, efetuamos a troca na Graph API
     if payload.code:
@@ -149,7 +172,7 @@ async def connect_whatsapp(
                 business_name = first_num.get("verified_name", "")
 
     # Se temos phone_number_id mas faltam número legível ou nome, consulta os detalhes
-    if phone_number_id and (not phone_number or not business_name):
+    if phone_number_id and (not phone_number or not business_name) and token:
         phone_details = await fetch_phone_number_details(phone_number_id, token)
         if phone_details:
             phone_number = phone_number or phone_details.get("display_phone_number", "")
@@ -346,6 +369,26 @@ async def receive_meta_webhook(request: Request):
                 ).fetchone()
 
             if not integration:
+                # Contingência 3: Se houver apenas 1 integração conectada no sistema
+                integration = c.execute(
+                    "SELECT * FROM whatsapp_integrations WHERE status = 'connected' ORDER BY id ASC LIMIT 1"
+                ).fetchone()
+
+            if not integration:
+                # Contingência 4: Associa ao utilizador primário do sistema para não perder mensagem
+                first_user = c.execute("SELECT * FROM users ORDER BY id ASC LIMIT 1").fetchone()
+                if first_user:
+                    cfg = get_meta_config()
+                    token_to_save = cfg.get("system_user_token", "")
+                    c.execute(
+                        """INSERT INTO whatsapp_integrations (user_id, waba_id, phone_number_id, phone_number, business_name, access_token, status, webhook_subscribed)
+                           VALUES (?, ?, ?, ?, ?, ?, 'connected', 1)
+                           ON CONFLICT(user_id) DO UPDATE SET phone_number_id=excluded.phone_number_id, status='connected'""",
+                        (first_user["id"], msg.get("waba_id") or f"waba_{phone_number_id}", phone_number_id, phone_number_id, first_user["name"], token_to_save)
+                    )
+                    integration = c.execute("SELECT * FROM whatsapp_integrations WHERE user_id = ?", (first_user["id"],)).fetchone()
+
+            if not integration:
                 logger.warning(
                     f"Nenhuma conta de utilizador encontrada para phone_number_id={phone_number_id}. "
                     f"Mensagem ignorada."
@@ -386,6 +429,25 @@ async def receive_meta_webhook(request: Request):
                 "INSERT INTO messages(user_id, contact_id, sender, content) VALUES(?, ?, 'customer', ?)",
                 (user_id, cid, content),
             )
+
+            # Detecção automática de intenção de marcação ou compra
+            try:
+                from backend.services.email_service import detect_booking_or_purchase_intent
+                intent = detect_booking_or_purchase_intent(content, "Mensagem WhatsApp")
+                if intent:
+                    has_pending = c.execute(
+                        "SELECT id FROM conversion_requests WHERE user_id = ? AND contact_id = ? AND status = 'pending'",
+                        (user_id, cid)
+                    ).fetchone()
+                    if not has_pending:
+                        c.execute(
+                            """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status)
+                               VALUES (?, ?, ?, ?, 'pending')""",
+                            (user_id, cid, intent["type"], intent["details"])
+                        )
+                        logger.info(f"[WhatsApp Conversão] Pedido de {intent['type']} detectado para {from_number}.")
+            except Exception as ex_intent:
+                logger.debug(f"Detecção de intenção: {ex_intent}")
 
             # Histórico recente da conversa
             history_rows = c.execute(

@@ -27,6 +27,7 @@ def get_meta_config() -> Dict[str, Any]:
     )
     verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN", "").strip() or "drexier_webhook_secret_token"
     version = os.getenv("WHATSAPP_GRAPH_VERSION", "").strip() or DEFAULT_GRAPH_VERSION
+    phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
 
     return {
         "app_id": app_id,
@@ -35,7 +36,9 @@ def get_meta_config() -> Dict[str, Any]:
         "system_user_token": system_user_token,
         "verify_token": verify_token,
         "version": version,
+        "phone_number_id": phone_number_id,
         "is_configured": bool(app_id and app_secret),
+        "has_env_credentials": bool(phone_number_id and system_user_token),
     }
 
 

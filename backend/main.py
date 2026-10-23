@@ -406,7 +406,7 @@ async def owner_reply(contact_id: int, data: OwnerReplyIn, user=Depends(current_
         raise HTTPException(400, str(e))
     except Exception as e:
         logger.error(f"Erro ao enviar resposta do proprietário: {e}")
-        raise HTTPException(500, f"Falha no envio do e-mail: {str(e)}")
+        raise HTTPException(500, f"Falha no envio da mensagem: {str(e)}")
 
 @app.post("/api/contacts/{contact_id}/conversion")
 def create_conversion(contact_id:int,data:ConversionIn,user=Depends(current_user)):

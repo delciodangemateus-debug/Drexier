@@ -1180,8 +1180,16 @@ async def process_confirmation_action(
             "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
             (user_id,)
         ).fetchone()
-        if not integration:
+        wa_integration = c.execute(
+            "SELECT * FROM whatsapp_integrations WHERE user_id = ? AND status = 'connected'",
+            (user_id,)
+        ).fetchone()
+
+        is_whatsapp = ("@" not in req["contact_key"]) or (not integration and wa_integration is not None)
+        if not is_whatsapp and not integration:
             raise ValueError("Nenhuma conta de e-mail conectada para envio da confirmação.")
+        if is_whatsapp and not wa_integration:
+            raise ValueError("Nenhuma conta de WhatsApp conectada para envio da confirmação.")
 
         # Histórico recente
         history_rows = c.execute(
@@ -1196,18 +1204,19 @@ async def process_confirmation_action(
         ).fetchall()
 
     user_dict = dict(user)
-    integration_dict = dict(integration)
+    integration_dict = dict(integration) if integration else {}
     business_name = user_dict.get("name") or integration_dict.get("display_name") or "nosso negócio"
     customer_name = req["name"] or req["contact_key"]
     customer_email = req["contact_key"]
 
+    channel_name = "WhatsApp" if is_whatsapp else "e-mail"
     if action == "confirm":
         instruction = (
             f"Você é o atendente oficial de {business_name}. "
             f"O proprietário analisou e acaba de CONFIRMAR a solicitação de {req['request_type']} do cliente ({customer_name}). "
             f"Detalhes do agendamento/pedido: {req['details']}. "
             f"Nota adicional do proprietário: {custom_note or 'Tudo confirmado.'}. "
-            f"Escreva um e-mail acolhedor, profissional e claro confirmando a realização do pedido/marcação, informando os dados e dizendo que ficamos à espera."
+            f"Escreva uma mensagem acolhedora, profissional e clara confirmando a realização do pedido/marcação para enviar via {channel_name}."
         )
         new_status = "confirmed"
         subject = f"Confirmação de Agendamento - {business_name}"
@@ -1218,7 +1227,7 @@ async def process_confirmation_action(
             f"e informou que INFELIZMENTE NÃO SERÁ POSSÍVEL atender naquele dia/horário/condição específica. "
             f"Detalhes do pedido original: {req['details']}. "
             f"Motivo ou alternativa sugerida pelo proprietário: {custom_note or 'Sem vaga neste dia; consultar outras datas disponíveis.'}. "
-            f"Escreva um e-mail extremamente educado, empático e atencioso explicando a indisponibilidade, sugerindo a data/alternativa proposta e perguntando qual outro momento o cliente prefere."
+            f"Escreva uma mensagem extremamente educada, empática e atenciosa explicando a indisponibilidade e sugerindo alternativa para enviar via {channel_name}."
         )
         new_status = "rejected"
         subject = f"Atualização sobre a sua solicitação - {business_name}"
@@ -1247,17 +1256,27 @@ async def process_confirmation_action(
             (new_status, request_id, user_id)
         )
 
-    # Envia e-mail oficial de resposta
+    # Envia resposta oficial pelo canal correto
     try:
-        await send_email(
-            integration=integration_dict,
-            to_email=customer_email,
-            subject=subject,
-            body_text=reply_text,
-        )
+        if is_whatsapp:
+            from backend.services.whatsapp import send_whatsapp_message
+            wa_dict = dict(wa_integration)
+            await send_whatsapp_message(
+                phone_number_id=wa_dict["phone_number_id"],
+                to=req["contact_key"],
+                text=reply_text,
+                access_token=wa_dict.get("access_token") or None,
+            )
+        else:
+            await send_email(
+                integration=integration_dict,
+                to_email=customer_email,
+                subject=subject,
+                body_text=reply_text,
+            )
     except Exception as e:
-        logger.error(f"Erro ao enviar e-mail de confirmação: {e}")
-        raise RuntimeError(f"Mensagem gerada, mas falha no envio por e-mail: {str(e)}")
+        logger.error(f"Erro ao enviar confirmação ({channel_name}): {e}")
+        raise RuntimeError(f"Mensagem gerada, mas falha no envio: {str(e)}")
 
     return {
         "ok": True,
@@ -1270,7 +1289,7 @@ async def process_confirmation_action(
 
 async def send_owner_reply(user_id: int, contact_id: int, message_text: str) -> Dict[str, Any]:
     """
-    Envia uma resposta oficial escrita manualmente pelo proprietário via e-mail para o cliente.
+    Envia uma resposta oficial escrita manualmente pelo proprietário via WhatsApp ou e-mail.
     """
     message_text = message_text.strip()
     if not message_text:
@@ -1284,17 +1303,48 @@ async def send_owner_reply(user_id: int, contact_id: int, message_text: str) -> 
         if not contact:
             raise ValueError("Cliente não encontrado.")
 
-        integration = c.execute(
+        email_integration = c.execute(
             "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
             (user_id,)
         ).fetchone()
-        if not integration:
-            raise ValueError("Nenhuma conta de e-mail conectada para envio. Conecte o e-mail em Configurações.")
+
+        wa_integration = c.execute(
+            "SELECT * FROM whatsapp_integrations WHERE user_id = ? AND status = 'connected'",
+            (user_id,)
+        ).fetchone()
 
         thread = c.execute(
             "SELECT subject, thread_id, last_message_id FROM email_threads WHERE contact_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1",
             (contact_id, user_id)
         ).fetchone()
+
+    is_whatsapp = ("@" not in contact["contact_key"]) or (not email_integration and wa_integration is not None)
+
+    if is_whatsapp:
+        if not wa_integration:
+            raise ValueError("Nenhuma conta de WhatsApp conectada para envio desta mensagem.")
+
+        from backend.services.whatsapp import send_whatsapp_message
+        wa_dict = dict(wa_integration)
+        await send_whatsapp_message(
+            phone_number_id=wa_dict["phone_number_id"],
+            to=contact["contact_key"],
+            text=message_text,
+            access_token=wa_dict.get("access_token") or None,
+        )
+
+        with connect() as c:
+            cur = c.execute(
+                "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'owner', ?)",
+                (user_id, contact_id, message_text)
+            )
+            msg_id = cur.lastrowid
+            c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (contact_id,))
+
+        return {"ok": True, "channel": "whatsapp", "message_id": msg_id, "content": message_text}
+
+    if not email_integration:
+        raise ValueError("Nenhuma conta de e-mail conectada para envio. Conecte o e-mail em Configurações.")
 
     customer_email = contact["contact_key"]
     subject = thread["subject"] if thread and thread["subject"] else "Mensagem de Atendimento"
@@ -1305,7 +1355,7 @@ async def send_owner_reply(user_id: int, contact_id: int, message_text: str) -> 
     last_msg_id = thread["last_message_id"] if thread else None
 
     # Envia e-mail oficial
-    integration_dict = dict(integration)
+    integration_dict = dict(email_integration)
     await send_email(
         integration=integration_dict,
         to_email=customer_email,
@@ -1325,4 +1375,4 @@ async def send_owner_reply(user_id: int, contact_id: int, message_text: str) -> 
         msg_id = cur.lastrowid
         c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (contact_id,))
 
-    return {"ok": True, "message_id": msg_id, "content": message_text}
+    return {"ok": True, "channel": "email", "message_id": msg_id, "content": message_text}

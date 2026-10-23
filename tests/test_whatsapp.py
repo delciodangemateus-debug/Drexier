@@ -270,3 +270,106 @@ def test_verify_webhook_signature():
 
     bad_sig = "sha256=abcdef1234567890"
     assert verify_webhook_signature(body, bad_sig) is False
+
+
+def test_whatsapp_connect_use_env(auth_client, monkeypatch):
+    client, token, user_id = auth_client
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "phone_env_123")
+    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "token_env_abc")
+
+    with patch("backend.routers.whatsapp.subscribe_waba_webhook", new_callable=AsyncMock) as mock_sub:
+        mock_sub.return_value = True
+
+        res = client.post(
+            "/api/whatsapp/connect",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"use_env": True},
+        )
+        assert res.status_code == 200
+        assert res.json()["ok"] is True
+        assert res.json()["integration"]["phone_number_id"] == "phone_env_123"
+
+    # Status agora deve constar como conectado
+    st_res = client.get("/api/whatsapp/status", headers={"Authorization": f"Bearer {token}"})
+    assert st_res.status_code == 200
+    assert st_res.json()["connected"] is True
+
+
+@pytest.mark.anyio
+async def test_owner_reply_to_whatsapp_contact(auth_client):
+    client, token, user_id = auth_client
+
+    # Cria integração WhatsApp e contacto com telefone
+    with connect() as c:
+        c.execute(
+            """INSERT INTO whatsapp_integrations (user_id, waba_id, phone_number_id, phone_number, business_name, access_token, status)
+               VALUES (?, 'waba_test', 'phone_owner_test', '+351912000000', 'Loja Teste', 'EAAB_token', 'connected')""",
+            (user_id,),
+        )
+        cur = c.execute(
+            "INSERT INTO contacts (user_id, name, contact_key) VALUES (?, 'Ana Cliente', '+351933333333')",
+            (user_id,),
+        )
+        contact_id = cur.lastrowid
+
+    with patch("backend.services.whatsapp.send_whatsapp_message", new_callable=AsyncMock) as mock_send:
+        mock_send.return_value = {"messages": [{"id": "wamid.reply123"}]}
+
+        res = client.post(
+            f"/api/contacts/{contact_id}/reply",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"message": "Olá Ana, a sua encomenda está a caminho!"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ok"] is True
+        assert data.get("channel") == "whatsapp"
+
+        # Verifica se send_whatsapp_message foi chamado com o número do cliente
+        assert mock_send.call_count == 1
+        kwargs = mock_send.call_args.kwargs
+        assert kwargs.get("to") == "+351933333333"
+        assert kwargs.get("text") == "Olá Ana, a sua encomenda está a caminho!"
+
+
+@pytest.mark.anyio
+async def test_conversion_action_whatsapp(auth_client):
+    client, token, user_id = auth_client
+
+    # Cria integração WhatsApp, contacto e pedido de agendamento pendente
+    with connect() as c:
+        c.execute(
+            """INSERT INTO whatsapp_integrations (user_id, waba_id, phone_number_id, phone_number, business_name, access_token, status)
+               VALUES (?, 'waba_test', 'phone_conv_test', '+351912000000', 'Loja Teste', 'EAAB_token', 'connected')""",
+            (user_id,),
+        )
+        cur = c.execute(
+            "INSERT INTO contacts (user_id, name, contact_key) VALUES (?, 'Rui Santos', '+351922222222')",
+            (user_id,),
+        )
+        contact_id = cur.lastrowid
+
+        cur_req = c.execute(
+            """INSERT INTO conversion_requests (user_id, contact_id, request_type, details, status)
+               VALUES (?, ?, 'booking', 'Marcação para Segunda às 14h', 'pending')""",
+            (user_id, contact_id),
+        )
+        req_id = cur_req.lastrowid
+
+    with patch("backend.services.whatsapp.send_whatsapp_message", new_callable=AsyncMock) as mock_send, \
+         patch("backend.services.email_service.draft_reply", new_callable=AsyncMock) as mock_draft:
+        mock_draft.return_value = "A sua marcação para Segunda às 14h está confirmada!"
+        mock_send.return_value = {"messages": [{"id": "wamid.conv_out"}]}
+
+        res = client.post(
+            f"/api/conversions/{req_id}/action",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"action": "confirm", "custom_note": "Aguardamos a sua visita."},
+        )
+        assert res.status_code == 200
+        assert res.json()["ok"] is True
+        assert res.json()["status"] == "confirmed"
+
+        # Confirma que enviou para o WhatsApp do cliente
+        assert mock_send.call_count == 1
+        assert mock_send.call_args.kwargs.get("to") == "+351922222222"
