@@ -28,6 +28,8 @@ def get_meta_config() -> Dict[str, Any]:
     verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN", "").strip() or "drexier_webhook_secret_token"
     version = os.getenv("WHATSAPP_GRAPH_VERSION", "").strip() or DEFAULT_GRAPH_VERSION
     phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    # URL público HTTPS para redirect OAuth (obrigatório para Meta - usar ngrok/localtunnel em dev)
+    public_url = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
 
     return {
         "app_id": app_id,
@@ -37,6 +39,7 @@ def get_meta_config() -> Dict[str, Any]:
         "verify_token": verify_token,
         "version": version,
         "phone_number_id": phone_number_id,
+        "public_url": public_url,
         "is_configured": bool(app_id and app_secret),
         "has_env_credentials": bool(phone_number_id and system_user_token),
     }
@@ -67,7 +70,7 @@ def verify_webhook_signature(payload_bytes: bytes, signature_header: Optional[st
     return hmac.compare_digest(generated_sig, expected_sig)
 
 
-async def exchange_code_for_token(code: str) -> Dict[str, Any]:
+async def exchange_code_for_token(code: str, redirect_uri: Optional[str] = None) -> Dict[str, Any]:
     """
     Troca o Authorization Code obtido via Embedded Signup pelo Access Token de Usuário da Meta.
     Endpoint: GET https://graph.facebook.com/{version}/oauth/access_token
@@ -81,6 +84,8 @@ async def exchange_code_for_token(code: str) -> Dict[str, Any]:
         "client_secret": config["app_secret"],
         "code": code,
     }
+    if redirect_uri:
+        params["redirect_uri"] = redirect_uri
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(url, params=params)

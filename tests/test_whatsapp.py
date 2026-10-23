@@ -373,3 +373,16 @@ async def test_conversion_action_whatsapp(auth_client):
         # Confirma que enviou para o WhatsApp do cliente
         assert mock_send.call_count == 1
         assert mock_send.call_args.kwargs.get("to") == "+351922222222"
+
+
+def test_whatsapp_oauth_callback(auth_client):
+    client, _, _ = auth_client
+    res = client.get("/api/whatsapp/oauth/callback?code=test_oauth_code_xyz")
+    assert res.status_code == 200
+    assert "WA_OAUTH_CODE" in res.text
+    assert "test_oauth_code_xyz" in res.text
+
+    res_err = client.get("/api/whatsapp/oauth/callback?error=access_denied&error_description=Cancelado")
+    assert res_err.status_code == 200
+    assert "WA_OAUTH_ERROR" in res_err.text
+    assert "Cancelado" in res_err.text

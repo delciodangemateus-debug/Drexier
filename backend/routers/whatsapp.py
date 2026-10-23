@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from backend.auth import decode_token
@@ -45,6 +45,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
 
 class WhatsAppConnectPayload(BaseModel):
     code: Optional[str] = None
+    redirect_uri: Optional[str] = None
     waba_id: Optional[str] = None
     phone_number_id: Optional[str] = None
     phone_number: Optional[str] = None
@@ -69,6 +70,7 @@ def get_whatsapp_public_config():
         "configured": bool(config["app_id"] and config["app_secret"]),
         "has_env_credentials": bool(config.get("has_env_credentials")),
         "verify_token": config.get("verify_token", ""),
+        "public_url": config.get("public_url", ""),
     }
 
 
@@ -110,6 +112,55 @@ def get_whatsapp_status(user: dict = Depends(get_current_user)):
     }
 
 
+@router.get("/whatsapp/oauth/callback")
+def whatsapp_oauth_callback(
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    """Callback do fluxo direto de autorização da Meta.
+    Suporta dois modos:
+    - Popup (window.opener existe): envia o código via postMessage e fecha a janela.
+    - Aba direta (sem opener): guarda o código em localStorage e redireciona para a app.
+    """
+    if error:
+        err_msg = error_description or error
+        html = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:40px;">
+            <h3 style="color:#dc2626;">Erro na autorização da Meta</h3>
+            <p>{err_msg}</p>
+            <script>
+                if (window.opener) {{
+                    window.opener.postMessage({{ type: 'WA_OAUTH_ERROR', error: {json.dumps(err_msg)} }}, '*');
+                    window.close();
+                }} else {{
+                    localStorage.setItem('drexier_wa_oauth_error', {json.dumps(err_msg)});
+                    window.location.href = '/';
+                }}
+            </script></body></html>"""
+        return HTMLResponse(content=html, status_code=200)
+
+    html = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:40px;">
+        <h3 style="color:#059669;">✅ Ligação com a Meta autorizada!</h3>
+        <p>A concluir a ligação com o Drexier...</p>
+        <p style="color:#64748b;font-size:13px;">Esta janela fechará automaticamente ou será redirecionado.</p>
+        <script>
+            var code = {json.dumps(code or '')};
+            if (window.opener) {{
+                // Modo popup: envia código para a janela principal e fecha
+                window.opener.postMessage({{ type: 'WA_OAUTH_CODE', code: code }}, '*');
+                window.close();
+            }} else {{
+                // Modo aba direta: guarda código em localStorage e redireciona para a app
+                if (code) {{
+                    localStorage.setItem('drexier_wa_pending_code', code);
+                    localStorage.setItem('drexier_wa_redirect_uri', window.location.origin + '/api/whatsapp/oauth/callback');
+                }}
+                window.location.href = '/';
+            }}
+        </script></body></html>"""
+    return HTMLResponse(content=html, status_code=200)
+
+
 @router.post("/whatsapp/connect")
 async def connect_whatsapp(
     payload: WhatsAppConnectPayload,
@@ -144,7 +195,7 @@ async def connect_whatsapp(
     # Se recebemos um código OAuth do Embedded Signup, efetuamos a troca na Graph API
     if payload.code:
         try:
-            token_data = await exchange_code_for_token(payload.code)
+            token_data = await exchange_code_for_token(payload.code, payload.redirect_uri)
             token = token_data.get("access_token", token)
         except Exception as e:
             logger.error(f"Erro ao trocar código por token: {e}")

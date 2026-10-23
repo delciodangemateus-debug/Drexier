@@ -325,6 +325,46 @@ async function boot() {
     $("#top-user").textContent = me.email;
     fillSettings();
 
+    // Deteta se a Meta redirecionou de volta com um código OAuth WhatsApp guardado no localStorage
+    // (acontece quando o utilizador abre o link da Meta numa aba direta, sem popup)
+    const waPendingCode = localStorage.getItem("drexier_wa_pending_code");
+    const waRedirectUri = localStorage.getItem("drexier_wa_redirect_uri");
+    if (waPendingCode) {
+      localStorage.removeItem("drexier_wa_pending_code");
+      localStorage.removeItem("drexier_wa_redirect_uri");
+      // Navega para as definições e processa o código
+      await navigate("settings");
+      $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "integration"));
+      $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-integration"));
+      switchIntegrationChannel("whatsapp");
+      const statusEl = $("#wa-connect-status");
+      if (statusEl) statusEl.textContent = "A concluir ligação com a Meta...";
+      try {
+        const payload = { code: waPendingCode };
+        if (waRedirectUri) payload.redirect_uri = waRedirectUri;
+        const result = await api("/api/whatsapp/connect", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        if (statusEl) statusEl.textContent = "";
+        showNotice(result.message || "WhatsApp oficial ligado com sucesso! ✅");
+        await loadWhatsAppStatus();
+      } catch (err) {
+        if (statusEl) statusEl.textContent = "";
+        showNotice("Erro ao concluir ligação na Meta: " + err.message, true);
+      }
+      return;
+    }
+
+    // Deteta erro de OAuth WhatsApp guardado no localStorage
+    const waOAuthError = localStorage.getItem("drexier_wa_oauth_error");
+    if (waOAuthError) {
+      localStorage.removeItem("drexier_wa_oauth_error");
+      await navigate("settings");
+      showNotice("Erro na autorização da Meta: " + waOAuthError, true);
+      return;
+    }
+
     // Deteta se o utilizador acabou de autorizar na Google ou Microsoft via OAuth
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("email_auth") === "success") {
@@ -2105,8 +2145,42 @@ let metaConfig = null;
 let fbSdkLoaded = false;
 let lastEmbeddedSignupData = null;
 
-// Escuta os eventos oficiais enviados pela janela modal da Meta (Embedded Signup)
-window.addEventListener("message", (event) => {
+// Escuta os eventos oficiais enviados pela janela modal da Meta (Embedded Signup ou popup direto)
+window.addEventListener("message", async (event) => {
+  // Trata retorno do popup direto OAuth
+  if (event.data && typeof event.data === "object") {
+    if (event.data.type === "WA_OAUTH_CODE") {
+      const code = event.data.code;
+      const statusEl = $("#wa-connect-status");
+      if (statusEl) statusEl.textContent = "A concluir ligação na Meta com o código recebido...";
+      try {
+        const redirectUri = `${window.location.origin}/api/whatsapp/oauth/callback`;
+        const result = await api("/api/whatsapp/connect", {
+          method: "POST",
+          body: JSON.stringify({
+            code,
+            redirect_uri: redirectUri,
+            phone_number_id: lastEmbeddedSignupData ? lastEmbeddedSignupData.phone_number_id : undefined,
+            waba_id: lastEmbeddedSignupData ? lastEmbeddedSignupData.waba_id : undefined,
+          }),
+        });
+        if (statusEl) statusEl.textContent = "";
+        showNotice(result.message || "WhatsApp oficial ligado com sucesso!");
+        await loadWhatsAppStatus();
+      } catch (err) {
+        if (statusEl) statusEl.textContent = "";
+        showNotice("Erro ao concluir ligação na Meta: " + err.message, true);
+      }
+      return;
+    }
+    if (event.data.type === "WA_OAUTH_ERROR") {
+      const statusEl = $("#wa-connect-status");
+      if (statusEl) statusEl.textContent = "";
+      showNotice("Erro na autorização da Meta: " + event.data.error, true);
+      return;
+    }
+  }
+
   if (
     event.origin !== "https://www.facebook.com" &&
     event.origin !== "https://web.facebook.com"
@@ -2277,69 +2351,134 @@ async function loadWhatsAppStatus() {
   }
 }
 
-// Iniciar fluxo oficial do Embedded Signup da Meta
+// Obtém o redirect URI correto: usa PUBLIC_URL do .env (localtunnel/ngrok) se disponível,
+// senão usa o origin atual (só funciona se for HTTPS ou localhost direto no backend)
+function getWaRedirectUri() {
+  if (metaConfig?.public_url) {
+    return `${metaConfig.public_url}/api/whatsapp/oauth/callback`;
+  }
+  return `${window.location.origin}/api/whatsapp/oauth/callback`;
+}
+
+// Abre a janela oficial da Meta para o Embedded Signup WhatsApp.
+// Usa window.open() diretamente (chamada síncrona dentro do click handler = nunca bloqueada).
+function openDirectMetaDialog() {
+  const statusEl = $("#wa-connect-status");
+
+  if (!metaConfig?.app_id) {
+    showNotice("Preencha o META_APP_ID no ficheiro .env antes de iniciar.", true);
+    $("#wa-manual-box")?.classList.remove("hidden");
+    return;
+  }
+
+  const redirectUri = getWaRedirectUri();
+
+  // Valida que o redirect URI é HTTPS (exigido pela Meta, excepto localhost)
+  if (!redirectUri.startsWith("https://") && !redirectUri.includes("localhost")) {
+    if (statusEl) {
+      statusEl.innerHTML = `<span style="color:#b45309;font-weight:600;">⚠️ URL público HTTPS necessário.</span><br>
+        Adiciona ao <code>.env</code>:<br>
+        <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">PUBLIC_URL=https://o-teu-localtunnel.loca.lt</code><br>
+        E reinicia o servidor. Ou usa a <strong>Configuração Direta</strong> abaixo.`;
+    }
+    $("#wa-manual-box")?.classList.remove("hidden");
+    return;
+  }
+
+  const extrasJson = encodeURIComponent(JSON.stringify({ feature: "whatsapp_embedded_signup", version: 2 }));
+  let url = `https://www.facebook.com/${metaConfig.version || "v21.0"}/dialog/oauth`
+    + `?client_id=${encodeURIComponent(metaConfig.app_id)}`
+    + `&redirect_uri=${encodeURIComponent(redirectUri)}`
+    + `&response_type=code`
+    + `&extras=${extrasJson}`;
+
+  if (metaConfig.config_id) {
+    url += `&config_id=${encodeURIComponent(metaConfig.config_id)}`;
+  } else {
+    url += `&scope=whatsapp_business_management%2Cwhatsapp_business_messaging`;
+  }
+
+  const w = 660, h = 780;
+  const left = Math.max(0, (window.screen.width - w) / 2);
+  const top = Math.max(0, (window.screen.height - h) / 2);
+  const popup = window.open(url, "MetaWhatsAppSignup",
+    `width=${w},height=${h},top=${top},left=${left},scrollbars=yes,status=no,resizable=yes`);
+
+  if (!popup || popup.closed || typeof popup.closed === "undefined") {
+    // Browser bloqueou o popup — mostra link clicável como fallback
+    if (statusEl) {
+      statusEl.innerHTML = `<span style="color:#b45309;">Pop-up bloqueado pelo navegador.</span>
+        <a href="${url}" target="_blank" rel="noopener" style="font-weight:600;">Clique aqui para abrir a janela da Meta ↗</a>
+        <br><small style="color:#64748b;">Após autorizar, voltará automaticamente ao Drexier.</small>`;
+    }
+    showNotice("Pop-up bloqueado. Usa o link acima ou permite pop-ups neste site.", true);
+  } else {
+    if (statusEl) {
+      statusEl.innerHTML = `<span style="color:#059669;font-weight:600;">✅ Janela da Meta aberta!</span>
+        Complete os passos no pop-up e aguarde a confirmação aqui.<br>
+        <button type="button" class="btn outline small" id="btn-reopen-meta-link"
+          style="margin-top:6px;padding:3px 10px;font-size:12px;">Reabrir Janela ↗</button>`;
+      $("#btn-reopen-meta-link")?.addEventListener("click", openDirectMetaDialog);
+    }
+  }
+}
+
+// Inicia o fluxo de ligação ao WhatsApp via Embedded Signup da Meta.
+// Estratégia: abre o popup OAuth diretamente com window.open() (síncrono no click → nunca bloqueado).
+// Se o FB SDK estiver disponível, tenta também o FB.login() em paralelo como alternativa.
 function startMetaEmbeddedSignup() {
   const statusEl = $("#wa-connect-status");
   const btn = $("#btn-wa-connect");
 
   if (!metaConfig || !metaConfig.app_id) {
-    showNotice("Preencha o META_APP_ID no seu ficheiro .env antes de iniciar.", true);
+    showNotice("Preencha o META_APP_ID no ficheiro .env antes de iniciar.", true);
     $("#wa-manual-box")?.classList.remove("hidden");
     return;
   }
 
-  if (!window.FB) {
-    showNotice("O SDK da Meta não pôde ser carregado. Pode utilizar a ligação direta por chaves abaixo.", true);
-    $("#wa-manual-box")?.classList.remove("hidden");
-    return;
-  }
+  // ── Passo 1: Abre o popup diretamente (síncrono → browser nunca bloqueia) ──
+  openDirectMetaDialog();
 
-  if (statusEl) statusEl.textContent = "A abrir janela oficial da Meta...";
-  if (btn) btn.disabled = true;
-
-  const loginParams = {
-    scope: "whatsapp_business_management,whatsapp_business_messaging",
-    response_type: "code",
-    override_default_response_type: true,
-    extras: {
-      feature: "whatsapp_embedded_signup",
-      version: 2,
-      sessionInfoVersion: "3",
-    },
-  };
-
-  if (metaConfig.config_id) {
-    loginParams.config_id = metaConfig.config_id;
-  }
-
-  window.FB.login(async (response) => {
-    if (btn) btn.disabled = false;
-    if (response.authResponse && response.authResponse.code) {
-      if (statusEl) statusEl.textContent = "A autenticar e subscrever webhooks...";
-      try {
-        const payload = {
-          code: response.authResponse.code,
-          phone_number_id: lastEmbeddedSignupData ? lastEmbeddedSignupData.phone_number_id : undefined,
-          waba_id: lastEmbeddedSignupData ? lastEmbeddedSignupData.waba_id : undefined,
-        };
-        const result = await api("/api/whatsapp/connect", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        if (statusEl) statusEl.textContent = "";
-        showNotice(result.message || "WhatsApp oficial ligado com sucesso!");
-        await loadWhatsAppStatus();
-      } catch (err) {
-        if (statusEl) statusEl.textContent = "";
-        showNotice("Erro ao concluir ligação na Meta: " + err.message, true);
-      }
+  // ── Passo 2: Se FB SDK disponível, tenta FB.login() em paralelo ──
+  // (pode funcionar sem necesidade de redirect URI em alguns contextos)
+  if (window.FB) {
+    const loginParams = {
+      response_type: "code",
+      override_default_response_type: true,
+      extras: { feature: "whatsapp_embedded_signup", version: 2, sessionInfoVersion: "3" },
+    };
+    if (metaConfig.config_id) {
+      loginParams.config_id = metaConfig.config_id;
     } else {
-      if (statusEl) statusEl.textContent = "";
-      if (response.status === "not_authorized" || response.error) {
-        showNotice("Ligação cancelada ou não autorizada na Meta.", true);
-      }
+      loginParams.scope = "whatsapp_business_management,whatsapp_business_messaging";
     }
-  }, loginParams);
+    try {
+      window.FB.login(async (response) => {
+        if (response.authResponse?.code) {
+          if (statusEl) statusEl.textContent = "A autenticar via SDK da Meta...";
+          try {
+            const result = await api("/api/whatsapp/connect", {
+              method: "POST",
+              body: JSON.stringify({
+                code: response.authResponse.code,
+                phone_number_id: lastEmbeddedSignupData?.phone_number_id,
+                waba_id: lastEmbeddedSignupData?.waba_id,
+              }),
+            });
+            if (statusEl) statusEl.textContent = "";
+            showNotice(result.message || "WhatsApp ligado com sucesso!");
+            await loadWhatsAppStatus();
+          } catch (err) {
+            if (statusEl) statusEl.textContent = "";
+            // Não mostra erro — o fluxo principal (popup direto) ainda pode completar
+            console.warn("[Drexier] FB.login connect error (não crítico):", err.message);
+          }
+        }
+      }, loginParams);
+    } catch (e) {
+      console.warn("[Drexier] FB.login não disponível (não crítico, popup direto está ativo):", e);
+    }
+  }
 }
 
 // Conexão direta por formulário manual
