@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from backend.auth import decode_token, create_token
 from backend.database import connect
+from backend.services.billing_service import is_subscription_active
 from backend.services.email_service import (
     build_google_auth_url,
     build_microsoft_auth_url,
@@ -40,6 +41,25 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
     if not row:
         raise HTTPException(401, "Conta não encontrada.")
     return dict(row)
+
+
+def require_email_subscription(user: dict = Depends(get_current_user)):
+    """
+    Bloqueia integrações e automações de e-mail se o utilizador não possuir
+    o Plano Business (59€/mês) ativo e com pagamento em dia.
+    """
+    if not is_subscription_active(user["id"]):
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "SUBSCRIPTION_REQUIRED",
+                "message": (
+                    "Acesso bloqueado. O Plano Business (59€/mês) é necessário para configurar "
+                    "a integração de e-mail e respostas automáticas. Ative a subscrição na aba Faturação."
+                )
+            }
+        )
+    return user
 
 
 class ManualEmailConnectPayload(BaseModel):
@@ -115,7 +135,7 @@ def get_email_status(user: dict = Depends(get_current_user)):
 
 
 @router.get("/oauth/google/url")
-def get_google_oauth_url(user: dict = Depends(get_current_user)):
+def get_google_oauth_url(user: dict = Depends(require_email_subscription)):
     """
     Retorna o link oficial de autorização da Google para que o utilizador
     possa aceder e conceder as permissões solicitadas.
@@ -148,6 +168,9 @@ async def google_oauth_callback(
     uid = decode_token(state)
     if not uid:
         return RedirectResponse("/?email_auth=error&reason=invalid_state")
+
+    if not is_subscription_active(uid):
+        return RedirectResponse("/?billing=paywall&reason=subscription_required")
 
     try:
         token_data = await exchange_google_code(code)
@@ -187,7 +210,7 @@ async def google_oauth_callback(
 
 
 @router.get("/oauth/microsoft/url")
-def get_microsoft_oauth_url(user: dict = Depends(get_current_user)):
+def get_microsoft_oauth_url(user: dict = Depends(require_email_subscription)):
     """
     Retorna o link oficial de autorização da Microsoft para que o utilizador
     possa aceder e conceder as permissões solicitadas.
@@ -220,6 +243,9 @@ async def microsoft_oauth_callback(
     uid = decode_token(state)
     if not uid:
         return RedirectResponse("/?email_auth=error&reason=invalid_state")
+
+    if not is_subscription_active(uid):
+        return RedirectResponse("/?billing=paywall&reason=subscription_required")
 
     try:
         token_data = await exchange_microsoft_code(code)
@@ -260,7 +286,7 @@ async def microsoft_oauth_callback(
 @router.post("/connect-manual")
 def connect_manual_email(
     payload: ManualEmailConnectPayload,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_email_subscription),
 ):
     """Permite ligação direta por credenciais SMTP/IMAP para testes ou servidores próprios."""
     with connect() as c:
@@ -302,7 +328,7 @@ def connect_manual_email(
 @router.post("/auto-reply")
 def toggle_auto_reply(
     payload: ToggleAutoReplyPayload,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_email_subscription),
 ):
     """Ativa ou desativa as respostas automáticas da IA para a integração de e-mail."""
     with connect() as c:
@@ -338,7 +364,7 @@ def disconnect_email(user: dict = Depends(get_current_user)):
 
 
 @router.post("/sync")
-async def trigger_email_sync(user: dict = Depends(get_current_user)):
+async def trigger_email_sync(user: dict = Depends(require_email_subscription)):
     """
     Sincroniza os e-mails recebidos na caixa de entrada do utilizador,
     aciona a IA Drexier para cada mensagem nova e envia as respostas.
@@ -359,7 +385,7 @@ async def trigger_email_sync(user: dict = Depends(get_current_user)):
 @router.post("/test-send")
 async def test_send_email(
     payload: TestEmailSendPayload,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_email_subscription),
 ):
     """Envia um e-mail de teste para verificar se o envio está 100% funcional."""
     with connect() as c:

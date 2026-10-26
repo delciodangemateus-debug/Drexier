@@ -41,6 +41,12 @@ def auth_client():
     assert signup_res.status_code == 200
     token = signup_res.json()["token"]
     user_id = signup_res.json()["user_id"]
+    with connect() as c:
+        c.execute(
+            """INSERT OR REPLACE INTO subscriptions (user_id, plan_name, amount, currency, status)
+               VALUES (?, 'Plano Business', 5900, 'eur', 'active')""",
+            (user_id,)
+        )
     return client, token, user_id
 
 

@@ -1,7 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
-from backend.database import init_db
+from backend.database import init_db, connect
+from backend.services.billing_service import _save_stored_subscription
 
 @pytest.fixture(autouse=True)
 def setup_db():
@@ -21,8 +22,9 @@ def test_static_routes():
     assert res_js.status_code == 200
 
 def test_full_auth_and_business_flow():
-    # 1. Signup
-    email = "testuser@example.com"
+    import time
+    # 1. Signup com email exclusivo para garantir isolamento do teste
+    email = f"testuser_{int(time.time()*1000)}@example.com"
     pwd = "SecurePassword123"
     signup_payload = {
         "name": "Maria Silva",
@@ -32,12 +34,13 @@ def test_full_auth_and_business_flow():
         "business_type": "Serviços e vendas"
     }
     res_signup = client.post("/api/auth/signup", json=signup_payload)
-    assert res_signup.status_code in [200, 409]
+    assert res_signup.status_code == 200
 
     # 2. Login
     res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
     assert res_login.status_code == 200
     token = res_login.json()["token"]
+    user_id = res_login.json()["user_id"]
     headers = {"Authorization": f"Bearer {token}"}
 
     # 3. Get profile
@@ -45,13 +48,20 @@ def test_full_auth_and_business_flow():
     assert res_me.status_code == 200
     assert res_me.json()["email"] == email
 
-    # 4. Add business info
+    # 3.1 Verificação de Paywall: antes de subscrever, adicionar info é bloqueado com 402
     info_payload = {
         "kind": "horarios",
         "title": "Horário de Funcionamento",
         "content": "Segunda a Sexta das 09h00 às 18h00. Sábado das 10h00 às 14h00.",
         "metadata": {}
     }
+    res_blocked = client.post("/api/business-info", json=info_payload, headers=headers)
+    assert res_blocked.status_code == 402
+
+    # 3.2 Ativação do Plano Business (59€/mês) para o utilizador
+    _save_stored_subscription(user_id, {"status": "active", "plan_name": "Plano Business"})
+
+    # 4. Add business info (agora com plano ativo, sucesso 200)
     res_info = client.post("/api/business-info", json=info_payload, headers=headers)
     assert res_info.status_code == 200
     info_id = res_info.json()["id"]
@@ -143,7 +153,7 @@ def test_owner_reply_and_conversion_actions():
     user_id = res_login.json()["user_id"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    # Conecta integração de e-mail simulada
+    # Conecta integração de e-mail simulada e ativa assinatura
     with connect() as c:
         c.execute("DELETE FROM email_integrations WHERE user_id=?", (user_id,))
         c.execute(
@@ -151,6 +161,7 @@ def test_owner_reply_and_conversion_actions():
                VALUES (?, 'smtp_imap', 'dono@empresa.com', 'Dono da Loja', 'connected')""",
             (user_id,)
         )
+    _save_stored_subscription(user_id, {"status": "active", "plan_name": "Plano Business"})
 
     with patch("backend.services.email_service.send_email", new_callable=AsyncMock) as mock_send, \
          patch("backend.services.agent.draft_reply", new_callable=AsyncMock) as mock_draft:
@@ -204,7 +215,11 @@ def test_training_document_upload_and_isolated_topics():
     })
     res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
     token = res_login.json()["token"]
+    user_id = res_login.json()["user_id"]
     headers = {"Authorization": f"Bearer {token}"}
+
+    # Ativa assinatura do Plano Business para o teste
+    _save_stored_subscription(user_id, {"status": "active", "plan_name": "Plano Business"})
 
     # 1. Teste de upload de documento em texto plano
     file_content = b"Regulamento Interno da Empresa 2026.\nArtigo 1: Os clientes tem 15 dias de garantia total.\nArtigo 2: Entregas gratuitas em compras superiores a 50 euros."
@@ -231,6 +246,90 @@ def test_training_document_upload_and_isolated_topics():
     created = res_create.json()
     assert created["kind"] == "treinamento"
     assert created["metadata"]["is_isolated_topic"] is True
+
+
+def test_paywall_strict_enforcement():
+    """
+    Ponto Crítico: Garante que utilizadores registados SEM subscrição ativa
+    conseguem navegar e ver o painel, mas são estritamente bloqueados com 402
+    em: adicionar dados à loja, dar instruções à IA, upload de documentos e integrações.
+    """
+    import time
+    email = f"paywall_test_{int(time.time()*1000)}@example.com"
+    pwd = "SecurePassword123"
+
+    # 1. Utilizador cria conta normalmente
+    res_signup = client.post("/api/auth/signup", json={
+        "name": "Cliente Sem Plano",
+        "email": email,
+        "password": pwd,
+        "confirm_password": pwd,
+        "business_type": "Comércio"
+    })
+    assert res_signup.status_code == 200
+
+    # 2. Utilizador entra na conta normalmente
+    res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+    assert res_login.status_code == 200
+    token = res_login.json()["token"]
+    user_id = res_login.json()["user_id"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 3. Leitura do perfil e dashboard permitidos normalmente
+    assert client.get("/api/me", headers=headers).status_code == 200
+    assert client.get("/api/dashboard", headers=headers).status_code == 200
+    assert client.get("/api/contacts", headers=headers).status_code == 200
+
+    # 4. Tentar adicionar dados da loja -> BLOQUEADO 402
+    res_biz = client.post("/api/business-info", json={
+        "kind": "productos", "title": "Produto Teste", "content": "10€", "metadata": {}
+    }, headers=headers)
+    assert res_biz.status_code == 402
+    assert "SUBSCRIPTION_REQUIRED" in str(res_biz.json())
+
+    # 5. Tentar dar instruções ao agente IA -> BLOQUEADO 402
+    res_agent = client.put("/api/agent-settings", json={
+        "instructions": "Seja gentil com todos os clientes.",
+        "mandatory_responses": {}
+    }, headers=headers)
+    assert res_agent.status_code == 402
+
+    # 6. Tentar fazer upload de documento de treino -> BLOQUEADO 402
+    files = {"file": ("manual.txt", b"Regras da loja...", "text/plain")}
+    res_doc = client.post("/api/business-info/upload-document", files=files, headers=headers)
+    assert res_doc.status_code == 402
+
+    # 7. Tentar iniciar integração de e-mail (OAuth Google) -> BLOQUEADO 402
+    res_oauth = client.get("/api/email/oauth/google/url", headers=headers)
+    assert res_oauth.status_code == 402
+
+    # 8. Tentar acionar sincronização de e-mails -> BLOQUEADO 402
+    res_sync = client.post("/api/email/sync", headers=headers)
+    assert res_sync.status_code == 402
+
+    # 9. Tentar simular atendimento com IA -> BLOQUEADO 402
+    res_sim = client.post("/api/simulate/incoming", json={
+        "contact_key": "cliente@teste.com",
+        "customer_name": "Cliente",
+        "message": "Olá!"
+    }, headers=headers)
+    assert res_sim.status_code == 402
+
+    # 10. Agora o utilizador subscreve o Plano Business (59€/mês)
+    _save_stored_subscription(user_id, {"status": "active", "plan_name": "Plano Business"})
+
+    # 11. Tudo passa a ser permitido com sucesso (200)
+    res_biz_ok = client.post("/api/business-info", json={
+        "kind": "productos", "title": "Produto Teste", "content": "10€", "metadata": {}
+    }, headers=headers)
+    assert res_biz_ok.status_code == 200
+
+    res_agent_ok = client.put("/api/agent-settings", json={
+        "instructions": "Seja gentil com todos os clientes.",
+        "mandatory_responses": {}
+    }, headers=headers)
+    assert res_agent_ok.status_code == 200
+
 
 
 

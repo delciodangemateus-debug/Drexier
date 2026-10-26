@@ -2564,3 +2564,145 @@ footer { text-align: center; color: var(--gray-400); font-size: 11.5px; padding:
   color: #64748b;
   font-weight: 500;
 }
+
+
+/* ============================================================
+   PAYWALL MODAL — BLOQUEIO DE ACESSO SEM ASSINATURA ATIVA
+   ============================================================ */
+.paywall-modal-card {
+  max-width: 480px;
+  width: 92%;
+  padding: 36px 32px 28px;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 24px 80px rgba(0,0,0,.18), 0 8px 30px rgba(0,0,0,.10);
+  text-align: center;
+  position: relative;
+  background: var(--white);
+}
+
+.paywall-modal-icon {
+  font-size: 44px;
+  margin-bottom: 12px;
+  display: block;
+}
+
+.paywall-modal-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--black);
+  margin: 0 0 10px;
+}
+
+.paywall-modal-desc {
+  color: var(--gray-600);
+  font-size: 14.5px;
+  line-height: 1.6;
+  margin: 0 0 22px;
+}
+
+.paywall-modal-plan {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1.5px solid #e2e8f0;
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  margin-bottom: 22px;
+  text-align: left;
+}
+
+.paywall-plan-price {
+  font-size: 36px;
+  font-weight: 900;
+  color: var(--black);
+  text-align: center;
+  margin-bottom: 14px;
+  letter-spacing: -1px;
+}
+
+.paywall-plan-price span {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--gray-500);
+  letter-spacing: 0;
+}
+
+.paywall-plan-features {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.paywall-plan-features li {
+  font-size: 13.5px;
+  color: var(--gray-800);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.paywall-plan-features li::before {
+  content: none;
+}
+
+.paywall-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.paywall-modal-actions .btn-large {
+  padding: 14px 20px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: var(--radius-md);
+}
+
+.paywall-modal-fine {
+  font-size: 11.5px;
+  color: var(--gray-400);
+  margin: 14px 0 0;
+  text-align: center;
+}
+
+/* Overlay para páginas bloqueadas por paywall */
+.paywall-page-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(248, 250, 252, 0.82);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  pointer-events: all;
+}
+
+.paywall-page-overlay-inner {
+  text-align: center;
+  padding: 32px 24px;
+  max-width: 380px;
+}
+
+.paywall-page-overlay-icon {
+  font-size: 40px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.paywall-page-overlay-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--black);
+  margin: 0 0 8px;
+}
+
+.paywall-page-overlay-desc {
+  font-size: 13.5px;
+  color: var(--gray-600);
+  line-height: 1.55;
+  margin: 0 0 18px;
+}

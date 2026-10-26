@@ -10,6 +10,51 @@ let currentExpandedCardId = null, currentEditingItemIndex = null;
 let currentBusinessSubtab = "cards"; // "cards" | "training"
 let currentUploadedFile = "";
 
+/* ==============================================================================
+   PAYWALL SAAS — CONTROLO DE ACESSO POR ASSINATURA STRIPE
+   hasActiveSub é a fonte única da verdade sobre o estado da subscrição.
+   Atualizado a cada loadBillingStatus() — chamado no boot e em cada navegação.
+   ============================================================================== */
+let hasActiveSub = false; // Assume bloqueado até confirmação do servidor
+
+/**
+ * Verificação de paywall: bloqueia a ação e abre modal se sem subscrição ativa.
+ * Usar antes de QUALQUER ação de escrita, upload, instrução ou integração.
+ * @returns {boolean} true = pode prosseguir | false = bloqueado (modal aberto)
+ */
+function paywallCheck() {
+  if (hasActiveSub) return true;
+  openPaywallModal();
+  return false;
+}
+
+function openPaywallModal() {
+  const modal = $("#paywall-modal");
+  if (modal) modal.classList.remove("hidden");
+}
+
+function closePaywallModal() {
+  const modal = $("#paywall-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+// Eventos do modal de paywall
+document.addEventListener("DOMContentLoaded", () => {
+  $("#paywall-btn-close")?.addEventListener("click", closePaywallModal);
+  $("#paywall-modal")?.addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) closePaywallModal();
+  });
+  $("#paywall-btn-subscribe")?.addEventListener("click", async () => {
+    closePaywallModal();
+    // Navega para a aba de faturação e inicia checkout
+    await navigate("settings");
+    $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+    $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+    await loadBillingStatus();
+    await startStripeCheckout();
+  });
+});
+
 const kindNames = {
   productos: "Produtos e Preços",
   servicos: "Serviços e Procedimentos",
@@ -229,7 +274,15 @@ async function api(url, options = {}) {
   try { data = await res.json(); } catch {}
   if (!res.ok) {
     if (res.status === 401 && token) { logoutNow(); }
-    throw new Error(data.detail || "Ocorreu um erro.");
+    if (res.status === 402) {
+      hasActiveSub = false;
+      applyPaywallState(false);
+      openPaywallModal();
+      const msg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Subscrição do Plano Business (59€/mês) necessária.");
+      throw new Error(msg);
+    }
+    const errMsg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Ocorreu um erro.");
+    throw new Error(errMsg);
   }
   return data;
 }
@@ -875,6 +928,7 @@ $("#btn-back-to-inbox")?.addEventListener("click", () => {
 // Envio de resposta oficial direta do proprietário por e-mail
 $("#owner-reply-form")?.addEventListener("submit", async e => {
   e.preventDefault();
+  if (!paywallCheck()) return;
   if (!selectedContact) {
     showNotice("Selecione um cliente primeiro.", true);
     return;
@@ -1049,10 +1103,14 @@ async function loadReports() {
   });
 }
 
-$("#add-variant").addEventListener("click", () => $("#variant-form").classList.remove("hidden"));
+$("#add-variant").addEventListener("click", () => {
+  if (!paywallCheck()) return;
+  $("#variant-form").classList.remove("hidden");
+});
 $("#cancel-variant").addEventListener("click", () => $("#variant-form").classList.add("hidden"));
 $("#variant-form").addEventListener("submit", async e => {
   e.preventDefault();
+  if (!paywallCheck()) return;
   try {
     await api("/api/variants", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(e.target))) });
     e.target.reset();
@@ -1348,6 +1406,7 @@ function renderBusinessCardItemsHtml(it, editingIndex = null) {
 }
 
 async function openPresetCardDirectly(preset) {
+  if (!paywallCheck()) return;
   let existing = infoCache.find(x => x.kind === preset.kind);
   if (!existing) {
     try {
@@ -1381,12 +1440,14 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
   // Vincular eventos dentro do card expandido
   $("#modal-close-btn").onclick = closeModal;
   $("#modal-done-btn").onclick = async () => {
+    if (!paywallCheck()) return;
     await saveCardGeneralData(cardId);
     closeModal();
   };
 
   // Botão Adicionar / Atualizar item
   $("#builder-save-btn").onclick = async () => {
+    if (!paywallCheck()) return;
     const name = $("#builder-name").value.trim();
     const price = $("#builder-price").value.trim();
     const details = $("#builder-details").value.trim();
@@ -1442,6 +1503,7 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
 
   $$(".delete-item-action").forEach(btn => {
     btn.onclick = async () => {
+      if (!paywallCheck()) return;
       const idx = parseInt(btn.dataset.idx, 10);
       const meta = it.metadata || {};
       const items = Array.isArray(meta.items) ? [...meta.items] : [];
@@ -1470,6 +1532,7 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
 
   // Eliminar card inteiro
   $("#delete-entire-card-btn").onclick = async () => {
+    if (!paywallCheck()) return;
     if (!confirm(`Tem a certeza de que deseja eliminar o card "${it.title}" e todos os seus itens?`)) return;
     try {
       await api(`/api/business-info/${cardId}`, { method: "DELETE" });
@@ -1483,6 +1546,7 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
 }
 
 async function saveCardGeneralData(cardId) {
+  if (!paywallCheck()) return;
   const it = infoCache.find(x => x.id === cardId);
   if (!it) return;
   const newTitle = $("#card-title-field")?.value.trim() || it.title;
@@ -1888,6 +1952,7 @@ function renderTrainingTopics() {
     btnDel.className = "btn xs danger";
     btnDel.textContent = "Eliminar";
     btnDel.onclick = async () => {
+      if (!paywallCheck()) return;
       if (!confirm(`Eliminar o tópico de treinamento "${t.title}"?`)) return;
       try {
         await api(`/api/business-info/${t.id}`, { method: "DELETE" });
@@ -1918,13 +1983,18 @@ $("#btn-toggle-training-form")?.addEventListener("click", () => {
 });
 
 // Upload de ficheiros de treino
-$("#btn-trigger-file-picker")?.addEventListener("click", () => $("#training-file-picker")?.click());
+$("#btn-trigger-file-picker")?.addEventListener("click", () => {
+  if (!paywallCheck()) return;
+  $("#training-file-picker")?.click();
+});
 $("#training-drop-zone")?.addEventListener("click", e => {
   if (e.target.id !== "btn-trigger-file-picker") {
+    if (!paywallCheck()) return;
     $("#training-file-picker")?.click();
   }
 });
 $("#training-file-picker")?.addEventListener("change", e => {
+  if (!paywallCheck()) return;
   if (e.target.files?.[0]) handleTrainingFileUpload(e.target.files[0]);
 });
 
@@ -1946,6 +2016,7 @@ $("#training-drop-zone")?.addEventListener("drop", e => {
 // Envio do formulário de treino
 $("#training-form")?.addEventListener("submit", async e => {
   e.preventDefault();
+  if (!paywallCheck()) return;
   const editId = $("#training-edit-id").value;
   const title = $("#training-title-input").value.trim();
   const content = $("#training-content-input").value.trim();
@@ -1991,6 +2062,7 @@ $("#training-form")?.addEventListener("submit", async e => {
 
 // Botão Nova Informação / Seletor de Tipo para Cards Personalizados
 $("#new-info").addEventListener("click", () => {
+  if (!paywallCheck()) return;
   $("#info-kind-picker").classList.toggle("hidden");
 });
 
@@ -2044,6 +2116,74 @@ $$("[data-setting]").forEach(b => b.addEventListener("click", () => {
 let billingConfig = null;
 let currentSubscription = null;
 
+/**
+ * Aplica ou remove o estado visual de paywall nas páginas sensíveis.
+ * Quando sem subscrição: desativa botões de escrita e mostra overlay nos tabs.
+ * Quando ativo: remove todas as restrições visuais.
+ */
+function applyPaywallState(isActive) {
+  // Botões de ação bloqueados quando sem subscrição
+  const blockedButtons = [
+    "#dash-btn-fill-cards",
+    "#dash-btn-open-training",
+    "#btn-sync-emails-messages",
+    "#btn-toggle-auto-reply-messages",
+    "#btn-send-owner-reply",
+    "#add-variant"
+  ];
+
+  blockedButtons.forEach(sel => {
+    const el = $(sel);
+    if (!el) return;
+    if (isActive) {
+      el.removeAttribute("data-paywall-locked");
+      el.title = "";
+    } else {
+      el.setAttribute("data-paywall-locked", "1");
+      el.title = "Requer Plano Business ativo (59€/mês)";
+    }
+  });
+
+  // Aplica indicador visual nas sub-abas de Negócio e Configurações bloqueadas
+  const paywallTabs = [
+    { tab: "#subtab-btn-cards", icon: "🔒 " },
+    { tab: "#subtab-btn-training", icon: "🔒 " },
+  ];
+  paywallTabs.forEach(({ tab, icon }) => {
+    const el = $(tab);
+    if (!el) return;
+    const subtabText = el.querySelector(".subtab-icon");
+    if (isActive) {
+      el.removeAttribute("data-paywall-locked");
+    } else {
+      el.setAttribute("data-paywall-locked", "1");
+    }
+  });
+
+  // Bloqueia visualmente os painéis de instruções e respostas obrigatórias nas Configurações
+  ["#setting-instructions", "#setting-mandatory", "#setting-integration"].forEach(sel => {
+    const panel = $(sel);
+    if (!panel) return;
+    // Remove overlay existente primeiro
+    panel.querySelector(".paywall-page-overlay")?.remove();
+    if (!isActive) {
+      panel.style.position = "relative";
+      const overlay = document.createElement("div");
+      overlay.className = "paywall-page-overlay";
+      overlay.innerHTML = `
+        <div class="paywall-page-overlay-inner">
+          <span class="paywall-page-overlay-icon">🔒</span>
+          <div class="paywall-page-overlay-title">Plano Business Necessário</div>
+          <p class="paywall-page-overlay-desc">Ative a sua subscrição de 59€/mês para configurar e personalizar o seu agente IA Drexier.</p>
+          <button class="btn primary" onclick="openPaywallModal()">Ativar Subscrição</button>
+        </div>`;
+      panel.appendChild(overlay);
+    } else {
+      panel.style.position = "";
+    }
+  });
+}
+
 async function loadBillingStatus() {
   try {
     const [cfg, status] = await Promise.all([
@@ -2053,6 +2193,12 @@ async function loadBillingStatus() {
 
     billingConfig = cfg;
     currentSubscription = status;
+
+    // Atualiza o estado global de acesso SaaS (fonte única da verdade)
+    hasActiveSub = !!(status && status.has_active_subscription);
+
+    // Aplica visualmente o estado de paywall nas páginas
+    applyPaywallState(hasActiveSub);
 
     // 1. Alerta de configuração no .env
     const envWarning = $("#billing-env-warning");
@@ -2237,6 +2383,7 @@ async function loadMe() {
 
 $("#instructions-form").addEventListener("submit", async e => {
   e.preventDefault();
+  if (!paywallCheck()) return;
   try {
     const meNow = await api("/api/me");
     await api("/api/agent-settings", {
@@ -2253,6 +2400,7 @@ $("#instructions-form").addEventListener("submit", async e => {
 
 $("#mandatory-form").addEventListener("submit", async e => {
   e.preventDefault();
+  if (!paywallCheck()) return;
   try {
     const meNow = await api("/api/me");
     const mandatory = Object.fromEntries(["greeting", "unknown", "conversion", "closing"].map(k => [k, e.target.elements[k].value.trim()]));
@@ -2269,6 +2417,7 @@ $("#mandatory-form").addEventListener("submit", async e => {
 
 $("#account-form").addEventListener("submit", async e => {
   e.preventDefault();
+  if (!paywallCheck()) return;
   const d = Object.fromEntries(new FormData(e.target));
   delete d.email;
   try {
@@ -2399,6 +2548,7 @@ async function loadEmailStatus() {
 
 // Conectar via Google Gmail (OAuth 2.0 Oficial)
 $("#btn-connect-google")?.addEventListener("click", async () => {
+  if (!paywallCheck()) return;
   const statusEl = $("#email-connect-status");
   try {
     if (statusEl) statusEl.textContent = "A preparar ligação segura com a Google...";
@@ -2433,6 +2583,7 @@ $("#btn-email-disconnect")?.addEventListener("click", async () => {
 
 // Sincronização manual de e-mails
 async function handleEmailSync(triggerBtn) {
+  if (!paywallCheck()) return;
   if (triggerBtn) {
     triggerBtn.disabled = true;
     triggerBtn.textContent = "A sincronizar...";
@@ -2526,6 +2677,7 @@ function updateAutoReplyUI(enabled, connected = true) {
 }
 
 async function toggleAutoReply() {
+  if (!paywallCheck()) return;
   try {
     const statusData = await api("/api/email/status");
     if (!statusData.connected) {

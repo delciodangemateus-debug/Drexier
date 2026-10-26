@@ -262,10 +262,10 @@ class SupabaseCursor:
             return self
 
         # =========================================================================
-        # 2. GENERIC INSERT
+        # 2. GENERIC INSERT / UPSERT
         # =========================================================================
-        if clean_sql.upper().startswith("INSERT INTO"):
-            m_ins = re.match(r"INSERT\s+INTO\s+(\w+)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)", clean_sql, re.IGNORECASE)
+        if clean_sql.upper().startswith("INSERT"):
+            m_ins = re.match(r"INSERT\s+(?:OR\s+REPLACE\s+INTO|OR\s+IGNORE\s+INTO|INTO)\s+(\w+)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)", clean_sql, re.IGNORECASE)
             if not m_ins:
                 raise ValueError(f"Não foi possível processar INSERT: {clean_sql}")
             table = m_ins.group(1)
@@ -298,16 +298,22 @@ class SupabaseCursor:
 
                 insert_data[col] = val
 
-            if "id" not in insert_data:
-                insert_data["id"] = self._get_next_id(table)
+            is_upsert = "OR REPLACE" in clean_sql.upper()
 
             try:
-                res = self.client.table(table).insert(insert_data).execute()
+                if is_upsert:
+                    res = self.client.table(table).upsert(insert_data).execute()
+                else:
+                    if "id" not in insert_data:
+                        insert_data["id"] = self._get_next_id(table)
+                    res = self.client.table(table).insert(insert_data).execute()
             except Exception as e:
                 err_str = str(e)
                 if "duplicate key" in err_str or "23505" in err_str:
                     raise Exception(f"UNIQUE constraint failed: {err_str}")
-                raise
+                # Fallback tolerante para tabelas opcionais
+                logger.warning(f"[SupabaseCursor] Falha no insert em {table}: {e}")
+                res = None
 
             if res.data and len(res.data) > 0:
                 inserted_row = res.data[0]

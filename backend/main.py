@@ -11,7 +11,7 @@ from backend.auth import hash_password, verify_password, create_token, decode_to
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
 from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
-from backend.services.billing_service import is_subscription_active
+from backend.services.billing_service import is_subscription_active, get_user_subscription_status
 from backend.routers.whatsapp import router as whatsapp_router
 from backend.routers.email import router as email_router
 from backend.routers.billing import router as billing_router
@@ -109,6 +109,27 @@ def current_user(authorization: Optional[str] = Header(default=None)):
 def user_id(user=Depends(current_user)):
     return user["id"]
 
+
+def require_active_subscription(user=Depends(current_user)):
+    """
+    Dependência FastAPI de Paywall SaaS — Ponto Crítico de Segurança.
+    Bloqueia TODOS os endpoints de escrita / IA / integrações se o utilizador
+    não possuir uma assinatura Stripe ativa e com pagamento em dia.
+    Retorna HTTP 402 Payment Required para que o frontend redirecione para Faturação.
+    Login, signup, leitura de dados, billing e webhook permanecem sempre acessíveis.
+    """
+    if not is_subscription_active(user["id"]):
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "SUBSCRIPTION_REQUIRED",
+                "message": (
+                    "Acesso bloqueado. O Plano Business (59€/mês) é necessário para utilizar "
+                    "esta funcionalidade. Ative a sua subscrição na aba Faturação."
+                )
+            }
+        )
+
 class Signup(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: EmailStr
@@ -183,7 +204,7 @@ def me(user=Depends(current_user)):
     return user
 
 @app.put("/api/account")
-def update_account(data: ProfileUpdate, user=Depends(current_user)):
+def update_account(data: ProfileUpdate, user=Depends(current_user), _sub=Depends(require_active_subscription)):
     with connect() as c:
         c.execute("UPDATE users SET name=?,business_type=?,business_description=?,language=? WHERE id=?",
                   (data.name.strip(), data.business_type, data.business_description, data.language, user["id"]))
@@ -258,7 +279,7 @@ def get_business_info(user=Depends(current_user)):
     return [dict(x) | {"metadata":json.loads(x["metadata"] or "{}")} for x in rows]
 
 @app.post("/api/business-info")
-def create_business_info(data:BusinessInfoIn,user=Depends(current_user)):
+def create_business_info(data:BusinessInfoIn,user=Depends(current_user),_sub=Depends(require_active_subscription)):
     with connect() as c:
         cur=c.execute("INSERT INTO business_info(user_id,kind,title,content,metadata) VALUES(?,?,?,?,?)",
           (user["id"],data.kind,data.title.strip(),data.content.strip(),json.dumps(data.metadata,ensure_ascii=False)))
@@ -266,7 +287,7 @@ def create_business_info(data:BusinessInfoIn,user=Depends(current_user)):
     return dict(item) | {"metadata":json.loads(item["metadata"] or "{}")}
 
 @app.put("/api/business-info/{item_id}")
-def update_business_info(item_id:int,data:BusinessInfoIn,user=Depends(current_user)):
+def update_business_info(item_id:int,data:BusinessInfoIn,user=Depends(current_user),_sub=Depends(require_active_subscription)):
     with connect() as c:
         cur=c.execute("UPDATE business_info SET kind=?,title=?,content=?,metadata=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?",
           (data.kind,data.title.strip(),data.content.strip(),json.dumps(data.metadata,ensure_ascii=False),item_id,user["id"]))
@@ -275,14 +296,14 @@ def update_business_info(item_id:int,data:BusinessInfoIn,user=Depends(current_us
     return dict(item) | {"metadata":json.loads(item["metadata"] or "{}")}
 
 @app.delete("/api/business-info/{item_id}")
-def delete_business_info(item_id:int,user=Depends(current_user)):
+def delete_business_info(item_id:int,user=Depends(current_user),_sub=Depends(require_active_subscription)):
     with connect() as c:
         cur=c.execute("DELETE FROM business_info WHERE id=? AND user_id=?",(item_id,user["id"]))
     if not cur.rowcount: raise HTTPException(404,"Informação não encontrada.")
     return {"ok":True}
 
 @app.post("/api/business-info/upload-document")
-async def upload_training_document(file: UploadFile = File(...), user=Depends(current_user)):
+async def upload_training_document(file: UploadFile = File(...), user=Depends(current_user), _sub=Depends(require_active_subscription)):
     """
     Extrai o texto integral de arquivos enviados pelo utilizador (PDF, Word DOCX, TXT, MD, CSV)
     para alimentar a base massiva de treinamento profundo da IA Drexier.
@@ -356,14 +377,14 @@ async def upload_training_document(file: UploadFile = File(...), user=Depends(cu
     }
 
 @app.put("/api/agent-settings")
-def update_agent_settings(data:AgentSettings,user=Depends(current_user)):
+def update_agent_settings(data:AgentSettings,user=Depends(current_user),_sub=Depends(require_active_subscription)):
     with connect() as c:
         c.execute("UPDATE users SET agent_instructions=?,mandatory_responses=? WHERE id=?",
           (data.instructions,json.dumps(data.mandatory_responses,ensure_ascii=False),user["id"]))
     return {"ok":True}
 
 @app.post("/api/simulate/incoming")
-async def incoming(data:IncomingMessage,user=Depends(current_user)):
+async def incoming(data:IncomingMessage,user=Depends(current_user),_sub=Depends(require_active_subscription)):
     """Endpoint de entrada preparado para integração futura. Só recebe mensagens se autenticado nesta versão."""
     with connect() as c:
         contact=c.execute("SELECT id FROM contacts WHERE user_id=? AND contact_key=?",(user["id"],data.contact_key)).fetchone()
@@ -406,7 +427,7 @@ async def incoming(data:IncomingMessage,user=Depends(current_user)):
     return {"contact_id":cid,"reply":reply}
 
 @app.post("/api/contacts/{contact_id}/reply")
-async def owner_reply(contact_id: int, data: OwnerReplyIn, user=Depends(current_user)):
+async def owner_reply(contact_id: int, data: OwnerReplyIn, user=Depends(current_user), _sub=Depends(require_active_subscription)):
     try:
         res = await send_owner_reply(user["id"], contact_id, data.message)
         return res
@@ -450,7 +471,7 @@ def resolve_conversion(request_id:int,user=Depends(current_user)):
     return {"ok":True}
 
 @app.post("/api/variants")
-def create_variant(data:dict,user=Depends(current_user)):
+def create_variant(data:dict,user=Depends(current_user),_sub=Depends(require_active_subscription)):
     label=str(data.get("label","")).strip()
     response_text=str(data.get("response_text","")).strip()
     if not label or not response_text: raise HTTPException(400,"Preencha o nome do teste e o texto da resposta.")

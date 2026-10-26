@@ -8,7 +8,7 @@ import os
 import time
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 import stripe
@@ -189,7 +189,7 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
                 else:
                     end_dt = datetime.fromisoformat(str(period_end).replace("Z", "+00:00"))
                 # Dá tolerância de 24h para renovação automática via webhook
-                has_active_access = datetime.now(timezone.utc) <= (end_dt + datetime.timedelta(days=1))
+                has_active_access = datetime.now(timezone.utc) <= (end_dt + timedelta(days=1))
             except Exception:
                 has_active_access = True
         else:

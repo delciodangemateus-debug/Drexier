@@ -636,6 +636,34 @@
   </main>
 </div>
 <div id="confirm-modal" class="modal hidden"><div class="modal-card"><h2>Confirmar saída?</h2><p>Tem a certeza de que deseja sair da sua conta?</p><div class="actions"><button class="btn outline" id="cancel-logout">Cancelar</button><button class="btn primary" id="confirm-logout">Sair</button></div></div></div>
+
+<!-- Modal de Paywall SaaS — Ponto Crítico de Acesso -->
+<div id="paywall-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+  <div class="modal-card paywall-modal-card">
+    <div class="paywall-modal-icon">🔒</div>
+    <h2 class="paywall-modal-title">Funcionalidade Bloqueada</h2>
+    <p class="paywall-modal-desc">
+      Esta funcionalidade está disponível exclusivamente para assinantes do <strong>Plano Business</strong>.<br>
+      Ative a sua subscrição para desbloquear o acesso total ao Drexier AI.
+    </p>
+    <div class="paywall-modal-plan">
+      <div class="paywall-plan-price">59€<span>/mês</span></div>
+      <ul class="paywall-plan-features">
+        <li>✓ Atendimento IA 24/7 por e-mail</li>
+        <li>✓ Treinamento ilimitado com documentos</li>
+        <li>✓ Base de conhecimento completa do negócio</li>
+        <li>✓ Instruções e regras personalizadas à IA</li>
+        <li>✓ Integração Gmail & respostas automáticas</li>
+        <li>✓ Dashboard completo de conversões</li>
+      </ul>
+    </div>
+    <div class="paywall-modal-actions">
+      <button class="btn primary btn-large" id="paywall-btn-subscribe">💳 Ativar Plano Business (59€/mês)</button>
+      <button class="btn outline" id="paywall-btn-close">Fechar</button>
+    </div>
+    <p class="paywall-modal-fine">Sem fidelização · Cancele a qualquer momento · Pagamento seguro via Stripe</p>
+  </div>
+</div>
 <div id="card-expand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" tabindex="-1">
   <div class="expanded-card-shell" id="expanded-card-content"></div>
 </div>
