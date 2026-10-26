@@ -17,6 +17,7 @@ from backend.services.billing_service import (
     create_portal_session,
     handle_stripe_webhook,
     is_stripe_configured,
+    verify_checkout_session,
 )
 
 logger = logging.getLogger("drexier.billing_router")
@@ -50,6 +51,17 @@ def get_billing_config():
 def get_subscription_status(user=Depends(get_current_user)):
     """Retorna o estado detalhado da assinatura e acesso do utilizador autenticado."""
     return get_user_subscription_status(user["id"])
+
+
+@router.get("/verify-session")
+def verify_session(session_id: str, user=Depends(get_current_user)):
+    """
+    Verifica e ativa imediatamente a sessão de Checkout recém-paga pelo cliente na Stripe,
+    garantindo desbloqueio instantâneo sem depender de atrasos de webhook.
+    """
+    if not session_id:
+        raise HTTPException(400, "session_id obrigatório.")
+    return verify_checkout_session(session_id=session_id.strip(), user_id=user["id"])
 
 
 class CheckoutRequestPayload(BaseModel):

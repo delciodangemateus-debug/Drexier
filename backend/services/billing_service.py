@@ -173,6 +173,8 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
     """
     Retorna o estado detalhado da assinatura do utilizador.
     Verifica se o acesso está liberado, status de pagamento e período de vigência.
+    Se o status local estiver inativo mas a Stripe estiver configurada,
+    faz auto-reconciliação direta com a Stripe para desbloquear o acesso na hora.
     """
     sub_data = _get_stored_subscription(user_id) or {}
     status = sub_data.get("status", "none")
@@ -194,6 +196,52 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
                 has_active_access = True
         else:
             has_active_access = True
+
+    # AUTO-RECONCILIAÇÃO INFALÍVEL COM A STRIPE:
+    # Se o banco local indicar inativo mas a Stripe estiver configurada,
+    # consulta a API da Stripe diretamente para evitar falso-bloqueio se o webhook atrasar
+    if not has_active_access and is_stripe_configured():
+        try:
+            stripe.api_key = get_stripe_secret_key()
+            customer_id = sub_data.get("stripe_customer_id")
+            user_email = None
+
+            with connect() as c:
+                u_row = c.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+                if u_row:
+                    user_email = u_row["email"]
+
+            # Se não temos customer_id salvo, busca na Stripe pelo email do usuário
+            if not customer_id and user_email:
+                cust_res = stripe.Customer.list(email=user_email, limit=1)
+                if cust_res and len(cust_res.data) > 0:
+                    customer_id = cust_res.data[0].id
+                    sub_data["stripe_customer_id"] = customer_id
+
+            if customer_id:
+                subs_list = stripe.Subscription.list(customer=customer_id, status="all", limit=3)
+                for s in subs_list.data:
+                    if s.status in ("active", "trialing"):
+                        period_end_dt = datetime.fromtimestamp(s.current_period_end, tz=timezone.utc).isoformat()
+                        price_id = s.items.data[0].price.id if s.items and s.items.data else get_stripe_price_id()
+                        sub_data.update({
+                            "stripe_customer_id": customer_id,
+                            "stripe_subscription_id": s.id,
+                            "stripe_price_id": price_id,
+                            "plan_name": PLAN_NAME,
+                            "amount": PLAN_AMOUNT_CENTS,
+                            "currency": PLAN_CURRENCY,
+                            "status": s.status,
+                            "current_period_end": period_end_dt,
+                            "cancel_at_period_end": s.cancel_at_period_end
+                        })
+                        _save_stored_subscription(user_id, sub_data)
+                        status = s.status
+                        has_active_access = True
+                        logger.info(f"[Auto-Reconciliação Stripe] Assinatura {s.id} ativa confirmada e salva para user {user_id}!")
+                        break
+        except Exception as ex:
+            logger.debug(f"[Auto-Reconciliação Stripe] Verificação ignorada: {ex}")
 
     return {
         "configured": is_stripe_configured(),
@@ -217,6 +265,67 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
         "current_period_end": sub_data.get("current_period_end"),
         "cancel_at_period_end": bool(sub_data.get("cancel_at_period_end", False)),
     }
+
+
+def verify_checkout_session(session_id: str, user_id: int) -> Dict[str, Any]:
+    """
+    Verifica e ativa imediatamente uma sessão de Checkout recém-concluída na Stripe.
+    Elimina qualquer latência de webhook e desbloqueia o utilizador instantaneamente.
+    """
+    if not is_stripe_configured():
+        return get_user_subscription_status(user_id)
+
+    stripe.api_key = get_stripe_secret_key()
+    try:
+        session = stripe.checkout.Session.retrieve(session_id, expand=["subscription", "customer"])
+        customer = session.get("customer")
+        customer_id = customer.id if isinstance(customer, stripe.Customer) else customer
+        sub = session.get("subscription")
+        sub_id = sub.id if isinstance(sub, stripe.Subscription) else sub
+
+        payment_status = session.get("payment_status")
+        session_status = session.get("status")
+
+        if payment_status in ("paid", "no_payment_required") or session_status == "complete":
+            status = "active"
+            period_end_dt = ""
+            cancel_at = False
+            price_id = get_stripe_price_id()
+
+            if isinstance(sub, stripe.Subscription):
+                status = sub.status
+                period_end_dt = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc).isoformat()
+                cancel_at = sub.cancel_at_period_end
+                if sub.items and sub.items.data:
+                    price_id = sub.items.data[0].price.id
+            elif sub_id:
+                try:
+                    s_obj = stripe.Subscription.retrieve(sub_id)
+                    status = s_obj.status
+                    period_end_dt = datetime.fromtimestamp(s_obj.current_period_end, tz=timezone.utc).isoformat()
+                    cancel_at = s_obj.cancel_at_period_end
+                    if s_obj.items and s_obj.items.data:
+                        price_id = s_obj.items.data[0].price.id
+                except Exception:
+                    pass
+
+            record = {
+                "stripe_customer_id": str(customer_id or ""),
+                "stripe_subscription_id": str(sub_id or ""),
+                "stripe_price_id": str(price_id or ""),
+                "plan_name": PLAN_NAME,
+                "amount": PLAN_AMOUNT_CENTS,
+                "currency": PLAN_CURRENCY,
+                "status": status,
+                "current_period_end": period_end_dt,
+                "cancel_at_period_end": cancel_at
+            }
+            _save_stored_subscription(user_id, record)
+            logger.info(f"[Stripe Checkout] Sessão {session_id} verificada com sucesso! User {user_id} ativo.")
+    except Exception as ex:
+        logger.error(f"[Stripe Checkout] Falha ao verificar sessão {session_id}: {ex}")
+
+    return get_user_subscription_status(user_id)
 
 
 def is_subscription_active(user_id: int) -> bool:
@@ -258,6 +367,8 @@ async def create_checkout_session(user_id: int, user_email: str, user_name: str,
                     metadata={"user_id": str(user_id), "app": "Drexier AI"}
                 )
                 customer_id = new_customer.id
+            sub_data["stripe_customer_id"] = customer_id
+            _save_stored_subscription(user_id, sub_data)
         except Exception as e:
             logger.error(f"Erro ao obter/criar Customer na Stripe: {e}")
             raise RuntimeError(f"Falha ao registar cliente na Stripe: {str(e)}")

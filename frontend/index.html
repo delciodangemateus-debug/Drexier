@@ -567,10 +567,15 @@
                 <strong>Subscreva com 1 Clique e Ative a sua Conta Imediatamente</strong>
                 <span>Ao aderir, o valor de 59€ é cobrado no seu cartão através do checkout seguro da Stripe e todas as funcionalidades do software ficam liberadas.</span>
               </div>
-              <button type="button" class="btn primary btn-large billing-cta-btn" id="btn-subscribe-plan">
-                <span>Subscrever Plano Business (59€/mês)</span>
-                <span class="btn-arrow">➔</span>
-              </button>
+              <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <button type="button" class="btn primary btn-large billing-cta-btn" id="btn-subscribe-plan">
+                  <span>Subscrever Plano Business (59€/mês)</span>
+                  <span class="btn-arrow">➔</span>
+                </button>
+                <button type="button" class="btn outline small" id="btn-sync-billing-status" title="Já pagou? Clique aqui para verificar com a Stripe imediatamente">
+                  🔄 Já paguei / Atualizar Status
+                </button>
+              </div>
             </div>
 
             <!-- Caso B: Assinatura Ativa e em Dia -->

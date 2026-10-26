@@ -386,8 +386,24 @@ async function boot() {
     // Deteta se o utilizador acabou de autorizar na Google via OAuth ou pagou na Stripe
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("billing") === "success") {
-      showNotice("🎉 Pagamento efetuado com sucesso! O seu Plano Business (59€/mês) está ativo e o acesso total está desbloqueado.");
+      const sessionId = urlParams.get("session_id");
       window.history.replaceState({}, document.title, window.location.pathname);
+
+      // Ativa a subscrição imediatamente via verify-session (elimina a dependência do webhook)
+      if (sessionId) {
+        try {
+          const verified = await api(`/api/billing/verify-session?session_id=${encodeURIComponent(sessionId)}`);
+          if (verified && verified.has_active_subscription) {
+            hasActiveSub = true;
+            applyPaywallState(true);
+          }
+        } catch (e) {
+          // Fallback: loadBillingStatus fará auto-reconciliação com a Stripe
+          console.warn("verify-session falhou, a recorrer a loadBillingStatus:", e);
+        }
+      }
+
+      showNotice("🎉 Pagamento efetuado com sucesso! O seu Plano Business (59€/mês) está ativo e o acesso total está desbloqueado.");
       await navigate("settings");
       $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
       $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
@@ -2353,6 +2369,28 @@ async function openStripePortal() {
 $("#btn-subscribe-plan")?.addEventListener("click", startStripeCheckout);
 $("#btn-manage-subscription")?.addEventListener("click", openStripePortal);
 $("#btn-fix-payment")?.addEventListener("click", openStripePortal);
+
+// Botão "Já paguei / Atualizar Status" — força reconciliação com a Stripe
+$("#btn-sync-billing-status")?.addEventListener("click", async () => {
+  const btn = $("#btn-sync-billing-status");
+  const originalText = btn?.innerHTML;
+  if (btn) { btn.disabled = true; btn.textContent = "A verificar com Stripe…"; }
+  try {
+    const status = await api("/api/billing/status");
+    hasActiveSub = !!(status && status.has_active_subscription);
+    applyPaywallState(hasActiveSub);
+    if (hasActiveSub) {
+      showNotice("✅ Subscrição ativa confirmada! Todas as funcionalidades estão desbloqueadas.");
+    } else {
+      showNotice("Não encontrámos uma subscrição ativa. Se acabou de pagar, aguarde 30 segundos e tente novamente.", true);
+    }
+    await loadBillingStatus();
+  } catch (err) {
+    showNotice(err.message || "Erro ao verificar subscrição.", true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
+  }
+});
 
 // Botão de atalho do Dashboard para a aba Faturação
 $("#btn-goto-billing")?.addEventListener("click", async () => {
