@@ -11,8 +11,10 @@ from backend.auth import hash_password, verify_password, create_token, decode_to
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
 from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
+from backend.services.billing_service import is_subscription_active
 from backend.routers.whatsapp import router as whatsapp_router
 from backend.routers.email import router as email_router
+from backend.routers.billing import router as billing_router
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -36,6 +38,10 @@ async def background_email_worker():
             
             for row in active_users:
                 uid = row["user_id"]
+                # Validação SaaS: processa automações apenas se o pagamento estiver em dia
+                if not is_subscription_active(uid):
+                    logger.debug(f"[SaaS Paywall] Automação suspensa para user {uid}: assinatura inativa ou pendente.")
+                    continue
                 try:
                     processed = await sync_emails_for_user(uid)
                     if processed:
@@ -61,7 +67,8 @@ async def lifespan(app: FastAPI):
             pass
 
 app = FastAPI(title="Drexier API", version="0.1.0", lifespan=lifespan)
-# Roteadores de canais de atendimento (Email ativo como canal principal; WhatsApp mantido como legado)
+# Roteadores do sistema (Faturação Stripe, Canal Email Google ativo, WhatsApp legado)
+app.include_router(billing_router)
 app.include_router(email_router)
 app.include_router(whatsapp_router)
 

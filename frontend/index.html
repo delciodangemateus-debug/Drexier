@@ -41,6 +41,20 @@
     <header class="topbar"><button id="mobile-menu" class="btn outline small">Menu</button><div><h1 id="page-title">Dashboard</h1><p id="page-subtitle" class="muted">Visão geral do atendimento</p></div><div class="top-user" id="top-user"></div></header>
     <div id="notice" class="notice hidden" role="status"></div>
     <section id="page-dashboard" class="page">
+      <!-- Alerta de Subscrição SaaS no Dashboard (se plano inativo) -->
+      <div id="billing-paywall-banner" class="billing-paywall-alert hidden">
+        <div class="billing-paywall-left">
+          <span class="billing-paywall-icon">💳</span>
+          <div>
+            <strong id="billing-paywall-title">Ative o Plano Business (59€/mês) para desbloquear a sua IA Drexier</strong>
+            <span id="billing-paywall-desc" class="billing-paywall-sub">
+              Acesso total às respostas automáticas 24/7 por e-mail e treinamento ilimitado da IA.
+            </span>
+          </div>
+        </div>
+        <button type="button" class="btn small primary" id="btn-goto-billing">Ativar Subscrição ➔</button>
+      </div>
+
       <!-- Banner de Indução e Precisão da IA Baseado no Volume de Conhecimento -->
       <div class="knowledge-hero-banner" id="dashboard-knowledge-banner">
         <div class="knowledge-hero-content">
@@ -306,7 +320,13 @@
       </div>
     </section>
     <section id="page-settings" class="page hidden">
-      <div class="settings-tabs"><button class="settings-tab active" data-setting="integration">Integração</button><button class="settings-tab" data-setting="instructions">Instruções ao agente</button><button class="settings-tab" data-setting="mandatory">Respostas obrigatórias</button><button class="settings-tab" data-setting="account">Conta</button></div>
+      <div class="settings-tabs">
+        <button class="settings-tab active" data-setting="integration">Integração</button>
+        <button class="settings-tab" data-setting="billing">Faturação 💳</button>
+        <button class="settings-tab" data-setting="instructions">Instruções ao agente</button>
+        <button class="settings-tab" data-setting="mandatory">Respostas obrigatórias</button>
+        <button class="settings-tab" data-setting="account">Conta</button>
+      </div>
       <div id="setting-integration" class="panel setting-panel">
         <!-- Canal de Atendimento Ativo -->
         <div class="channel-selector-bar">
@@ -448,6 +468,166 @@
         </div>
 
       </div>
+
+      <!-- ==================== ABA: FATURAÇÃO E STRIPE (PLANO BUSINESS 59€/MÊS) ==================== -->
+      <div id="setting-billing" class="panel setting-panel hidden">
+        <div class="panel-heading">
+          <div>
+            <h2>Faturação e Plano de Subscrição SaaS</h2>
+            <p class="muted">Gestão da subscrição mensal, emissão de faturas com NIF e controlo seguro de pagamentos via Stripe.</p>
+          </div>
+          <div id="billing-status-badge" class="badge badge-disconnected">A verificar...</div>
+        </div>
+
+        <!-- Alerta caso as chaves da Stripe estejam pendentes no .env -->
+        <div id="billing-env-warning" class="wa-alert-box hidden">
+          <div class="wa-alert-icon">💳</div>
+          <div class="wa-alert-content">
+            <strong>Configuração da Stripe Pendente no ficheiro .env</strong>
+            <p>Para ativar cobranças reais com cartão, 3D Secure e faturação automática, preencha no seu ficheiro <code>.env</code>:</p>
+            <ul style="margin: 6px 0 0 18px; font-size: 13px; line-height: 1.5;">
+              <li><code>STRIPE_SECRET_KEY</code> (chave secreta iniciada por <code>sk_test_...</code> ou <code>sk_live_...</code>)</li>
+              <li><code>STRIPE_PUBLISHABLE_KEY</code> (chave pública iniciada por <code>pk_test_...</code> ou <code>pk_live_...</code>)</li>
+              <li><code>STRIPE_WEBHOOK_SECRET</code> (assinatura do webhook iniciada por <code>whsec_...</code>)</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- CARD PRINCIPAL SUPER DESTACADO: PLANO BUSINESS (59€/MÊS) -->
+        <div class="billing-featured-card">
+          <div class="billing-badge-flag">⭐ PLANO OFICIAL · ACESSO COMPLETO SAAS</div>
+          
+          <div class="billing-card-header">
+            <div class="billing-card-title-group">
+              <h3 class="billing-plan-name">Plano Business</h3>
+              <p class="billing-plan-tagline">A ferramenta definitiva para transformar os e-mails e contactos da sua empresa em vendas e clientes satisfeitos com IA.</p>
+            </div>
+            <div class="billing-card-price-group">
+              <div class="billing-price-box">
+                <span class="billing-currency">€</span>
+                <span class="billing-amount">59</span>
+                <span class="billing-cents">,00</span>
+                <span class="billing-period">/ mês</span>
+              </div>
+              <span class="billing-tax-note">Cobrança mensal no cartão · Cancele quando quiser</span>
+            </div>
+          </div>
+
+          <!-- Benefícios Detalhados -->
+          <div class="billing-features-grid">
+            <div class="billing-feature-item">
+              <span class="feature-icon">🤖</span>
+              <div>
+                <strong>Atendimento Inteligente 24/7</strong>
+                <small>A IA Drexier responde instantaneamente aos seus clientes com o tom e regras da sua empresa.</small>
+              </div>
+            </div>
+            <div class="billing-feature-item">
+              <span class="feature-icon">📧</span>
+              <div>
+                <strong>Canal E-mail Oficial (Google Gmail)</strong>
+                <small>Conexão oficial direta com a caixa de entrada para monitorização e respostas reais contínuas.</small>
+              </div>
+            </div>
+            <div class="billing-feature-item">
+              <span class="feature-icon">📚</span>
+              <div>
+                <strong>Treinamento Profundo com Ficheiros</strong>
+                <small>Carregue catálogos, regulamentos internos e preçários (PDF, Word DOCX, TXT) sem limites.</small>
+              </div>
+            </div>
+            <div class="billing-feature-item">
+              <span class="feature-icon">🎯</span>
+              <div>
+                <strong>Validação de Pedidos & Marcações</strong>
+                <small>A IA identifica intenções de compra/reserva e permite confirmação rápida pelo proprietário.</small>
+              </div>
+            </div>
+            <div class="billing-feature-item">
+              <span class="feature-icon">📈</span>
+              <div>
+                <strong>Dashboard e Métricas em Tempo Real</strong>
+                <small>Visão clara de contactos diários, mensagens respondidas e taxas de conversão de clientes.</small>
+              </div>
+            </div>
+            <div class="billing-feature-item">
+              <span class="feature-icon">🛡️</span>
+              <div>
+                <strong>Pagamento Seguro & Proteção Antifraude</strong>
+                <small>Stripe com 3D Secure / SCA obrigatório, validação de morada (AVS) e criptografia bancária.</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- Área de Ação e Status -->
+          <div class="billing-action-box">
+            <!-- Caso A: Sem Assinatura Ativa -->
+            <div id="billing-action-unsubscribed">
+              <div class="billing-cta-details">
+                <strong>Subscreva com 1 Clique e Ative a sua Conta Imediatamente</strong>
+                <span>Ao aderir, o valor de 59€ é cobrado no seu cartão através do checkout seguro da Stripe e todas as funcionalidades do software ficam liberadas.</span>
+              </div>
+              <button type="button" class="btn primary btn-large billing-cta-btn" id="btn-subscribe-plan">
+                <span>Subscrever Plano Business (59€/mês)</span>
+                <span class="btn-arrow">➔</span>
+              </button>
+            </div>
+
+            <!-- Caso B: Assinatura Ativa e em Dia -->
+            <div id="billing-action-active" class="hidden">
+              <div class="billing-active-banner">
+                <div class="billing-active-check">✓</div>
+                <div>
+                  <strong style="color: #065f46; font-size: 15px;">A sua subscrição está ativa e regularizada!</strong>
+                  <span style="font-size: 13px; color: #047857; display: block; margin-top: 2px;" id="billing-active-details">
+                    Próxima renovação automática: <strong id="billing-renewal-date">-</strong>
+                  </span>
+                </div>
+              </div>
+              <button type="button" class="btn outline billing-portal-btn" id="btn-manage-subscription">
+                <span>⚙️ Gerir Cartão e Descarregar Faturas na Stripe</span>
+              </button>
+            </div>
+
+            <!-- Caso C: Pagamento Recusado / Em Atraso -->
+            <div id="billing-action-past-due" class="hidden">
+              <div class="billing-warning-banner">
+                <div class="billing-warning-icon">⚠️</div>
+                <div>
+                  <strong style="color: #991b1b; font-size: 15px;">Falha no Pagamento do Cartão</strong>
+                  <span style="font-size: 13px; color: #b91c1c; display: block; margin-top: 2px;">
+                    O último pagamento mensal foi recusado pela sua entidade bancária. Atualize os dados do seu cartão na Stripe para manter o atendimento ativo.
+                  </span>
+                </div>
+              </div>
+              <button type="button" class="btn primary billing-fix-btn" id="btn-fix-payment">
+                <span>Atualizar Cartão de Pagamento na Stripe ➔</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rodapé de Garantias de Segurança Stripe -->
+        <div class="billing-security-footer">
+          <div class="security-badge-item">
+            <span>🔒</span>
+            <span>Criptografia Bancária SSL 256-bit</span>
+          </div>
+          <div class="security-badge-item">
+            <span>🛡️</span>
+            <span>3D Secure / SCA Antifraude Obrigatório</span>
+          </div>
+          <div class="security-badge-item">
+            <span>💳</span>
+            <span>Conformidade PCI-DSS Nível 1 Oficial</span>
+          </div>
+          <div class="security-badge-item">
+            <span>⚡</span>
+            <span>Sem Fidelização · Cancelamento a Qualquer Momento</span>
+          </div>
+        </div>
+      </div>
+
       <div id="setting-instructions" class="panel setting-panel hidden"><h2>Instruções ao agente</h2><p class="muted">Defina o tom, o estilo e as regras gerais de atendimento.</p><form id="instructions-form" class="form"><label>Instruções personalizadas<textarea name="instructions" rows="8" placeholder="Escreva as instruções para o agente."></textarea></label><button class="btn primary" type="submit">Guardar instruções</button></form></div>
       <div id="setting-mandatory" class="panel setting-panel hidden"><h2>Respostas obrigatórias</h2><p class="muted">Defina mensagens que devem ser usadas em etapas específicas. Deixe em branco as que não quiser configurar.</p><form id="mandatory-form" class="form"><label>Primeira resposta<textarea name="greeting" rows="2"></textarea></label><label>Quando não souber a resposta<textarea name="unknown" rows="2"></textarea></label><label>Quando o cliente demonstrar intenção de compra/marcação<textarea name="conversion" rows="2"></textarea></label><label>Encerramento<textarea name="closing" rows="2"></textarea></label><button class="btn primary" type="submit">Guardar respostas</button></form></div>
       <div id="setting-account" class="panel setting-panel hidden"><h2>Conta</h2><form id="account-form" class="form"><label>Nome de usuário<input name="name" required></label><label>Email cadastrado<input name="email" disabled></label><label>Tipo de negócio<select name="business_type"><option>Serviços</option><option>Vendas</option><option>Serviços e vendas</option><option>Outro</option></select></label><label>Descrição do negócio<textarea name="business_description" rows="3"></textarea></label><label>Língua do agente<select name="language"><option>Português</option><option>English</option><option>Español</option><option>Deutsch</option><option>Français</option></select></label><button class="btn primary" type="submit">Guardar conta</button></form><hr><button class="btn outline" id="logout-account">Sair da conta</button></div>

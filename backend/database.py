@@ -140,6 +140,22 @@ CREATE TABLE IF NOT EXISTS email_threads (
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE,
+  stripe_customer_id TEXT NOT NULL DEFAULT '',
+  stripe_subscription_id TEXT NOT NULL DEFAULT '',
+  stripe_price_id TEXT NOT NULL DEFAULT '',
+  plan_name TEXT NOT NULL DEFAULT 'Plano Business',
+  amount INTEGER NOT NULL DEFAULT 5900,
+  currency TEXT NOT NULL DEFAULT 'eur',
+  status TEXT NOT NULL DEFAULT 'inactive',
+  current_period_end TEXT DEFAULT '',
+  cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 """
 
 

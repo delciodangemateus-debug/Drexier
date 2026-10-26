@@ -330,9 +330,25 @@ async function boot() {
     localStorage.removeItem("drexier_wa_redirect_uri");
     localStorage.removeItem("drexier_wa_oauth_error");
 
-    // Deteta se o utilizador acabou de autorizar na Google via OAuth
+    // Deteta se o utilizador acabou de autorizar na Google via OAuth ou pagou na Stripe
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("email_auth") === "success") {
+    if (urlParams.get("billing") === "success") {
+      showNotice("🎉 Pagamento efetuado com sucesso! O seu Plano Business (59€/mês) está ativo e o acesso total está desbloqueado.");
+      window.history.replaceState({}, document.title, window.location.pathname);
+      await navigate("settings");
+      $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+      $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+      await loadBillingStatus();
+      return;
+    } else if (urlParams.get("billing") === "cancel") {
+      showNotice("O processo de subscrição foi interrompido. Pode aderir ao Plano Business a qualquer momento na aba Faturação.");
+      window.history.replaceState({}, document.title, window.location.pathname);
+      await navigate("settings");
+      $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+      $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+      await loadBillingStatus();
+      return;
+    } else if (urlParams.get("email_auth") === "success") {
       showNotice("Conta de e-mail oficial (Google Gmail) conectada com sucesso! A IA já está pronta para responder aos clientes.");
       window.history.replaceState({}, document.title, window.location.pathname);
       await navigate("settings");
@@ -393,7 +409,10 @@ async function navigate(page) {
   $("#page-subtitle").textContent = pageMeta[page][1];
   $(".sidebar").classList.remove("open");
   try {
-    if (page === "dashboard") await loadDashboard();
+    if (page === "dashboard") {
+      await loadDashboard();
+      await loadBillingStatus();
+    }
     if (page === "messages") {
       if (!selectedContact) {
         $("#messages-chat-view")?.classList.add("hidden");
@@ -407,6 +426,7 @@ async function navigate(page) {
     if (page === "settings") {
       await loadMe();
       await loadEmailStatus();
+      await loadBillingStatus();
     }
   } catch (e) {
     showNotice(e.message, true);
@@ -2013,7 +2033,188 @@ $$("[data-setting]").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.setting === "integration") {
     loadEmailStatus();
   }
+  if (b.dataset.setting === "billing") {
+    loadBillingStatus();
+  }
 }));
+
+/* ==============================================================================
+   FATURAÇÃO & STRIPE PAYMENTS (PLANO BUSINESS 59€/MÊS)
+   ============================================================================== */
+let billingConfig = null;
+let currentSubscription = null;
+
+async function loadBillingStatus() {
+  try {
+    const [cfg, status] = await Promise.all([
+      api("/api/billing/config").catch(() => null),
+      api("/api/billing/status").catch(() => null)
+    ]);
+
+    billingConfig = cfg;
+    currentSubscription = status;
+
+    // 1. Alerta de configuração no .env
+    const envWarning = $("#billing-env-warning");
+    if (envWarning) {
+      if (cfg && !cfg.configured) {
+        envWarning.classList.remove("hidden");
+      } else {
+        envWarning.classList.add("hidden");
+      }
+    }
+
+    if (!status) return;
+
+    // 2. Atualiza badge de status
+    const statusBadge = $("#billing-status-badge");
+    const paywallBanner = $("#billing-paywall-banner");
+    const actionUnsubscribed = $("#billing-action-unsubscribed");
+    const actionActive = $("#billing-action-active");
+    const actionPastDue = $("#billing-action-past-due");
+
+    if (status.has_active_subscription) {
+      // Estado Ativo (59€/mês)
+      if (statusBadge) {
+        statusBadge.textContent = "Plano Ativo (59€/mês)";
+        statusBadge.className = "badge badge-connected";
+      }
+      actionActive?.classList.remove("hidden");
+      actionUnsubscribed?.classList.add("hidden");
+      actionPastDue?.classList.add("hidden");
+
+      if (paywallBanner) paywallBanner.classList.add("hidden");
+
+      // Formata data de renovação
+      const renewalEl = $("#billing-renewal-date");
+      if (renewalEl && status.current_period_end) {
+        try {
+          const d = new Date(status.current_period_end);
+          renewalEl.textContent = d.toLocaleDateString("pt-PT", {
+            day: "2-digit",
+            month: "long",
+            year: "numeric"
+          });
+        } catch (_) {
+          renewalEl.textContent = status.current_period_end;
+        }
+      } else if (renewalEl) {
+        renewalEl.textContent = "Renovação mensal contínua";
+      }
+
+    } else if (status.status === "past_due") {
+      // Pagamento Recusado / Em Atraso
+      if (statusBadge) {
+        statusBadge.textContent = "Pagamento Recusado";
+        statusBadge.className = "badge badge-disconnected";
+        statusBadge.style.background = "#fee2e2";
+        statusBadge.style.color = "#991b1b";
+      }
+      actionPastDue?.classList.remove("hidden");
+      actionUnsubscribed?.classList.add("hidden");
+      actionActive?.classList.add("hidden");
+
+      if (paywallBanner) {
+        paywallBanner.classList.remove("hidden");
+        const titleEl = $("#billing-paywall-title");
+        const descEl = $("#billing-paywall-desc");
+        if (titleEl) titleEl.textContent = "⚠️ Pagamento Recusado no Cartão";
+        if (descEl) descEl.textContent = "Atualize os dados do seu cartão na Stripe para manter o atendimento com IA ativo.";
+      }
+
+    } else {
+      // Sem plano ativo / Não subscrito
+      if (statusBadge) {
+        statusBadge.textContent = "Sem Plano Ativo";
+        statusBadge.className = "badge badge-disconnected";
+      }
+      actionUnsubscribed?.classList.remove("hidden");
+      actionActive?.classList.add("hidden");
+      actionPastDue?.classList.add("hidden");
+
+      if (paywallBanner) {
+        paywallBanner.classList.remove("hidden");
+        const titleEl = $("#billing-paywall-title");
+        const descEl = $("#billing-paywall-desc");
+        if (titleEl) titleEl.textContent = "Ative o Plano Business (59€/mês) para desbloquear a sua IA Drexier";
+        if (descEl) descEl.textContent = "Acesso total às respostas automáticas 24/7 por e-mail e treinamento ilimitado da IA.";
+      }
+    }
+
+  } catch (err) {
+    logger.error("Erro ao carregar status de faturação:", err);
+  }
+}
+
+async function startStripeCheckout() {
+  const btn = $("#btn-subscribe-plan");
+  const originalText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>A preparar checkout seguro da Stripe...</span>`;
+  }
+
+  try {
+    const res = await api("/api/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ base_url: window.location.origin })
+    });
+
+    if (res && res.checkout_url) {
+      // Redireciona diretamente para a página segura de pagamento da Stripe
+      window.location.href = res.checkout_url;
+    } else {
+      throw new Error("Não foi possível gerar a página de pagamento da Stripe.");
+    }
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+    showNotice(err.message, true);
+  }
+}
+
+async function openStripePortal() {
+  const btn = $("#btn-manage-subscription") || $("#btn-fix-payment");
+  const originalText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span>A aceder ao portal seguro...</span>`;
+  }
+
+  try {
+    const res = await api("/api/billing/portal", {
+      method: "POST",
+      body: JSON.stringify({ base_url: window.location.origin })
+    });
+
+    if (res && res.portal_url) {
+      window.location.href = res.portal_url;
+    } else {
+      throw new Error("Não foi possível abrir o portal da Stripe.");
+    }
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+    showNotice(err.message, true);
+  }
+}
+
+// Botões de Ação de Faturação
+$("#btn-subscribe-plan")?.addEventListener("click", startStripeCheckout);
+$("#btn-manage-subscription")?.addEventListener("click", openStripePortal);
+$("#btn-fix-payment")?.addEventListener("click", openStripePortal);
+
+// Botão de atalho do Dashboard para a aba Faturação
+$("#btn-goto-billing")?.addEventListener("click", async () => {
+  await navigate("settings");
+  $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+  $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+  await loadBillingStatus();
+});
 
 function fillSettings() {
   if (!me) return;
