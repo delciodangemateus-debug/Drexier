@@ -460,5 +460,8 @@ def delete_variant(variant_id:int,user=Depends(current_user)):
 
 @app.get("/api/database/status")
 def database_status():
-    """Retorna o estado da configuração e conectividade do Supabase e SQLite."""
-    return get_supabase_status()
+    """Retorna o estado de conectividade do Supabase como banco de dados principal e único."""
+    status = get_supabase_status()
+    status["engine"] = "Supabase PostgreSQL (Cloud)"
+    status["local_db_eliminated"] = True
+    return status
