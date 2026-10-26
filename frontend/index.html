@@ -308,202 +308,24 @@
     <section id="page-settings" class="page hidden">
       <div class="settings-tabs"><button class="settings-tab active" data-setting="integration">Integração</button><button class="settings-tab" data-setting="instructions">Instruções ao agente</button><button class="settings-tab" data-setting="mandatory">Respostas obrigatórias</button><button class="settings-tab" data-setting="account">Conta</button></div>
       <div id="setting-integration" class="panel setting-panel">
-        <!-- Seletor de Canal de Integração -->
+        <!-- Canal de Atendimento Ativo -->
         <div class="channel-selector-bar">
-          <button type="button" class="channel-tab-btn active" id="tab-channel-whatsapp" data-channel="whatsapp">
-            <span class="channel-icon">💬</span>
-            <div class="channel-meta">
-              <strong>WhatsApp Oficial</strong>
-              <small>Meta Cloud API · 24/7</small>
-            </div>
-            <span class="channel-pill" id="pill-wa-status">Desconectado</span>
-          </button>
-          <button type="button" class="channel-tab-btn" id="tab-channel-email" data-channel="email">
+          <button type="button" class="channel-tab-btn active" id="tab-channel-email" data-channel="email">
             <span class="channel-icon">📧</span>
             <div class="channel-meta">
               <strong>E-mail Oficial</strong>
-              <small>Google Gmail & Outlook</small>
+              <small>Google Gmail · Atendimento IA 24/7</small>
             </div>
             <span class="channel-pill" id="pill-email-status">Desconectado</span>
           </button>
         </div>
 
-        <!-- ==================== CANAL 1: WHATSAPP CLOUD API ==================== -->
-        <div id="channel-whatsapp-section">
+        <!-- ==================== CANAL PRINCIPAL: E-MAIL GOOGLE GMAIL ==================== -->
+        <div id="channel-email-section">
           <div class="panel-heading">
             <div>
-              <h2>Integração WhatsApp Oficial (Meta Cloud API)</h2>
-              <p class="muted">Conecte a conta de WhatsApp Business da sua empresa para que a IA Drexier atenda clientes, esclareça dúvidas e registre agendamentos 24 horas por dia diretamente no WhatsApp.</p>
-            </div>
-            <div id="wa-status-badge" class="badge badge-disconnected">Desconectado</div>
-          </div>
-
-          <!-- Estado 0: Carregando -->
-          <div id="wa-loading-state" class="empty-state">
-            <p>A carregar estado da integração do WhatsApp...</p>
-          </div>
-
-          <!-- Estado 1: Alerta caso chaves estejam pendentes no .env -->
-          <div id="wa-env-warning" class="wa-alert-box hidden">
-            <div class="wa-alert-icon">⚠️</div>
-            <div class="wa-alert-content">
-              <strong>Configuração de Credenciais Meta Pendente no .env</strong>
-              <p>Para ativar o Embedded Signup oficial, configure <code>META_APP_ID</code> e <code>META_APP_SECRET</code> no seu arquivo <code>.env</code>.</p>
-            </div>
-          </div>
-
-          <!-- Estado 2: Desconectado -->
-          <div id="wa-disconnected-view" class="wa-view hidden">
-            <div class="wa-hero-card">
-              <div class="wa-hero-content">
-                <h3>Conecte o seu WhatsApp Business em poucos segundos</h3>
-                <p>Ao conectar a sua conta oficial da Meta, o Drexier recebe permissão para ler dúvidas recebidas no WhatsApp e responder com a inteligência artificial treinada no seu negócio.</p>
-                <div class="wa-steps-grid">
-                  <div class="wa-step-item">
-                    <span class="wa-step-num">1</span>
-                    <div>
-                      <strong>Conecte com a Meta</strong>
-                      <p class="muted">Autentique via Embedded Signup ou informe seu Phone Number ID.</p>
-                    </div>
-                  </div>
-                  <div class="wa-step-item">
-                    <span class="wa-step-num">2</span>
-                    <div>
-                      <strong>Selecione o Número</strong>
-                      <p class="muted">Escolha a linha comercial do WhatsApp Business da sua empresa.</p>
-                    </div>
-                  </div>
-                  <div class="wa-step-item">
-                    <span class="wa-step-num">3</span>
-                    <div>
-                      <strong>IA Drexier Ativa</strong>
-                      <p class="muted">Respostas imediatas, precisas e humanizadas enviadas aos clientes.</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="wa-action-bar">
-                  <button id="btn-wa-connect" class="btn btn-whatsapp" type="button" style="font-size: 15px; padding: 12px 22px;">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2m.01 1.67c2.2 0 4.26.86 5.82 2.42a8.225 8.225 0 0 1 2.41 5.83c0 4.54-3.7 8.24-8.24 8.24-1.48 0-2.93-.4-4.2-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.196 8.196 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.24-8.24m4.52 11.66c-.25-.13-1.47-.72-1.7-.81-.23-.08-.39-.13-.56.13-.17.25-.64.81-.79.97-.14.17-.29.19-.54.06-.25-.13-1.06-.39-2.03-1.25-.75-.67-1.26-1.5-1.41-1.75-.14-.25-.02-.39.11-.51.11-.11.25-.29.37-.44.13-.14.17-.25.25-.42.08-.17.04-.31-.02-.44-.06-.13-.56-1.34-.76-1.84-.2-.49-.4-.42-.56-.43h-.48c-.17 0-.44.06-.67.31-.23.25-.88.86-.88 2.1s.9 2.43 1.03 2.6c.13.17 1.77 2.7 4.29 3.79.6.26 1.07.41 1.44.53.6.19 1.15.16 1.58.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.07.15-1.18-.06-.1-.23-.17-.48-.3"/>
-                    </svg>
-                    <span>Conectar WhatsApp Oficial com Meta</span>
-                  </button>
-                  <button id="btn-toggle-manual-wa" class="btn outline small" type="button">Configuração Direta (ID do Telefone & Token)</button>
-                  <button id="btn-wa-connect-env" class="btn primary small hidden" type="button">⚡ Conectar com Chaves do .env</button>
-                </div>
-                <p id="wa-connect-status" class="muted" style="margin-top: 10px;"></p>
-              </div>
-            </div>
-
-            <!-- Formulário Manual de Conexão Direta -->
-            <div id="wa-manual-box" class="wa-manual-card hidden">
-              <h4>Ligação Direta por Credenciais da Meta Cloud API</h4>
-              <p class="muted">Utilize o Phone Number ID e o Access Token permanente ou temporário gerados no Meta for Developers.</p>
-              <form id="wa-manual-form" class="form">
-                <label>Phone Number ID (ID do Número de Telefone)*<input name="phone_number_id" required placeholder="Ex: 504584986064123"></label>
-                <label>Access Token (Token de Acesso Permanente ou do Sistema)*<input name="access_token" type="password" required placeholder="EAA..."></label>
-                <label>WABA ID (ID da Conta WhatsApp Business - Opcional)<input name="waba_id" placeholder="Ex: 102938475610293"></label>
-                <label>Nome Comercial / Loja (Opcional)<input name="business_name" placeholder="Ex: Minha Empresa WhatsApp"></label>
-                <div class="actions">
-                  <button class="btn primary" type="submit">Guardar e Ligar WhatsApp</button>
-                  <button class="btn outline" type="button" id="btn-cancel-manual-wa">Cancelar</button>
-                </div>
-              </form>
-            </div>
-          </div>
-
-          <!-- Estado 3: Conectado com Sucesso -->
-          <div id="wa-connected-view" class="wa-view hidden">
-            <div class="wa-connected-card">
-              <div class="wa-conn-header">
-                <div class="wa-conn-title-box">
-                  <span class="wa-status-dot-pulse"></span>
-                  <div>
-                    <h3 id="wa-display-name">WhatsApp Oficial Conectado</h3>
-                    <span id="wa-display-phone" class="wa-phone-highlight">+351 900 000 000</span>
-                  </div>
-                </div>
-                <div style="display:flex; gap: 8px;">
-                  <button id="btn-wa-disconnect" class="btn outline danger small" type="button">Desconectar WhatsApp</button>
-                </div>
-              </div>
-
-              <div class="wa-info-grid">
-                <div class="wa-info-item">
-                  <span class="wa-info-label">Número Oficial</span>
-                  <strong id="wa-info-phone" class="wa-mono">-</strong>
-                </div>
-                <div class="wa-info-item">
-                  <span class="wa-info-label">Phone Number ID</span>
-                  <strong id="wa-display-phone-id" class="wa-mono">-</strong>
-                </div>
-                <div class="wa-info-item">
-                  <span class="wa-info-label">WABA ID</span>
-                  <strong id="wa-display-waba-id" class="wa-mono">-</strong>
-                </div>
-                <div class="wa-info-item">
-                  <span class="wa-info-label">Webhook Meta</span>
-                  <strong id="wa-display-webhook" class="wa-text-green">Subscrito & Ativo</strong>
-                </div>
-              </div>
-
-              <!-- Banner Operacional ao Vivo -->
-              <div class="email-operational-banner">
-                <div class="status-indicator-live">
-                  <span class="live-pulse-dot"></span>
-                  <div>
-                    <strong>Funcionamento Pleno & Atendimento 100% Real no WhatsApp:</strong>
-                    <span style="font-size: 13px; color: #065f46; display: block; margin-top: 3px;">
-                      O Drexier monitoriza continuamente este número de WhatsApp. Quando um cliente envia uma mensagem, o agente de IA Drexier gera instantaneamente a resposta oficial e envia de volta no WhatsApp com precisão cirúrgica e contexto do negócio.
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Configuração do Webhook da Meta -->
-              <div class="panel" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-top:16px;">
-                <h4 style="margin:0 0 6px;font-size:14px;color:#1e293b;">🔗 Dados do Webhook para a Meta Developer Console</h4>
-                <p class="muted" style="font-size:12.5px;margin:0 0 12px;">Se precisar registrar o webhook manualmente no painel da Meta Developers (WhatsApp &gt; Configuração):</p>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                  <div>
-                    <label style="font-size:12px;font-weight:600;color:#475569;">URL de Retorno de Chamada (Callback URL)</label>
-                    <div class="wa-copy-input-row">
-                      <input id="wa-webhook-url-input" readonly value="/api/webhooks/whatsapp">
-                      <button class="btn outline small" type="button" id="btn-copy-wa-webhook">Copiar</button>
-                    </div>
-                  </div>
-                  <div>
-                    <label style="font-size:12px;font-weight:600;color:#475569;">Token de Verificação (Verify Token)</label>
-                    <div class="wa-copy-input-row">
-                      <input id="wa-webhook-token-input" readonly value="drexier_whatsapp_verify_token">
-                      <button class="btn outline small" type="button" id="btn-copy-wa-token">Copiar</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Teste de Envio no WhatsApp -->
-              <div class="wa-test-section">
-                <h4>Enviar Mensagem de Teste no WhatsApp</h4>
-                <p class="muted">Valide a conectividade com a Meta Cloud API enviando uma mensagem de teste para qualquer número de telemóvel.</p>
-                <form id="wa-test-form" class="inline-form" style="margin-top: 10px;">
-                  <label>Número de Destino (com indicativo do país)<input name="test_to" placeholder="Ex: 351912345678 ou 244923456789" required></label>
-                  <label>Mensagem de Teste<input name="test_message" value="Olá! Esta é uma mensagem de teste enviada pela IA Drexier via WhatsApp Cloud API Oficial." required></label>
-                  <button class="btn primary" type="submit" id="btn-wa-test-submit">Enviar Teste no WhatsApp</button>
-                </form>
-                <div id="wa-test-result" class="wa-test-result hidden"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ==================== CANAL 2: E-MAIL OFICIAL ==================== -->
-        <div id="channel-email-section" class="hidden">
-          <div class="panel-heading">
-            <div>
-              <h2>Integração de E-mail Oficial</h2>
-              <p class="muted">Conecte o seu e-mail comercial (Google Gmail ou Microsoft Outlook) para que a IA Drexier atenda e conduza conversas com os seus clientes diretamente por e-mail.</p>
+              <h2>Integração de E-mail Oficial (Google Gmail)</h2>
+              <p class="muted">Conecte a conta comercial do Google Gmail da sua empresa para que a IA Drexier atenda e conduza conversas com os seus clientes diretamente por e-mail.</p>
             </div>
             <div id="email-status-badge" class="badge badge-disconnected">Desconectado</div>
           </div>
@@ -521,30 +343,29 @@
               <p>Para ativar a ligação com um clique, adicione as chaves no seu ficheiro <code>.env</code>:</p>
               <ul style="margin: 6px 0 0 18px; font-size: 13px; line-height: 1.5;">
                 <li><strong>Google Gmail:</strong> <code>GOOGLE_CLIENT_ID</code> e <code>GOOGLE_CLIENT_SECRET</code> (<a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>)</li>
-                <li><strong>Microsoft Outlook:</strong> <code>MICROSOFT_CLIENT_ID</code> e <code>MICROSOFT_CLIENT_SECRET</code> (<a href="https://portal.azure.com/" target="_blank" rel="noopener">Azure Portal</a>)</li>
               </ul>
             </div>
           </div>
 
-          <!-- Estado 2: Desconectado - Escolha de fornecedor oficial (Google ou Microsoft) -->
+          <!-- Estado 2: Desconectado - Escolha de fornecedor oficial (Google Gmail) -->
           <div id="email-disconnected-view" class="wa-view hidden">
             <div class="wa-hero-card">
               <div class="wa-hero-content">
-                <h3>Conecte o seu E-mail em poucos segundos</h3>
-                <p>Ao conectar a sua conta através da página oficial da Google ou Microsoft, o Drexier recebe autorização segura para ler dúvidas recebidas e enviar respostas inteligentes conduzidas pela IA.</p>
+                <h3>Conecte o seu Google Gmail em poucos segundos</h3>
+                <p>Ao conectar a sua conta através da página oficial da Google, o Drexier recebe autorização segura para ler dúvidas recebidas e enviar respostas inteligentes conduzidas pela IA.</p>
                 <div class="wa-steps-grid">
                   <div class="wa-step-item">
                     <span class="wa-step-num">1</span>
                     <div>
-                      <strong>Selecione o Fornecedor</strong>
-                      <p class="muted">Escolha a conta oficial onde os seus clientes enviam mensagens.</p>
+                      <strong>Conectar com a Google</strong>
+                      <p class="muted">Autentique com um clique através da autorização OAuth 2.0 oficial.</p>
                     </div>
                   </div>
                   <div class="wa-step-item">
                     <span class="wa-step-num">2</span>
                     <div>
                       <strong>Conceda as Permissões</strong>
-                      <p class="muted">Autorize o envio e leitura de e-mails na tela oficial e segura da Google/Microsoft.</p>
+                      <p class="muted">Autorize o envio e leitura de e-mails na tela oficial e segura da Google.</p>
                     </div>
                   </div>
                   <div class="wa-step-item">
@@ -565,37 +386,9 @@
                     </svg>
                     <span>Conectar Google Gmail Oficial</span>
                   </button>
-                  <button id="btn-connect-microsoft" class="btn btn-microsoft" type="button" disabled style="opacity: 0.5; cursor: not-allowed; filter: grayscale(40%);" title="Integração Outlook desativada temporariamente. O código permanece preservado.">
-                    <svg width="18" height="18" viewBox="0 0 24 24">
-                      <path fill="#F25022" d="M1 1h10v10H1z"/>
-                      <path fill="#7FBA00" d="M13 1h10v10H13z"/>
-                      <path fill="#00A4EF" d="M1 13h10v10H1z"/>
-                      <path fill="#FFB900" d="M13 13h10v10H13z"/>
-                    </svg>
-                    <span>Microsoft Outlook (Desativado)</span>
-                  </button>
-                  <button id="btn-toggle-manual-email" class="btn outline small" type="button">Configuração Direta (SMTP / IMAP)</button>
                 </div>
                 <p id="email-connect-status" class="muted" style="margin-top: 10px;"></p>
               </div>
-            </div>
-
-            <!-- Formulário Opcional de Conexão com Servidor Direto (SMTP / IMAP) -->
-            <div id="email-manual-box" class="wa-manual-card hidden">
-              <h4>Ligação Direta por Servidor (SMTP / IMAP ou App Password)</h4>
-              <p class="muted">Útil para servidores corporativos próprios ou senhas de app geradas.</p>
-              <form id="email-manual-form" class="form">
-                <label>Endereço de E-mail<input name="email_address" type="email" required placeholder="atendimento@empresa.com"></label>
-                <label>Nome do Remetente<input name="display_name" placeholder="Ex: Suporte Drexier"></label>
-                <label>Servidor SMTP (Envio)<input name="smtp_host" required placeholder="Ex: smtp.gmail.com ou smtp.office365.com"></label>
-                <label>Porta SMTP<input name="smtp_port" type="number" value="587" required></label>
-                <label>Usuário SMTP<input name="smtp_user" placeholder="Geralmente o próprio e-mail"></label>
-                <label>Senha / Palavra-passe de Aplicação<input name="smtp_password" type="password" required placeholder="••••••••••••"></label>
-                <div class="actions">
-                  <button class="btn primary" type="submit">Guardar e Ligar E-mail</button>
-                  <button class="btn outline" type="button" id="btn-cancel-manual-email">Cancelar</button>
-                </div>
-              </form>
             </div>
           </div>
 

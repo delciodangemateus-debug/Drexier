@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from backend.database import init_db, connect
+from backend.supabase_client import get_supabase_status
 from backend.auth import hash_password, verify_password, create_token, decode_token
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
@@ -456,3 +457,8 @@ def delete_variant(variant_id:int,user=Depends(current_user)):
         cur=c.execute("DELETE FROM response_variants WHERE id=? AND user_id=?",(variant_id,user["id"]))
     if not cur.rowcount: raise HTTPException(404,"Teste não encontrado.")
     return {"ok":True}
+
+@app.get("/api/database/status")
+def database_status():
+    """Retorna o estado da configuração e conectividade do Supabase e SQLite."""
+    return get_supabase_status()

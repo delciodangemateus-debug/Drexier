@@ -1,21 +1,43 @@
 import os
 import sqlite3
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
+from backend.supabase_client import (
+    get_supabase_client,
+    is_supabase_configured,
+    get_supabase_status,
+)
 
 load_dotenv()
+logger = logging.getLogger("drexier.database")
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)
 DB_PATH = os.getenv("DATABASE_PATH", str(DATA_DIR / "drexier.db"))
 
 def connect():
+    """
+    Retorna a conexão local do banco de dados (SQLite).
+    Mantém compatibilidade imediata e suporte offline para os repositórios locais.
+    """
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 def init_db():
+    """
+    Inicializa a estrutura do banco de dados:
+    1. Verifica o estado da conexão com o Supabase;
+    2. Inicializa as tabelas locais com todas as entidades e tabelas reservadas para expansão.
+    """
+    if is_supabase_configured():
+        logger.info("Supabase detectado nas variáveis de ambiente. Cliente pronto para uso.")
+    else:
+        logger.info("Supabase ainda não configurado no .env. Utilizando banco local SQLite.")
+
     with connect() as c:
         c.executescript("""
         CREATE TABLE IF NOT EXISTS users (
@@ -28,7 +50,8 @@ def init_db():
           language TEXT NOT NULL DEFAULT 'Português',
           agent_instructions TEXT DEFAULT '',
           mandatory_responses TEXT DEFAULT '{}',
-          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS business_info (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +106,8 @@ def init_db():
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
         );
+
+        -- Tabela de integração WhatsApp (reservada para expansão futura)
         CREATE TABLE IF NOT EXISTS whatsapp_integrations (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL UNIQUE,
@@ -101,7 +126,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_whatsapp_waba_id ON whatsapp_integrations(waba_id);
         CREATE INDEX IF NOT EXISTS idx_whatsapp_user_id ON whatsapp_integrations(user_id);
 
-        -- Tabela de integração de email oficial (Google Gmail / Microsoft Outlook / SMTP)
+        -- Tabela de integração de email oficial (Google Gmail ativo; Microsoft Outlook e SMTP para expansão)
         CREATE TABLE IF NOT EXISTS email_integrations (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL UNIQUE,
