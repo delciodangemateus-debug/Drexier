@@ -65,12 +65,14 @@ def get_stripe_public_config() -> Dict[str, Any]:
 
 def _get_stored_subscription(user_id: int) -> Optional[Dict[str, Any]]:
     """Recupera os dados de assinatura persistidos para o utilizador."""
+    stored_subscription = None
+    metadata_subscription = None
     with connect() as c:
         # 1. Tenta buscar em tabela subscriptions caso exista
         try:
             row = c.execute("SELECT * FROM subscriptions WHERE user_id = ?", (user_id,)).fetchone()
             if row:
-                return dict(row)
+                stored_subscription = dict(row)
         except Exception:
             pass
 
@@ -84,19 +86,56 @@ def _get_stored_subscription(user_id: int) -> Optional[Dict[str, Any]]:
                 raw_meta = row["metadata"]
                 if isinstance(raw_meta, str):
                     try:
-                        return json.loads(raw_meta)
+                        metadata_subscription = json.loads(raw_meta)
                     except Exception:
                         pass
                 elif isinstance(raw_meta, dict):
-                    return raw_meta
+                    metadata_subscription = raw_meta
         except Exception:
             pass
 
+    if stored_subscription:
+        if not stored_subscription.get("last_successful_payment_at") and metadata_subscription:
+            stored_subscription["last_successful_payment_at"] = metadata_subscription.get("last_successful_payment_at")
+        return stored_subscription
+    return metadata_subscription
+
+
+def get_last_successful_payment_at(user_id: int) -> Optional[str]:
+    """Retorna a data do último pagamento confirmado, se já existir."""
+    subscription = _get_stored_subscription(user_id) or {}
+    return subscription.get("last_successful_payment_at")
+
+
+def _stripe_timestamp_to_iso(value: Any) -> Optional[str]:
+    if not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def _get_latest_successful_payment_at(subscription_id: str) -> Optional[str]:
+    """Recupera da Stripe o pagamento mais recente para contas ainda sem data persistida."""
+    try:
+        invoices = stripe.Invoice.list(subscription=subscription_id, status="paid", limit=10)
+        for invoice in invoices.data:
+            if int(invoice.get("amount_paid") or 0) <= 0:
+                continue
+            transitions = invoice.get("status_transitions") or {}
+            paid_at = _stripe_timestamp_to_iso(
+                transitions.get("paid_at") or invoice.get("created")
+            )
+            if paid_at:
+                return paid_at
+    except Exception as ex:
+        logger.warning(f"Não foi possível recuperar pagamentos anteriores da Stripe: {ex}")
     return None
 
 
 def _save_stored_subscription(user_id: int, data: Dict[str, Any]):
     """Salva os dados da assinatura com persistência no banco de dados."""
+    if not data.get("last_successful_payment_at"):
+        existing_subscription = _get_stored_subscription(user_id) or {}
+        data["last_successful_payment_at"] = existing_subscription.get("last_successful_payment_at")
     data["user_id"] = user_id
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -189,18 +228,21 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
                 if isinstance(period_end, (int, float)):
                     end_dt = datetime.fromtimestamp(period_end, tz=timezone.utc)
                 else:
-                    end_dt = datetime.fromisoformat(str(period_end).replace("Z", "+00:00"))
+                    pe_str = str(period_end).replace("Z", "+00:00")
+                    end_dt = datetime.fromisoformat(pe_str)
                 # Dá tolerância de 24h para renovação automática via webhook
                 has_active_access = datetime.now(timezone.utc) <= (end_dt + timedelta(days=1))
             except Exception:
                 has_active_access = True
         else:
             has_active_access = True
+    elif status in ("past_due", "unpaid", "incomplete"):
+        has_active_access = False
 
     # AUTO-RECONCILIAÇÃO INFALÍVEL COM A STRIPE:
     # Se o banco local indicar inativo mas a Stripe estiver configurada,
     # consulta a API da Stripe diretamente para evitar falso-bloqueio se o webhook atrasar
-    if not has_active_access and is_stripe_configured():
+    if is_stripe_configured():
         try:
             stripe.api_key = get_stripe_secret_key()
             customer_id = sub_data.get("stripe_customer_id")
@@ -213,33 +255,51 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
 
             # Se não temos customer_id salvo, busca na Stripe pelo email do usuário
             if not customer_id and user_email:
-                cust_res = stripe.Customer.list(email=user_email, limit=1)
-                if cust_res and len(cust_res.data) > 0:
-                    customer_id = cust_res.data[0].id
-                    sub_data["stripe_customer_id"] = customer_id
+                try:
+                    cust_res = stripe.Customer.list(email=user_email, limit=1)
+                    if cust_res and len(cust_res.data) > 0:
+                        customer_id = cust_res.data[0].id
+                        sub_data["stripe_customer_id"] = customer_id
+                except Exception:
+                    pass
 
             if customer_id:
-                subs_list = stripe.Subscription.list(customer=customer_id, status="all", limit=3)
-                for s in subs_list.data:
-                    if s.status in ("active", "trialing"):
-                        period_end_dt = datetime.fromtimestamp(s.current_period_end, tz=timezone.utc).isoformat()
-                        price_id = s.items.data[0].price.id if s.items and s.items.data else get_stripe_price_id()
-                        sub_data.update({
-                            "stripe_customer_id": customer_id,
-                            "stripe_subscription_id": s.id,
-                            "stripe_price_id": price_id,
-                            "plan_name": PLAN_NAME,
-                            "amount": PLAN_AMOUNT_CENTS,
-                            "currency": PLAN_CURRENCY,
-                            "status": s.status,
-                            "current_period_end": period_end_dt,
-                            "cancel_at_period_end": s.cancel_at_period_end
-                        })
-                        _save_stored_subscription(user_id, sub_data)
-                        status = s.status
-                        has_active_access = True
-                        logger.info(f"[Auto-Reconciliação Stripe] Assinatura {s.id} ativa confirmada e salva para user {user_id}!")
-                        break
+                try:
+                    subs_list = stripe.Subscription.list(customer=customer_id, status="all", limit=5)
+                    for s in subs_list.data:
+                        if getattr(s, "status", None) in ("active", "trialing"):
+                            try:
+                                period_end_dt = datetime.fromtimestamp(s.current_period_end, tz=timezone.utc).isoformat()
+                            except Exception:
+                                period_end_dt = sub_data.get("current_period_end") or (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+                            price_id = get_stripe_price_id()
+                            try:
+                                if s.items and s.items.data:
+                                    price_id = s.items.data[0].price.id
+                            except Exception:
+                                pass
+                            sub_data.update({
+                                "stripe_customer_id": customer_id,
+                                "stripe_subscription_id": getattr(s, "id", sub_data.get("stripe_subscription_id") or ""),
+                                "stripe_price_id": price_id,
+                                "plan_name": PLAN_NAME,
+                                "amount": PLAN_AMOUNT_CENTS,
+                                "currency": PLAN_CURRENCY,
+                                "status": s.status,
+                                "current_period_end": period_end_dt,
+                                "cancel_at_period_end": bool(getattr(s, "cancel_at_period_end", False))
+                            })
+                            if not sub_data.get("last_successful_payment_at"):
+                                paid_at = _get_latest_successful_payment_at(str(getattr(s, "id", "")))
+                                if paid_at:
+                                    sub_data["last_successful_payment_at"] = paid_at
+                            _save_stored_subscription(user_id, sub_data)
+                            status = s.status
+                            has_active_access = True
+                            logger.info(f"[Auto-Reconciliação Stripe] Assinatura {getattr(s,'id','')} ativa confirmada e salva para user {user_id}!")
+                            break
+                except Exception:
+                    pass
         except Exception as ex:
             logger.debug(f"[Auto-Reconciliação Stripe] Verificação ignorada: {ex}")
 
@@ -263,6 +323,7 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
         "stripe_customer_id": sub_data.get("stripe_customer_id"),
         "stripe_subscription_id": sub_data.get("stripe_subscription_id"),
         "current_period_end": sub_data.get("current_period_end"),
+        "last_successful_payment_at": sub_data.get("last_successful_payment_at"),
         "cancel_at_period_end": bool(sub_data.get("cancel_at_period_end", False)),
     }
 
@@ -279,49 +340,71 @@ def verify_checkout_session(session_id: str, user_id: int) -> Dict[str, Any]:
     try:
         session = stripe.checkout.Session.retrieve(session_id, expand=["subscription", "customer"])
         customer = session.get("customer")
-        customer_id = customer.id if isinstance(customer, stripe.Customer) else customer
+        customer_id = customer.id if hasattr(customer, "id") else (customer if isinstance(customer, str) else None)
         sub = session.get("subscription")
-        sub_id = sub.id if isinstance(sub, stripe.Subscription) else sub
+        sub_id = sub.id if hasattr(sub, "id") else (sub if isinstance(sub, str) else None)
 
         payment_status = session.get("payment_status")
         session_status = session.get("status")
 
-        if payment_status in ("paid", "no_payment_required") or session_status == "complete":
+        if payment_status in ("paid", "no_payment_required") or session_status == "complete" or sub_id:
             status = "active"
             period_end_dt = ""
             cancel_at = False
             price_id = get_stripe_price_id()
 
-            if isinstance(sub, stripe.Subscription):
-                status = sub.status
-                period_end_dt = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc).isoformat()
-                cancel_at = sub.cancel_at_period_end
-                if sub.items and sub.items.data:
-                    price_id = sub.items.data[0].price.id
+            if hasattr(sub, "status"):
+                try:
+                    status = sub.status or "active"
+                    if getattr(sub, "current_period_end", None):
+                        period_end_dt = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc).isoformat()
+                    cancel_at = bool(getattr(sub, "cancel_at_period_end", False))
+                    if getattr(sub, "items", None) and sub.items.data:
+                        try:
+                            price_id = sub.items.data[0].price.id
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             elif sub_id:
                 try:
                     s_obj = stripe.Subscription.retrieve(sub_id)
-                    status = s_obj.status
-                    period_end_dt = datetime.fromtimestamp(s_obj.current_period_end, tz=timezone.utc).isoformat()
-                    cancel_at = s_obj.cancel_at_period_end
-                    if s_obj.items and s_obj.items.data:
-                        price_id = s_obj.items.data[0].price.id
+                    status = getattr(s_obj, "status", None) or "active"
+                    if getattr(s_obj, "current_period_end", None):
+                        period_end_dt = datetime.fromtimestamp(s_obj.current_period_end, tz=timezone.utc).isoformat()
+                    cancel_at = bool(getattr(s_obj, "cancel_at_period_end", False))
+                    if getattr(s_obj, "items", None) and s_obj.items.data:
+                        try:
+                            price_id = s_obj.items.data[0].price.id
+                        except Exception:
+                            pass
                 except Exception:
                     pass
+
+            # Se ainda não temos período, definir para 30 dias a partir de agora para garantir acesso imediato
+            if not period_end_dt:
+                try:
+                    period_end_dt = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+                except Exception:
+                    period_end_dt = ""
 
             record = {
                 "stripe_customer_id": str(customer_id or ""),
                 "stripe_subscription_id": str(sub_id or ""),
-                "stripe_price_id": str(price_id or ""),
+                "stripe_price_id": str(price_id or get_stripe_price_id() or ""),
                 "plan_name": PLAN_NAME,
                 "amount": PLAN_AMOUNT_CENTS,
                 "currency": PLAN_CURRENCY,
-                "status": status,
+                "status": status if status in ("active", "trialing", "past_due") else "active",
                 "current_period_end": period_end_dt,
-                "cancel_at_period_end": cancel_at
+                "cancel_at_period_end": bool(cancel_at)
             }
+            if payment_status == "paid":
+                record["last_successful_payment_at"] = _stripe_timestamp_to_iso(
+                    session.get("created")
+                )
             _save_stored_subscription(user_id, record)
-            logger.info(f"[Stripe Checkout] Sessão {session_id} verificada com sucesso! User {user_id} ativo.")
+            logger.info(f"[Stripe Checkout] Sessão {session_id} verificada com sucesso! User {user_id} ativo (status={record['status']}).")
     except Exception as ex:
         logger.error(f"[Stripe Checkout] Falha ao verificar sessão {session_id}: {ex}")
 
@@ -551,13 +634,22 @@ def handle_stripe_webhook(payload_bytes: bytes, sig_header: str) -> Dict[str, An
 
                 if user_id:
                     period_end_dt = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc).isoformat()
-                    _save_stored_subscription(user_id, {
+                    payment_timestamp = None
+                    if int(invoice.get("amount_paid") or 0) > 0:
+                        status_transitions = invoice.get("status_transitions") or {}
+                        payment_timestamp = _stripe_timestamp_to_iso(
+                            status_transitions.get("paid_at") or event.get("created")
+                        )
+                    payment_data = {
                         "stripe_customer_id": customer_id,
                         "stripe_subscription_id": subscription_id,
                         "status": "active",
                         "current_period_end": period_end_dt,
                         "cancel_at_period_end": sub.cancel_at_period_end
-                    })
+                    }
+                    if payment_timestamp:
+                        payment_data["last_successful_payment_at"] = payment_timestamp
+                    _save_stored_subscription(user_id, payment_data)
                     logger.info(f"[Stripe Webhook] Pagamento confirmado com sucesso para utilizador {user_id}.")
             except Exception as ex:
                 logger.error(f"Erro ao processar invoice.payment_succeeded: {ex}")

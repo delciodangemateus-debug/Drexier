@@ -1,136 +1,877 @@
 <!doctype html>
 <html lang="pt">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Drexier</title><link rel="stylesheet" href="./styles.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drexier — Atendimento inteligente para a sua empresa</title>
+<link rel="stylesheet" href="./styles.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-<div id="auth" class="auth-shell">
+
+<!-- ============================================================
+     1. LANDING PAGE (VISÍVEL ANTES DO LOGIN / CADASTRO)
+     ============================================================ -->
+<div id="landing" class="landing-shell">
+  <!-- CABEÇALHO / HEADER -->
+  <header class="lp-header" id="lp-header">
+    <div class="lp-container lp-header-inner">
+      <div class="lp-brand">
+        <a href="#lp-hero" class="lp-brand-link">
+          <span class="lp-wordmark">Drexier</span>
+          <span class="lp-brand-badge">AI PLATFORM</span>
+        </a>
+      </div>
+      <nav class="lp-nav">
+        <a href="#lp-hero" class="lp-nav-link">Visão Geral</a>
+        <a href="#lp-metrics" class="lp-nav-link">Desempenho</a>
+        <a href="#lp-comparison" class="lp-nav-link">Comparativo</a>
+        <a href="#lp-faq" class="lp-nav-link">Perguntas Frequentes</a>
+        <a href="#lp-about" class="lp-nav-link">Sobre o Software</a>
+      </nav>
+      <div class="lp-header-actions">
+        <button type="button" class="btn outline small lp-nav-login" id="lp-btn-login">Entrar</button>
+        <button type="button" class="btn primary small lp-cta-btn lp-nav-signup" id="lp-btn-signup-nav">Começar Agora</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- SEÇÃO 1: BANNER / HERO -->
+  <section id="lp-hero" class="lp-hero-section">
+    <div class="lp-container">
+      <div class="lp-hero-grid">
+        <div class="lp-hero-content">
+          <div class="lp-pill-badge">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span>Tecnologia Autônoma de Atendimento &amp; Vendas</span>
+          </div>
+          <h1 class="lp-hero-title">
+            Atendimento ao cliente e vendas com <span class="lp-title-highlight">mais contexto</span>
+          </h1>
+          <p class="lp-hero-subtitle">
+            Organize as conversas por e-mail, dê ao agente informações sobre o seu negócio e acompanhe as respostas num só lugar. Você decide quando ativar a automação e pode intervir sempre que precisar.
+          </p>
+          <div class="lp-hero-actions">
+            <button type="button" class="btn primary lp-btn-hero lp-cta-btn" id="lp-btn-hero-start">
+              <span>Começar Agora</span>
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </button>
+            <a href="#lp-comparison" class="btn outline lp-btn-hero-secondary">
+              <span>Ver como funciona</span>
+            </a>
+          </div>
+          <div class="lp-hero-guarantees">
+            <div class="lp-hero-guarantee-item">
+              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Configuração guiada</span>
+            </div>
+            <div class="lp-hero-guarantee-item">
+              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Integração com Gmail</span>
+            </div>
+            <div class="lp-hero-guarantee-item">
+              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span>Controle do agente por você</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- HERO VISUAL SHOWCASE (EM INGLÊS, MINIMALISTA, ULTRA-PROFISSIONAL) -->
+        <div class="lp-hero-visual-wrapper">
+          <div class="lp-visual-frame">
+            <div class="lp-visual-header">
+              <div class="lp-visual-dots">
+                <span class="lp-vdot"></span>
+                <span class="lp-vdot"></span>
+                <span class="lp-vdot"></span>
+              </div>
+              <div class="lp-visual-title">Drexier Email Assistant &bull; Product Preview</div>
+              <div class="lp-visual-status">
+                <span class="lp-live-beacon"></span>
+                <span>Illustrative interface</span>
+              </div>
+            </div>
+
+            <!-- Real-time metrics grid in English -->
+            <div class="lp-telemetry-grid">
+              <div class="lp-telemetry-item">
+                <span class="lp-telemetry-label">Active AI Agents</span>
+                <strong class="lp-telemetry-val">Workspace agent</strong>
+                <small class="lp-telemetry-sub">Configured by your team</small>
+              </div>
+              <div class="lp-telemetry-item">
+                <span class="lp-telemetry-label">Channel</span>
+                <strong class="lp-telemetry-val lp-gold-val">Email</strong>
+                <small class="lp-telemetry-sub">Connected by account owner</small>
+              </div>
+              <div class="lp-telemetry-item">
+                <span class="lp-telemetry-label">Business context</span>
+                <strong class="lp-telemetry-val">Your knowledge</strong>
+                <small class="lp-telemetry-sub">Products, policies and FAQs</small>
+              </div>
+              <div class="lp-telemetry-item">
+                <span class="lp-telemetry-label">Human control</span>
+                <strong class="lp-telemetry-val lp-gold-val">On or off</strong>
+                <small class="lp-telemetry-sub">You control automation</small>
+              </div>
+            </div>
+
+            <!-- Minimalist Live Conversation & Official Email Dispatch -->
+            <div class="lp-dialogue-mockup">
+              <!-- Client Inquiry Bubble -->
+              <div class="lp-mock-bubble lp-client-bubble">
+                <div class="lp-bubble-meta">
+                  <span class="lp-client-tag">Inbound Inquiry</span>
+                  <span class="lp-client-id">Alex Morgan &bull; Customer</span>
+                  <span class="lp-bubble-time">Incoming email</span>
+                </div>
+                <p class="lp-bubble-text">
+                  "Hello, could you share your current pricing and let me know whether this item is available?"
+                </p>
+              </div>
+
+              <!-- Flow Connector -->
+              <div class="lp-flow-line">
+                <div class="lp-flow-pulse"></div>
+                <span class="lp-flow-text">Business information reviewed &bull; Example workflow</span>
+              </div>
+
+              <!-- AI Agent Response Bubble -->
+              <div class="lp-mock-bubble lp-agent-bubble">
+                <div class="lp-bubble-meta">
+                  <span class="lp-agent-badge">
+                    <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    <span>Verified AI Agent</span>
+                  </span>
+                  <span class="lp-agent-id">Draft response &bull; Review before sending</span>
+                </div>
+                <div class="lp-bubble-subject">Subject: Re: Product information</div>
+                <p class="lp-bubble-text">
+                  "Hello Alex, thanks for reaching out. I can check the product details and availability using the information provided by the team. If you have a specific item in mind, please share its name and I will be happy to help."
+                </p>
+                <div class="lp-agent-footer">
+                  <span class="lp-audit-tag">
+                    <svg class="svg-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                    <span>Illustrative conversation &bull; Your settings determine how replies are handled</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SEÇÃO 2: ROLO INFINITO DE SELOS (CONFIDENCE & SECURITY TICKER) -->
+  <section class="lp-ticker-section">
+    <div class="lp-ticker-track-wrap">
+      <div class="lp-ticker-track">
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+          <span><strong>Agilidade no atendimento:</strong> Automatize etapas repetitivas do acompanhamento</span>
+        </div>
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+          <span><strong>Contexto do negócio:</strong> Organize as informações usadas pelo agente</span>
+        </div>
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span><strong>Segurança e controlo:</strong> Autorize o Gmail e pause o agente quando quiser</span>
+        </div>
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+          <span><strong>Confiança e visibilidade:</strong> Acompanhe mensagens e pedidos no painel</span>
+        </div>
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          <span><strong>Automação configurável:</strong> Ative as respostas quando estiver pronto</span>
+        </div>
+        <!-- Duplicados para efeito contínuo suave -->
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+          <span><strong>Agilidade no atendimento:</strong> Automatize etapas repetitivas do acompanhamento</span>
+        </div>
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+          <span><strong>Contexto do negócio:</strong> Organize as informações usadas pelo agente</span>
+        </div>
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span><strong>Segurança e controlo:</strong> Autorize o Gmail e pause o agente quando quiser</span>
+        </div>
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+          <span><strong>Confiança e visibilidade:</strong> Acompanhe mensagens e pedidos no painel</span>
+        </div>
+        <div class="lp-ticker-item">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          <span><strong>Automação configurável:</strong> Ative as respostas quando estiver pronto</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SEÇÃO 3: TRÊS CARDS VISUAIS PEQUENOS (MÉTRICAS & IMPACTO) -->
+  <section id="lp-metrics" class="lp-section">
+    <div class="lp-container">
+      <div class="lp-section-header">
+        <span class="lp-pill-badge">Visão da operação</span>
+        <h2 class="lp-section-title">Mais clareza para acompanhar o atendimento</h2>
+        <p class="lp-section-subtitle">Exemplos visuais de como organizar conversas, contexto do negócio e oportunidades. Os resultados variam conforme a operação e a configuração da conta.</p>
+      </div>
+
+      <div class="lp-tri-grid">
+        <!-- Card 1: Gráfico de Linha Subindo -->
+        <div class="lp-tri-card">
+          <div class="lp-card-head">
+            <span class="lp-card-tag">Oportunidades</span>
+            <span class="lp-card-stat-pill">Acompanhe</span>
+          </div>
+          <h3 class="lp-card-title">Acompanhe cada conversa</h3>
+          <p class="lp-card-desc">Tenha uma visão clara das mensagens recebidas e das oportunidades que precisam de atenção.</p>
+          <div class="lp-chart-mini-box">
+            <svg class="lp-growth-svg" viewBox="0 0 320 120" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="lp-line-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#2d1f4d" stop-opacity="0.35"/>
+                  <stop offset="100%" stop-color="#2d1f4d" stop-opacity="0.0"/>
+                </linearGradient>
+              </defs>
+              <path d="M 0,110 Q 70,105 130,85 T 220,45 T 320,12 L 320,120 L 0,120 Z" fill="url(#lp-line-grad)" />
+              <path d="M 0,110 Q 70,105 130,85 T 220,45 T 320,12" fill="none" stroke="#cf9f38" stroke-width="3" stroke-linecap="round" />
+              <circle cx="320" cy="12" r="5" fill="#cf9f38" stroke="#1b1333" stroke-width="2" />
+            </svg>
+            <div class="lp-chart-legend">
+              <span>Conversas recebidas</span>
+              <span class="lp-gold-bold">Exemplo visual, sem dados reais</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: Comparação de Clientes Respondidos Antes vs Depois -->
+        <div class="lp-tri-card">
+          <div class="lp-card-head">
+            <span class="lp-card-tag">Acompanhamento</span>
+            <span class="lp-card-stat-pill">Manual e assistido</span>
+          </div>
+          <h3 class="lp-card-title">Antes vs. Depois da Automação</h3>
+          <p class="lp-card-desc">A automação pode ajudar a responder com mais consistência, enquanto o atendimento manual depende da disponibilidade da equipa.</p>
+          <div class="lp-compare-bars-box">
+            <div class="lp-bar-row">
+              <div class="lp-bar-meta">
+                <span class="lp-bar-name">Antes (Manual)</span>
+                <span class="lp-bar-val">Depende da disponibilidade</span>
+              </div>
+              <div class="lp-bar-bg">
+                <div class="lp-bar-fill before" style="width: 32%;"></div>
+              </div>
+              <small class="lp-bar-hint">A cobertura varia conforme os horários da equipa</small>
+            </div>
+            <div class="lp-bar-row">
+              <div class="lp-bar-meta">
+                <span class="lp-bar-name">Depois (Drexier IA)</span>
+                <span class="lp-bar-val lp-gold-bold">Pode responder quando ativada</span>
+              </div>
+              <div class="lp-bar-bg">
+                <div class="lp-bar-fill after" style="width: 88%;"></div>
+              </div>
+              <small class="lp-bar-hint lp-gold-bold">O tempo de resposta depende da configuração e do serviço</small>
+            </div>
+            <small class="lp-bar-hint">Representação qualitativa, sem métricas de desempenho.</small>
+          </div>
+        </div>
+
+        <!-- Card 3: Mais Vendas Realizadas -->
+        <div class="lp-tri-card">
+          <div class="lp-card-head">
+            <span class="lp-card-tag">Pedidos</span>
+            <span class="lp-card-stat-pill">Mais visibilidade</span>
+          </div>
+          <h3 class="lp-card-title">Oportunidades bem organizadas</h3>
+          <p class="lp-card-desc">Centralize pedidos e mensagens para que a equipa saiba quais conversas precisam de acompanhamento.</p>
+          <div class="lp-sales-stat-box">
+            <div class="lp-sales-big-number">
+              <span class="lp-sales-metric">Vendas</span>
+              <span class="lp-sales-sub">Tendência ilustrativa</span>
+            </div>
+            <div class="lp-sales-bars" role="img" aria-label="Gráfico ilustrativo de vendas em tendência crescente, sem dados reais">
+              <span class="lp-sales-bar lp-sales-bar-1"></span>
+              <span class="lp-sales-bar lp-sales-bar-2"></span>
+              <span class="lp-sales-bar lp-sales-bar-3"></span>
+              <span class="lp-sales-bar lp-sales-bar-4"></span>
+            </div>
+            <small class="lp-bar-hint">Exemplo visual, não representa resultados medidos.</small>
+            <div class="lp-sales-features-list">
+              <div class="lp-sales-item">
+                <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cf9f38" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Pedidos sinalizados para validação</span>
+              </div>
+              <div class="lp-sales-item">
+                <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cf9f38" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Informações de produtos configuradas por si</span>
+              </div>
+              <div class="lp-sales-item">
+                <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#cf9f38" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Histórico de conversas acessível à equipa</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SEÇÃO 4: COMPARAÇÃO DETALHADA (MANUAL VS DREXIER IA) -->
+  <section id="lp-comparison" class="lp-section lp-comparison-section">
+    <div class="lp-container">
+      <div class="lp-section-header">
+        <span class="lp-pill-badge">Comparação funcional</span>
+        <h2 class="lp-section-title">Resposta Manual vs. Automação Drexier</h2>
+        <p class="lp-section-subtitle">Uma comparação prática de como o atendimento manual e a automação podem apoiar a gestão de mensagens. Não representa um estudo de desempenho nem garante resultados comerciais.</p>
+      </div>
+
+      <div class="lp-comparison-table-wrap">
+        <table class="lp-compare-table">
+          <thead>
+            <tr>
+              <th class="lp-th-factor">Aspeto</th>
+              <th class="lp-th-manual">Atendimento Manual Tradicional</th>
+              <th class="lp-th-drexier">Automação Inteligente Drexier</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="lp-td-factor">
+                <strong>Acompanhamento de clientes</strong>
+                <p>Como as conversas são organizadas e acompanhadas.</p>
+              </td>
+              <td class="lp-td-manual">
+                <span class="lp-tag-bad">Depende da equipa</span>
+                <p>A equipa acompanha as mensagens conforme a disponibilidade e os processos existentes.</p>
+              </td>
+              <td class="lp-td-drexier">
+                <span class="lp-tag-good">Conversas centralizadas</span>
+                <p>O painel ajuda a visualizar os clientes e a dar seguimento às conversas por e-mail.</p>
+              </td>
+            </tr>
+            <tr>
+              <td class="lp-td-factor">
+                <strong>Tempo de resposta</strong>
+                <p>Como o retorno é preparado e enviado.</p>
+              </td>
+              <td class="lp-td-manual">
+                <span class="lp-tag-bad">Horário da equipa</span>
+                <p>O tempo de resposta depende dos horários e da disponibilidade de quem atende.</p>
+              </td>
+              <td class="lp-td-drexier">
+                <span class="lp-tag-good">Apoio automatizado</span>
+                <p>Quando ativado e configurado, o agente pode preparar respostas com base nas informações do negócio.</p>
+              </td>
+            </tr>
+            <tr>
+              <td class="lp-td-factor">
+                <strong>Pedidos e oportunidades</strong>
+                <p>Como pedidos que precisam de acompanhamento são identificados.</p>
+              </td>
+              <td class="lp-td-manual">
+                <span class="lp-tag-bad">Gestão manual</span>
+                <p>O acompanhamento é feito pela equipa com os processos que já utiliza.</p>
+              </td>
+              <td class="lp-td-drexier">
+                <span class="lp-tag-good">Mais visibilidade</span>
+                <p>Pedidos detetados nas mensagens podem aparecer no painel para revisão e confirmação.</p>
+              </td>
+            </tr>
+            <tr>
+              <td class="lp-td-factor">
+                <strong>Informações do negócio</strong>
+                <p>Como produtos, preços e políticas são consultados durante o atendimento.</p>
+              </td>
+              <td class="lp-td-manual">
+                <span class="lp-tag-bad">Consulta manual</span>
+                <p>A pessoa que atende consulta e aplica as informações disponíveis da empresa.</p>
+              </td>
+              <td class="lp-td-drexier">
+                <span class="lp-tag-good">Contexto configurável</span>
+                <p>O agente utiliza os dados e as instruções que a equipa adiciona à plataforma; reveja as respostas e mantenha a base atualizada.</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Strategic CTA in Comparison Section -->
+      <div class="lp-section-cta">
+        <div class="lp-cta-inner-card">
+          <div class="lp-cta-text">
+            <h3>Quer organizar o atendimento do seu negócio?</h3>
+            <p>Crie a sua conta, configure as informações da empresa e ligue o e-mail comercial.</p>
+          </div>
+          <button type="button" class="btn primary lp-cta-btn lp-cta-large" id="lp-btn-cta-compare">
+            <span>Começar Agora</span>
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SEÇÃO 5: PERGUNTAS FREQUENTES (FAQ) -->
+  <section id="lp-faq" class="lp-section">
+    <div class="lp-container lp-container-narrow">
+      <div class="lp-section-header">
+        <span class="lp-pill-badge">Dúvidas Comuns</span>
+        <h2 class="lp-section-title">Perguntas Frequentes sobre o Software</h2>
+        <p class="lp-section-subtitle">Tudo o que precisa de compreender sobre o funcionamento, segurança e implementação da plataforma Drexier.</p>
+      </div>
+
+      <div class="lp-faq-accordion" id="lp-faq-list">
+        <!-- FAQ 1 -->
+        <div class="lp-faq-item">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>O que é o Drexier e como funciona na prática?</span>
+            <svg class="svg-icon lp-faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="lp-faq-answer">
+            <p>O Drexier ajuda a organizar o atendimento por e-mail. Depois de ligar a conta e configurar as informações do negócio, pode acompanhar as mensagens e, quando ativado, usar o agente para preparar ou enviar respostas de acordo com as definições da conta.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 2 -->
+        <div class="lp-faq-item">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>A IA pode inventar preços, produtos ou prazos incorretos (alucinações)?</span>
+            <svg class="svg-icon lp-faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="lp-faq-answer">
+            <p>Como em qualquer sistema de IA, podem ocorrer respostas incorretas. Configure instruções claras, mantenha os dados atualizados e reveja as respostas, sobretudo antes de enviar informações importantes sobre preços, stock ou políticas.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 3 -->
+        <div class="lp-faq-item">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>Preciso de conhecimento técnico ou programadores para configurar?</span>
+            <svg class="svg-icon lp-faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="lp-faq-answer">
+            <p>Não é necessário programar para utilizar as funções principais. Pode ligar o e-mail e preencher as informações do negócio pela interface. A disponibilidade de ajuda adicional depende do suporte oferecido pela plataforma.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 4 -->
+        <div class="lp-faq-item">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>Como o Drexier se conecta ao meu e-mail oficial Google Gmail?</span>
+            <svg class="svg-icon lp-faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="lp-faq-answer">
+            <p>A ligação é feita através do fluxo de autorização Google apresentado pela plataforma. Reveja as permissões solicitadas antes de autorizar o acesso e pode desligar a integração nas configurações da conta.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 5 -->
+        <div class="lp-faq-item">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>Como funciona a validação de pedidos de compra ou agendamentos?</span>
+            <svg class="svg-icon lp-faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="lp-faq-answer">
+            <p>Quando uma mensagem é identificada como um pedido, pode aparecer no painel para validação. Reveja os detalhes e confirme ou responda ao cliente conforme os procedimentos da sua empresa.</p>
+          </div>
+        </div>
+
+        <!-- FAQ 6 -->
+        <div class="lp-faq-item">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>Posso desligar o agente ou intervir manualmente quando desejar?</span>
+            <svg class="svg-icon lp-faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="lp-faq-answer">
+            <p>Sim. Pode ativar ou pausar o agente pelo interruptor na aba Mensagens e responder manualmente às conversas disponíveis na plataforma.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SEÇÃO 6: INFORMAÇÕES SOBRE O SOFTWARE (GERAL, SEM SEGREDOS TÉCNICOS) -->
+  <section id="lp-about" class="lp-section lp-about-section">
+    <div class="lp-container">
+      <div class="lp-section-header">
+        <span class="lp-pill-badge">Conheça a Nossa Filosofia</span>
+        <h2 class="lp-section-title">Sobre a Plataforma Drexier</h2>
+        <p class="lp-section-subtitle">Tecnologia desenvolvida com foco intransigente em confiabilidade, elegância visual e resultados financeiros reais.</p>
+      </div>
+
+      <div class="lp-about-grid">
+        <!-- O Que Fazemos -->
+        <div class="lp-about-card">
+          <div class="lp-about-icon-box">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          </div>
+          <h3 class="lp-about-title">O Que Fazemos</h3>
+          <p class="lp-about-text">
+            Ajudamos equipas a organizar a caixa de entrada, acompanhar clientes e gerir respostas por e-mail com apoio de inteligência artificial.
+          </p>
+        </div>
+
+        <!-- Como Fazemos -->
+        <div class="lp-about-card">
+          <div class="lp-about-icon-box">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </div>
+          <h3 class="lp-about-title">Como Fazemos</h3>
+          <p class="lp-about-text">
+            A plataforma reúne informações sobre produtos, stock e políticas para dar contexto ao agente. A equipa pode atualizar esses dados e acompanhar as conversas num único painel.
+          </p>
+        </div>
+
+        <!-- Porque Somos Diferentes -->
+        <div class="lp-about-card">
+          <div class="lp-about-icon-box">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          </div>
+          <h3 class="lp-about-title">Porque Somos Diferentes</h3>
+          <p class="lp-about-text">
+            O Drexier combina gestão de mensagens, contexto configurável do negócio e controlo direto sobre a automação, para que a equipa possa adaptar o atendimento aos seus próprios processos.
+          </p>
+        </div>
+      </div>
+
+      <!-- Final Hero Banner with Strategic CTA -->
+      <div class="lp-final-cta-banner">
+        <div class="lp-final-cta-content">
+          <span class="lp-pill-badge">Comece Hoje Mesmo</span>
+          <h2 class="lp-final-title">Pronto para colocar o atendimento da sua empresa no piloto automático?</h2>
+          <p class="lp-final-desc">Crie a sua conta, configure as informações do negócio e explore as ferramentas de atendimento.</p>
+          <div class="lp-final-actions">
+            <button type="button" class="btn primary lp-cta-btn lp-cta-large" id="lp-btn-final-start">
+              <span>Começar Agora</span>
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RODAPÉ / FOOTER -->
+  <footer class="lp-footer">
+    <div class="lp-container lp-footer-inner">
+      <div class="lp-footer-brand">
+        <div class="lp-brand">
+          <span class="lp-wordmark">Drexier</span>
+          <span class="lp-brand-badge">AI PLATFORM</span>
+        </div>
+        <p class="muted">Plataforma corporativa de atendimento e vendas conduzidas por inteligência artificial autônoma.</p>
+        <span class="lp-copy">&copy; 2026 Drexier Technologies. Todos os direitos reservados.</span>
+      </div>
+      <div class="lp-footer-links">
+        <div class="lp-fcol">
+          <strong>Navegação</strong>
+          <a href="#lp-hero">Visão Geral</a>
+          <a href="#lp-metrics">Desempenho</a>
+          <a href="#lp-comparison">Comparativo</a>
+          <a href="#lp-about">Sobre Nós</a>
+          <a href="#lp-faq">FAQ</a>
+        </div>
+        <div class="lp-fcol">
+          <strong>Acesso</strong>
+          <a href="#" id="lp-link-footer-login">Entrar na Conta</a>
+          <a href="#" id="lp-link-footer-signup">Criar Conta / Começar Agora</a>
+        </div>
+        <div class="lp-fcol">
+          <strong>Segurança &amp; Conformidade</strong>
+          <span>Controlo do agente na plataforma</span>
+          <span>Integração com Google Gmail</span>
+          <span>Gestão de mensagens e pedidos</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<!-- ============================================================
+     2. AUTH (LOGIN & CRIAR CONTA)
+     ============================================================ -->
+<div id="auth" class="auth-shell hidden">
+  <div class="auth-top-nav">
+    <button type="button" id="btn-back-to-landing" class="btn ghost small back-to-landing-btn">
+      <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 19"></polyline></svg>
+      <span>Voltar à página inicial</span>
+    </button>
+  </div>
   <section class="auth-card">
-    <div class="wordmark">Drexier</div><p class="muted">Atendimento ao cliente, organizado.</p>
-    <div class="tabs"><button class="tab active" data-auth="login">Entrar</button><button class="tab" data-auth="signup">Criar conta</button></div>
+    <div class="wordmark auth-mark">Drexier</div>
+    <p class="muted auth-sub">Atendimento ao cliente inteligente e organizado.</p>
+    <div class="tabs">
+      <button class="tab active" data-auth="login">Entrar</button>
+      <button class="tab" data-auth="signup">Criar conta</button>
+    </div>
     <form id="login-form" class="form">
-      <label>Email<input name="email" type="email" required autocomplete="email"></label>
-      <label>Senha<input name="password" type="password" required autocomplete="current-password"></label>
-      <button class="btn primary" type="submit">Entrar</button>
+      <label>Email<input name="email" type="email" required autocomplete="email" placeholder="seuemail@empresa.com"></label>
+      <label>Senha<input name="password" type="password" required autocomplete="current-password" placeholder="••••••••"></label>
+      <button class="btn primary" type="submit">Entrar na Plataforma</button>
     </form>
     <form id="signup-form" class="form hidden">
-      <label>Nome completo<input name="name" required minlength="2"></label>
-      <label>Email<input name="email" type="email" required></label>
-      <label>Tipo de negócio<select name="business_type" required><option value="">Selecione</option><option>Serviços</option><option>Vendas</option><option>Serviços e vendas</option><option>Outro</option></select></label>
-      <label>Senha (mínimo 8 caracteres, com letra e número)<input name="password" type="password" minlength="8" required></label>
-      <label>Confirmar senha<input name="confirm_password" type="password" minlength="8" required></label>
-      <button class="btn primary" type="submit">Criar conta</button>
+      <label>Nome completo<input name="name" required minlength="2" placeholder="Seu nome ou da empresa"></label>
+      <label>Email profissional<input name="email" type="email" required placeholder="contato@empresa.com"></label>
+      <label>Tipo de negócio
+        <select name="business_type" required>
+          <option value="">Selecione o segmento</option>
+          <option>Serviços</option>
+          <option>Vendas</option>
+          <option>Serviços e vendas</option>
+          <option>Outro</option>
+        </select>
+      </label>
+      <label>Senha (mínimo 8 caracteres, com letra e número)<input name="password" type="password" minlength="8" required placeholder="••••••••"></label>
+      <label>Confirmar senha<input name="confirm_password" type="password" minlength="8" required placeholder="••••••••"></label>
+      <button class="btn primary" type="submit">Criar Conta e Começar</button>
     </form>
     <p id="auth-error" class="error" role="alert"></p>
   </section>
 </div>
+
+<!-- ============================================================
+     3. APP SHELL (PAINEL INTERNO DO SOFTWARE)
+     ============================================================ -->
 <div id="app" class="app hidden">
   <aside class="sidebar">
     <div class="wordmark side-mark">Drexier</div>
     <nav id="nav">
-      <button class="nav-item active" data-page="dashboard">Dashboard</button>
-      <button class="nav-item" data-page="messages">Mensagens</button>
-      <button class="nav-item" data-page="reports">Relatórios</button>
-      <button class="nav-item" data-page="business">Negócio</button>
-      <button class="nav-item" data-page="settings">Configurações</button>
+      <button class="nav-item active" data-page="dashboard">
+        <span class="nav-item-content">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+          <span>Dashboard</span>
+        </span>
+      </button>
+      <button class="nav-item" data-page="messages">
+        <span class="nav-item-content">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          <span>Mensagens</span>
+        </span>
+        <span id="nav-messages-dot" class="nav-unread-dot hidden" title="Novas mensagens ou pedidos aguardando"></span>
+      </button>
+      <button class="nav-item" data-page="reports">
+        <span class="nav-item-content">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+          <span>Relatórios</span>
+        </span>
+      </button>
+      <button class="nav-item" data-page="business">
+        <span class="nav-item-content">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          <span>Negócio</span>
+        </span>
+      </button>
+      <button class="nav-item" data-page="settings">
+        <span class="nav-item-content">
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>Configurações</span>
+        </span>
+      </button>
     </nav>
-    <div class="sidebar-bottom"><span id="side-user"></span><button class="btn outline small" id="logout">Sair da conta</button></div>
+    <div class="sidebar-bottom">
+      <span id="side-user"></span>
+      <button class="btn outline small" id="logout">Sair da conta</button>
+    </div>
   </aside>
+
   <main class="main">
-    <header class="topbar"><button id="mobile-menu" class="btn outline small">Menu</button><div><h1 id="page-title">Dashboard</h1><p id="page-subtitle" class="muted">Visão geral do atendimento</p></div><div class="top-user" id="top-user"></div></header>
+    <header class="topbar">
+      <button id="mobile-menu" class="btn outline small">Menu</button>
+      <div>
+        <h1 id="page-title">Dashboard</h1>
+        <p id="page-subtitle" class="muted">Visão geral do atendimento</p>
+      </div>
+    </header>
+
     <div id="notice" class="notice hidden" role="status"></div>
+
+    <!-- ==================== PÁGINA: DASHBOARD ==================== -->
     <section id="page-dashboard" class="page">
       <!-- Alerta de Subscrição SaaS no Dashboard (se plano inativo) -->
       <div id="billing-paywall-banner" class="billing-paywall-alert hidden">
         <div class="billing-paywall-left">
-          <span class="billing-paywall-icon">💳</span>
+          <span class="billing-paywall-icon">
+            <svg class="svg-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+          </span>
           <div>
             <strong id="billing-paywall-title">Ative o Plano Business (59€/mês) para desbloquear a sua IA Drexier</strong>
             <span id="billing-paywall-desc" class="billing-paywall-sub">
-              Acesso total às respostas automáticas 24/7 por e-mail e treinamento ilimitado da IA.
+              Acesso às respostas automáticas por e-mail quando o agente estiver ativado, além das ferramentas de treinamento.
             </span>
           </div>
         </div>
-        <button type="button" class="btn small primary" id="btn-goto-billing">Ativar Subscrição ➔</button>
+        <button type="button" class="btn small primary" id="btn-goto-billing">
+          <span>Ativar Subscrição</span>
+          <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </button>
       </div>
 
-      <!-- Banner de Indução e Precisão da IA Baseado no Volume de Conhecimento -->
+      <!-- Indicador de preenchimento da base de conhecimento -->
       <div class="knowledge-hero-banner" id="dashboard-knowledge-banner">
         <div class="knowledge-hero-content">
           <div class="knowledge-hero-top">
-            <div class="knowledge-hero-badge"><span class="pulse-spark">⚡</span> Potência e Precisão da IA Drexier</div>
+            <div class="knowledge-hero-badge">
+              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+              <span>Base de conhecimento do agente</span>
+            </div>
             <span class="knowledge-level-tag" id="dash-knowledge-level-tag">Calibração Inicial</span>
           </div>
-          <h2 class="knowledge-hero-title" id="dash-knowledge-title">Alimente a Base da IA para Máxima Precisão nas Respostas</h2>
+          <h2 class="knowledge-hero-title" id="dash-knowledge-title">Complete as informações do seu negócio</h2>
           <p class="knowledge-hero-desc" id="dash-knowledge-desc">
-            O seu agente depende de um <strong>volume massivo de dados reais</strong> sobre o negócio para atender os clientes com máxima assertividade e sem alucinações. Preencha os cards pré-gerados e envie regulamentos na aba Negócios.
+            Adicione informações claras sobre produtos, políticas e atendimento para dar mais contexto às respostas do agente. Revise as respostas e mantenha esta base atualizada na aba Negócio.
           </p>
           <div class="knowledge-progress-bar-container">
             <div class="knowledge-progress-bar">
-              <div class="knowledge-progress-fill" id="dash-knowledge-fill" style="width: 25%;"></div>
+              <div class="knowledge-progress-fill" id="dash-knowledge-fill" style="width: 15%;"></div>
             </div>
             <div class="knowledge-progress-stats">
-              <span id="dash-knowledge-status-text">Cards configurados: 0 / 12 · Treinamentos: 0</span>
-              <strong id="dash-knowledge-percent-text">25% Precisão</strong>
+              <span id="dash-knowledge-status-text">Cards configurados: 0 / 12 &bull; Treinamentos: 0</span>
+              <strong id="dash-knowledge-percent-text">15/100 Índice da base</strong>
             </div>
           </div>
           <div class="knowledge-missing-pills-wrap" id="dash-missing-pills-wrap">
             <span class="knowledge-pills-label">Cards prioritários aguardando preenchimento:</span>
-            <div class="knowledge-missing-pills" id="dash-missing-pills">
-              <!-- Preenchido dinamicamente com atalhos de clique direto -->
-            </div>
+            <div class="knowledge-missing-pills" id="dash-missing-pills"></div>
           </div>
         </div>
         <div class="knowledge-hero-actions">
-          <button class="btn primary" id="dash-btn-fill-cards">📋 Completar Cards do Negócio</button>
-          <button class="btn outline" id="dash-btn-open-training">🧠 Enviar Regulamentos & Treinar IA</button>
+          <button class="btn primary" id="dash-btn-fill-cards">
+            <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+            <span>Completar Cards do Negócio</span>
+          </button>
+          <button class="btn outline" id="dash-btn-open-training">
+            <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line></svg>
+            <span>Enviar Regulamentos &amp; Treinar IA</span>
+          </button>
         </div>
       </div>
 
-      <div class="metric-grid">
-        <article class="metric"><span>Mensagens respondidas</span><strong id="metric-messages">0</strong></article>
-        <article class="metric"><span>Clientes adquiridos</span><strong id="metric-contacts">0</strong></article>
-        <article class="metric"><span>Novos clientes hoje</span><strong id="metric-today">0</strong><small id="compare-yesterday">Dia anterior: 0</small></article>
-        <article class="metric clickable" id="card-metric-pending" title="Clique para expandir e gerir pedidos a confirmar"><span>Pedidos para confirmar</span><strong id="metric-pending">0</strong><small class="muted" style="display:block;margin-top:4px;font-size:11px;">🔍 Clique para gerir</small></article>
-      </div>
-      <div class="panel"><div class="panel-heading"><h2>Aquisição de clientes</h2><span class="muted">Hoje vs. dia anterior</span></div><div id="dashboard-chart" class="chart"></div></div>
-      <div class="panel" id="panel-pending-confirmations">
-        <div class="panel-heading">
-          <div>
-            <h2>Pedidos aguardando confirmação</h2>
-            <p class="muted" style="margin:2px 0 0;font-size:12.5px;">Detectados automaticamente pela IA em e-mails recebidos de clientes.</p>
+      <!-- BENTO GRID ASSIMÉTRICO DE MÉTRICAS -->
+      <div class="dashboard-bento-grid">
+        <!-- Card 1: Mensagens Respondidas (Hero Card Metálico Alargado) -->
+        <article class="metric bento-card bento-hero-metric">
+          <div class="bento-metric-top">
+            <span class="bento-metric-tag">Desempenho Geral</span>
+            <span class="bento-gold-chip">Visão geral</span>
           </div>
-          <button class="btn primary small" id="btn-open-pending-modal">Gerir Pedidos</button>
+          <span class="bento-metric-label">Mensagens Respondidas</span>
+          <strong id="metric-messages" class="bento-metric-number">0</strong>
+          <small class="bento-metric-sub">Respostas autônomas oficiais via e-mail</small>
+        </article>
+
+        <!-- Card 2: Clientes Adquiridos -->
+        <article class="metric bento-card">
+          <div class="bento-metric-icon">
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          </div>
+          <span class="bento-metric-label">Clientes adquiridos</span>
+          <strong id="metric-contacts" class="bento-metric-number">0</strong>
+          <small class="muted">Interações registradas e retidas</small>
+        </article>
+
+        <!-- Card 3: Novos Clientes Hoje -->
+        <article class="metric bento-card">
+          <div class="bento-metric-icon">
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+          </div>
+          <span class="bento-metric-label">Novos clientes hoje</span>
+          <strong id="metric-today" class="bento-metric-number">0</strong>
+          <small id="compare-yesterday" class="bento-compare-pill">Dia anterior: 0</small>
+        </article>
+
+        <!-- Card 4: Pedidos para Confirmar (Clicável) -->
+        <article class="metric bento-card clickable" id="card-metric-pending" title="Clique para expandir e gerir pedidos a confirmar">
+          <div class="bento-metric-icon pending-icon">
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+          </div>
+          <span class="bento-metric-label">Pedidos para confirmar</span>
+          <strong id="metric-pending" class="bento-metric-number">0</strong>
+          <small class="bento-action-hint">Clique para gerir</small>
+        </article>
+      </div>
+
+      <!-- LAYOUT ASSIMÉTRICO: GRÁFICO (2 COLUNAS) + PEDIDOS PENDENTES (1 COLUNA) -->
+      <div class="dashboard-main-row">
+        <div class="panel dashboard-chart-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Aquisição de clientes</h2>
+              <p class="muted">Hoje vs. dia anterior &bull; Volume contínuo</p>
+            </div>
+          </div>
+          <div id="dashboard-chart" class="chart"></div>
         </div>
-        <div id="pending-list" class="empty">Nenhum pedido pendente.</div>
+
+        <div class="panel dashboard-pending-panel" id="panel-pending-confirmations">
+          <div class="panel-heading">
+            <div>
+              <h2>Pedidos aguardando validação</h2>
+              <p class="muted" style="margin:2px 0 0;font-size:12.5px;">Detectados pela IA em e-mails de clientes.</p>
+            </div>
+            <button class="btn primary small" id="btn-open-pending-modal">Gerir Pedidos</button>
+          </div>
+          <div id="pending-list" class="empty">Nenhum pedido pendente.</div>
+        </div>
       </div>
     </section>
+
+    <!-- ==================== PÁGINA: MENSAGENS ==================== -->
     <section id="page-messages" class="page hidden">
       <!-- Visão 1: Lista de Clientes (Cards tipo Chat App) -->
       <div id="messages-inbox-view" class="panel messages-inbox-panel">
-        <div class="panel-heading" style="flex-wrap: wrap; gap: 10px;">
+        <div class="panel-heading messages-header-bar">
           <div>
-            <h2>Clientes & Mensagens</h2>
+            <h2>Clientes &amp; Mensagens</h2>
             <p class="muted" style="margin:2px 0 0;">Selecione um cliente para abrir a conversa e acompanhar a IA em tempo real.</p>
           </div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button class="btn outline small" id="btn-toggle-auto-reply-messages" title="Ativar ou desativar o envio automático de respostas pelo agente">Respostas IA: Ativas</button>
-            <button class="btn primary small" id="btn-sync-emails-messages" title="Verificar novos e-mails recebidos e responder com a IA">Sincronizar E-mails</button>
+          <div class="messages-top-controls">
+            <!-- INTERRUPTOR DESLIZANTE PERSONALIZADO LIGADO / DESLIGADO DO AGENTE -->
+            <div class="agent-master-switch-box" id="agent-toggle-box" title="Clique no interruptor para ativar ou desativar o agente">
+              <div class="agent-switch-info">
+                <span class="agent-switch-title">Agente IA</span>
+                <span class="agent-switch-sub">Ligar ou desligar</span>
+              </div>
+              <button type="button" class="agent-slider-switch active" id="btn-toggle-agent-global" role="switch" aria-label="Desativar respostas automáticas do agente" aria-checked="true">
+                <span class="agent-switch-track">
+                  <span class="switch-label-state off">DESLIGADO</span>
+                  <span class="switch-slider-thumb"></span>
+                  <span class="switch-label-state on">LIGADO</span>
+                </span>
+              </button>
+            </div>
+
+            <button class="btn primary small" id="btn-sync-emails-messages" title="Verificar novos e-mails recebidos e responder com a IA">
+              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+              <span>Sincronizar E-mails</span>
+            </button>
             <button class="btn outline small" id="refresh-contacts">Atualizar</button>
           </div>
         </div>
+
         <div class="messages-accuracy-tip">
-          <span>💡 <strong>Dica de Precisão:</strong> O agente responde com muito mais detalhes e autoridade quanto maior for o volume de dados da sua empresa. <a href="#" id="link-go-business-from-msg">Enriqueça os cards e envie regulamentos na aba Negócios →</a></span>
+          <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          <span><strong>Contexto do agente:</strong> Mantenha as informações do negócio completas e atualizadas. <a href="#" id="link-go-business-from-msg">Gerir informações na aba Negócio &rarr;</a></span>
         </div>
-        <div id="contacts-list" class="contact-card-grid empty">Ainda não existem conversas.</div>
+
+        <div id="contacts-list" class="contact-card-grid empty">Ainda não existem conversas registradas.</div>
       </div>
 
       <!-- Visão 2: Chat com o Cliente (Aberto ao clicar no card do cliente) -->
       <div id="messages-chat-view" class="panel messages-chat-panel hidden">
         <div class="chat-header">
           <div style="display:flex; align-items:center; gap:12px;">
-            <button class="btn outline small" id="btn-back-to-inbox" title="Voltar à lista de clientes">← Voltar</button>
+            <button class="btn outline small" id="btn-back-to-inbox" title="Voltar à lista de clientes">
+              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 19"></polyline></svg>
+              <span>Voltar</span>
+            </button>
             <div>
               <h2 id="conversation-title" style="margin:0; font-size:16px;">Conversa</h2>
               <span id="conversation-subtitle" class="muted" style="font-size:12px;"></span>
@@ -143,7 +884,7 @@
 
         <div id="conversation-live-status" class="conversation-live-bar">
           <span class="live-pulse-dot" id="live-status-dot"></span>
-          <span id="live-status-text">Atendimento oficial por e-mail ativo · A IA Drexier responde automaticamente em tempo real a todas as mensagens deste cliente.</span>
+          <span id="live-status-text">Atendimento oficial por e-mail ativo &bull; A IA Drexier responde automaticamente em tempo real a todas as mensagens deste cliente.</span>
         </div>
 
         <div id="conversation" class="conversation empty">A carregar mensagens...</div>
@@ -152,40 +893,87 @@
         <form id="owner-reply-form" class="owner-reply-box">
           <textarea id="owner-reply-input" name="reply_message" rows="3" placeholder="Escreva aqui a sua resposta oficial ao cliente... (será enviada diretamente para o e-mail dele)" required></textarea>
           <div class="owner-reply-actions">
-            <span class="muted" style="font-size:12px;">✉️ Esta resposta será entregue no e-mail do cliente e registrada como Proprietário.</span>
+            <span class="muted" style="font-size:12px;">
+              <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+              Esta resposta será entregue no e-mail do cliente e registrada como Proprietário.
+            </span>
             <button class="btn primary small" type="submit" id="btn-send-owner-reply">Enviar por E-mail</button>
           </div>
         </form>
       </div>
     </section>
+
+    <!-- ==================== PÁGINA: RELATÓRIOS ==================== -->
     <section id="page-reports" class="page hidden">
-      <div class="panel"><div class="panel-heading"><h2>Clientes adquiridos por dia</h2><span class="muted">Dados reais da conta · últimos 14 dias</span></div><div id="reports-chart" class="chart line-chart"></div><div id="chart-labels" class="chart-labels"></div></div>
-      <div class="panel"><div class="panel-heading"><h2>Teste de estilos de resposta</h2><button class="btn primary small" id="add-variant">Novo estilo</button></div><p class="muted">Registe variantes para acompanhar os resultados. Os contadores só aumentam quando eventos reais forem ligados; não são criados resultados fictícios.</p><div id="variants-list" class="variant-list empty">Ainda não existem variantes.</div><form id="variant-form" class="form hidden"><label>Nome do estilo<input name="label" required></label><label>Texto da resposta<textarea name="response_text" rows="3" required></textarea></label><div class="actions"><button class="btn primary" type="submit">Guardar estilo</button><button class="btn outline" type="button" id="cancel-variant">Cancelar</button></div></form></div>
+      <div class="panel">
+        <div class="panel-heading">
+          <h2>Clientes adquiridos por dia</h2>
+          <span class="muted">Dados reais da conta &bull; últimos 14 dias</span>
+        </div>
+        <div id="reports-chart" class="chart line-chart"></div>
+        <div id="chart-labels" class="chart-labels"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-heading">
+          <h2>Teste de estilos de resposta</h2>
+          <button class="btn primary small" id="add-variant">+ Novo estilo</button>
+        </div>
+        <p class="muted">Registe variantes para acompanhar os resultados. Os contadores só aumentam quando eventos reais forem ligados.</p>
+        <div id="variants-list" class="variant-list empty">Ainda não existem variantes.</div>
+        <form id="variant-form" class="form hidden">
+          <label>Nome do estilo<input name="label" required placeholder="Ex: Direto e Comercial, Formal Executivo..."></label>
+          <label>Texto da resposta<textarea name="response_text" rows="3" required placeholder="Estrutura de resposta..."></textarea></label>
+          <div class="actions">
+            <button class="btn primary" type="submit">Guardar estilo</button>
+            <button class="btn outline" type="button" id="cancel-variant">Cancelar</button>
+          </div>
+        </form>
+      </div>
     </section>
+
+    <!-- ==================== PÁGINA: NEGÓCIO ==================== -->
     <section id="page-business" class="page hidden">
-      <!-- Sub-abas da Aba Negócio -->
+      <!-- Sub-abas da Aba Negócio com Ícones SVG (Sem Emojis) -->
       <div class="business-subtabs-bar">
         <button class="business-subtab active" data-subtab="cards" id="subtab-btn-cards">
-          <span class="subtab-icon">📋</span> Cards Estruturados <span class="subtab-pill" id="badge-cards-stat">0 / 12 preenchidos</span>
+          <span class="subtab-icon">
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+          </span>
+          <span>Cards Estruturados</span>
+          <span class="subtab-pill" id="badge-cards-stat">0 / 12 preenchidos</span>
+        </button>
+        <button class="business-subtab" data-subtab="stock" id="subtab-btn-stock">
+          <span class="subtab-icon">
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          </span>
+          <span>Stock</span>
+          <span class="subtab-pill" id="badge-stock-stat">0 produtos</span>
         </button>
         <button class="business-subtab" data-subtab="training" id="subtab-btn-training">
-          <span class="subtab-icon">🧠</span> Treinamento &amp; Documentos <span class="subtab-pill" id="badge-training-stat">0 tópicos</span>
+          <span class="subtab-icon">
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line></svg>
+          </span>
+          <span>Treinamento &amp; Documentos</span>
+          <span class="subtab-pill" id="badge-training-stat">0 tópicos</span>
         </button>
       </div>
 
-      <!-- Banner de Indução e Precisão da Base de Negócio -->
+      <!-- Indicador de preenchimento da base de negócio -->
       <div class="business-ai-banner">
         <div class="business-ai-banner-content">
-          <div class="business-ai-badge"><span class="pulse-spark">⚡</span> Potência da Base de Dados da IA</div>
+          <div class="business-ai-badge">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span>Base de conhecimento do agente</span>
+          </div>
           <div class="business-ai-text-block">
-            <h3 id="business-ai-title">Volume de Conhecimento: Insira Dados Massivos</h3>
+            <h3 id="business-ai-title">Organize o contexto do seu negócio</h3>
             <p id="business-ai-desc" class="muted">
-              Quanto maior o volume de informações, regulamentos, produtos e regras inseridos, mais infalível será o modelo ao atender os clientes da sua empresa, garantindo respostas ricas e livres de erros.
+              Organize produtos, políticas e orientações para dar contexto ao agente. Este indicador acompanha o preenchimento da base, não mede a precisão das respostas.
             </p>
           </div>
           <div class="business-ai-progress-wrap">
-            <div class="business-ai-bar"><div class="business-ai-fill" id="business-ai-fill" style="width: 20%;"></div></div>
-            <span class="business-ai-pct" id="business-ai-pct">20% Precisão</span>
+            <div class="business-ai-bar"><div class="business-ai-fill" id="business-ai-fill" style="width: 15%;"></div></div>
+            <span class="business-ai-pct" id="business-ai-pct">15/100 Índice da base</span>
           </div>
         </div>
       </div>
@@ -196,7 +984,7 @@
           <div class="panel-heading" style="flex-wrap: wrap; gap: 12px;">
             <div>
               <h2>Cards Estruturados do Negócio</h2>
-              <p class="muted">12 cards pré-elaborados prontos para preenchimento. A IA utiliza todos os dados que cadastrar aqui.</p>
+              <p class="muted">Organize produtos, políticas e respostas frequentes para dar contexto ao agente.</p>
             </div>
             <div style="display:flex; gap:8px;">
               <button class="btn primary" id="new-info">+ Novo Card Personalizado</button>
@@ -206,45 +994,127 @@
           <div id="info-kind-picker" class="kind-picker hidden">
             <p>Escolha uma categoria para o seu card personalizado:</p>
             <div class="kind-grid">
-              <button class="kind-option" data-kind="productos">📦 Produtos e Preços</button>
-              <button class="kind-option" data-kind="servicos">⚙️ Serviços e Procedimentos</button>
-              <button class="kind-option" data-kind="horarios">🕐 Horários de Atendimento</button>
-              <button class="kind-option" data-kind="marcacoes">📅 Marcações e Agendamentos</button>
-              <button class="kind-option" data-kind="pagamentos">💳 Formas de Pagamento</button>
-              <button class="kind-option" data-kind="campanhas">🎯 Campanhas e Descontos</button>
-              <button class="kind-option" data-kind="devolucoes">🔄 Trocas e Devoluções</button>
-              <button class="kind-option" data-kind="entregas">🚚 Envios e Prazos</button>
-              <button class="kind-option" data-kind="faq">❓ Perguntas Frequentes (FAQ)</button>
-              <button class="kind-option" data-kind="localizacao">📍 Localização e Morada</button>
-              <button class="kind-option" data-kind="contactos">📞 Canais Oficiais de Contacto</button>
-              <button class="kind-option" data-kind="regras_atendimento">🛡️ Regras de Atendimento</button>
-              <button class="kind-option" data-kind="personalizado">✏️ Outro Personalizado</button>
+              <button class="kind-option" data-kind="productos">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                <span>Produtos e Preços</span>
+              </button>
+              <button class="kind-option" data-kind="servicos">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span>Serviços e Procedimentos</span>
+              </button>
+              <button class="kind-option" data-kind="horarios">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                <span>Horários de Atendimento</span>
+              </button>
+              <button class="kind-option" data-kind="marcacoes">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                <span>Marcações e Agendamentos</span>
+              </button>
+              <button class="kind-option" data-kind="pagamentos">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+                <span>Formas de Pagamento</span>
+              </button>
+              <button class="kind-option" data-kind="campanhas">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+                <span>Campanhas e Descontos</span>
+              </button>
+              <button class="kind-option" data-kind="devolucoes">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                <span>Trocas e Devoluções</span>
+              </button>
+              <button class="kind-option" data-kind="entregas">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+                <span>Envios e Prazos</span>
+              </button>
+              <button class="kind-option" data-kind="faq">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                <span>Perguntas Frequentes (FAQ)</span>
+              </button>
+              <button class="kind-option" data-kind="localizacao">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                <span>Localização e Morada</span>
+              </button>
+              <button class="kind-option" data-kind="contactos">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                <span>Canais Oficiais de Contacto</span>
+              </button>
+              <button class="kind-option" data-kind="regras_atendimento">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                <span>Regras de Atendimento</span>
+              </button>
+              <button class="kind-option" data-kind="personalizado">
+                <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+                <span>Outro Personalizado</span>
+              </button>
             </div>
           </div>
 
-          <div id="info-list" class="card-grid">
-            <!-- Renderizado dinamicamente via app.js -->
+          <div id="info-list" class="card-grid"></div>
+        </div>
+      </div>
+
+      <!-- Sub-visão 2: Gestão de Stock baseada nos Produtos e Preços -->
+      <div id="subview-stock" class="subview-container hidden">
+        <div class="panel">
+          <div class="panel-heading" style="flex-wrap: wrap; gap: 12px;">
+            <div>
+              <h2>Stock de Produtos</h2>
+              <p class="muted">Baseado no card "Produtos e Preços". A IA apenas informa ao cliente se tem ou não o produto disponível, nunca a quantidade.</p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button class="btn outline small" id="btn-refresh-stock">Atualizar</button>
+              <button class="btn primary small" id="btn-save-stock">Guardar Stock</button>
+            </div>
+          </div>
+          <div class="training-induce-box" style="margin-top: 10px;">
+            <div class="training-induce-icon">
+              <svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            </div>
+            <div class="training-induce-content">
+              <strong>Regra de Sigilo para a IA:</strong>
+              <p>A IA só deve informar se existe disponibilidade para o produto solicitado. Nunca revela números de stock ou dados sensíveis. Apenas "Temos em stock" ou "Não temos em stock de momento".</p>
+            </div>
+          </div>
+          <div style="margin-top: 16px; overflow-x: auto;">
+            <table class="variant-list" style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="text-align: left; background: #fafafa;">
+                  <th style="padding: 10px 12px; border: 1px solid var(--border); font-size: 12.5px;">Produto</th>
+                  <th style="padding: 10px 12px; border: 1px solid var(--border); font-size: 12.5px;">Preço</th>
+                  <th style="padding: 10px 12px; border: 1px solid var(--border); font-size: 12.5px;">Detalhes</th>
+                  <th style="padding: 10px 12px; border: 1px solid var(--border); font-size: 12.5px; width: 140px;">Em stock?</th>
+                  <th style="padding: 10px 12px; border: 1px solid var(--border); font-size: 12.5px; width: 160px;">Quantidade (apenas proprietário)</th>
+                </tr>
+              </thead>
+              <tbody id="stock-table-body">
+                <tr>
+                  <td colspan="5" style="padding: 14px; text-align: center; color: var(--muted);">Nenhum produto encontrado no card "Produtos e Preços".</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
 
-      <!-- Sub-visão 2: Treinamentos & Documentos Oficiais -->
+      <!-- Sub-visão 3: Treinamentos & Documentos Oficiais -->
       <div id="subview-training" class="subview-container hidden">
         <div class="panel">
           <div class="panel-heading" style="flex-wrap: wrap; gap: 10px;">
             <div>
               <h2>Central de Treinamento Livre da IA &amp; Documentos</h2>
-              <p class="muted">Escreva livremente regulamentos, normas, contratos e políticas ou transfira documentos (PDF, DOCX, TXT). Quanto mais volume de texto inserir, mais perfeita será a IA.</p>
+              <p class="muted">Escreva livremente regulamentos, normas, contratos e políticas ou transfira documentos (PDF, DOCX, TXT).</p>
             </div>
             <button class="btn primary small" id="btn-toggle-training-form">+ Novo Tópico de Treinamento</button>
           </div>
 
-          <!-- Banner persuasivo de indução de treino massivo -->
+          <!-- Banner de Treinamento -->
           <div class="training-induce-box">
-            <div class="training-induce-icon">🎯</div>
+            <div class="training-induce-icon">
+              <svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+            </div>
             <div class="training-induce-content">
-              <strong>Garanta 100% de precisão: Quanto mais dados fornecer, menor o risco de o agente hesitar.</strong>
-              <p>Ao marcar um treino como <em>Tópico Isolado</em>, a IA cria uma barreira contextual para que o assunto nunca seja confundido com outras regras da empresa. Cole manuais completos, roteiros, exceções de atendimento e perguntas de clientes.</p>
+              <strong>Adicione orientações claras e mantenha-as atualizadas.</strong>
+              <p>Ao marcar um treino como <em>Tópico Isolado</em>, o conteúdo fica identificado separadamente para ajudar a equipa a organizar as informações.</p>
             </div>
           </div>
 
@@ -255,7 +1125,7 @@
             <div class="training-form-grid">
               <label>
                 Título do Tópico / Regulamento
-                <input id="training-title-input" placeholder="Ex: Regulamento Interno da Loja 2026, Manual de Garantias e Trocas, Procedimento de Atendimento VIP..." required maxlength="240">
+                <input id="training-title-input" placeholder="Ex: Regulamento Interno 2026, Manual de Garantias e Trocas..." required maxlength="240">
               </label>
 
               <!-- Opção Crítica: Marcar como Tópico Isolado de Conhecimento -->
@@ -263,9 +1133,12 @@
                 <label class="topic-checkbox-label">
                   <input type="checkbox" id="training-is-topic-checkbox" checked>
                   <div>
-                    <span class="topic-checkbox-title">🏷️ Marcar como Tópico Isolado de Conhecimento (Recomendado)</span>
+                    <span class="topic-checkbox-title">
+                      <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+                      Marcar como Tópico Isolado de Conhecimento (Recomendado)
+                    </span>
                     <small class="muted" style="display:block;margin-top:2px;">
-                      A IA delimitará este conteúdo de forma independente e estrita, garantindo que o agente <strong>nunca confunda nem misture</strong> este tópico com outros assuntos da empresa.
+                      Este conteúdo será identificado separadamente para ajudar a organizar as informações disponíveis ao agente.
                     </small>
                   </div>
                 </label>
@@ -274,10 +1147,12 @@
               <!-- Upload / Transferência de Ficheiros -->
               <div class="training-upload-zone" id="training-drop-zone">
                 <input type="file" id="training-file-picker" accept=".pdf,.docx,.txt,.md,.csv,.json" style="display:none;">
-                <div class="upload-zone-icon">📁</div>
+                <div class="upload-zone-icon">
+                  <svg class="svg-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                </div>
                 <div class="upload-zone-text">
                   <strong>Transferir / Carregar Documento Oficial (PDF, Word DOCX, TXT, MD, CSV)</strong>
-                  <p class="muted" style="margin:2px 0 0;font-size:12.5px;">Clique aqui ou arraste o regulamento/manual para carregar automaticamente o conteúdo para o campo livre.</p>
+                  <p class="muted" style="margin:2px 0 0;font-size:12.5px;">Clique aqui ou arraste o ficheiro para carregar automaticamente o conteúdo.</p>
                 </div>
                 <button type="button" class="btn outline small" id="btn-trigger-file-picker">Selecionar Documento</button>
               </div>
@@ -285,8 +1160,8 @@
 
               <!-- Campo de Escrita Livre Massivo -->
               <label>
-                Campo de Escrita Livre (Área de Texto Massiva e Sem Limites)
-                <textarea id="training-content-input" rows="9" required placeholder="Escreva aqui uma infinidade de informações sobre a empresa... Cole regulamentos completos, termos de compra, manuais da equipe, exceções de atendimento, políticas de preços para clientes fiéis, condições contratuais, tabelas detalhadas... Quanto mais volume de texto inserir, mais perfeito e assertivo será o atendimento da IA!"></textarea>
+                Campo de Escrita Livre (Área de Texto Sem Limites)
+                <textarea id="training-content-input" rows="9" required placeholder="Escreva aqui detalhadamente sobre a sua empresa... Cole regulamentos completos, termos de compra, manuais da equipe, exceções de atendimento, políticas de preços... Quanto maior o volume, mais assertivo será o atendimento da IA!"></textarea>
               </label>
 
               <!-- Medidor de Volume e Robustez do Treinamento -->
@@ -296,7 +1171,7 @@
                   <span class="stat-pill" id="training-chars-count">0 caracteres</span>
                 </div>
                 <div class="training-gauge-indicator">
-                  <span class="gauge-pill gauge-empty" id="training-gauge-status">⚠️ Volume Básico</span>
+                  <span class="gauge-pill gauge-empty" id="training-gauge-status">Volume Básico</span>
                   <span class="gauge-desc muted" id="training-gauge-desc">Adicione mais dados para atingir o nível de treino ideal</span>
                 </div>
               </div>
@@ -319,28 +1194,31 @@
         </div>
       </div>
     </section>
+
+    <!-- ==================== PÁGINA: CONFIGURAÇÕES ==================== -->
     <section id="page-settings" class="page hidden">
       <div class="settings-tabs">
         <button class="settings-tab active" data-setting="integration">Integração</button>
-        <button class="settings-tab" data-setting="billing">Faturação 💳</button>
+        <button class="settings-tab" data-setting="billing">Faturação</button>
         <button class="settings-tab" data-setting="instructions">Instruções ao agente</button>
         <button class="settings-tab" data-setting="mandatory">Respostas obrigatórias</button>
         <button class="settings-tab" data-setting="account">Conta</button>
       </div>
+
       <div id="setting-integration" class="panel setting-panel">
-        <!-- Canal de Atendimento Ativo -->
         <div class="channel-selector-bar">
           <button type="button" class="channel-tab-btn active" id="tab-channel-email" data-channel="email">
-            <span class="channel-icon">📧</span>
+            <span class="channel-icon">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+            </span>
             <div class="channel-meta">
               <strong>E-mail Oficial</strong>
-              <small>Google Gmail · Atendimento IA 24/7</small>
+              <small>Google Gmail &bull; Respostas automáticas configuráveis</small>
             </div>
             <span class="channel-pill" id="pill-email-status">Desconectado</span>
           </button>
         </div>
 
-        <!-- ==================== CANAL PRINCIPAL: E-MAIL GOOGLE GMAIL ==================== -->
         <div id="channel-email-section">
           <div class="panel-heading">
             <div>
@@ -350,14 +1228,14 @@
             <div id="email-status-badge" class="badge badge-disconnected">Desconectado</div>
           </div>
 
-          <!-- Estado 0: Carregando status da integração de email -->
           <div id="email-loading-state" class="empty-state">
             <p>A carregar estado da integração de e-mail...</p>
           </div>
 
-          <!-- Estado 1: Alerta caso chaves OAuth estejam pendentes no .env -->
           <div id="email-env-warning" class="wa-alert-box hidden">
-            <div class="wa-alert-icon">⚠️</div>
+            <div class="wa-alert-icon">
+              <svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </div>
             <div class="wa-alert-content">
               <strong>Configuração de Credenciais Pendente no ficheiro .env</strong>
               <p>Para ativar a ligação com um clique, adicione as chaves no seu ficheiro <code>.env</code>:</p>
@@ -367,7 +1245,6 @@
             </div>
           </div>
 
-          <!-- Estado 2: Desconectado - Escolha de fornecedor oficial (Google Gmail) -->
           <div id="email-disconnected-view" class="wa-view hidden">
             <div class="wa-hero-card">
               <div class="wa-hero-content">
@@ -412,7 +1289,6 @@
             </div>
           </div>
 
-          <!-- Estado 3: Conectado com Sucesso -->
           <div id="email-connected-view" class="wa-view hidden">
             <div class="wa-connected-card">
               <div class="wa-conn-header">
@@ -449,16 +1325,19 @@
                   <span class="wa-info-label">Última Sincronização</span>
                   <strong id="email-info-last-sync">-</strong>
                 </div>
+                <div class="wa-info-item">
+                  <span class="wa-info-label">A IA responde desde</span>
+                  <strong id="email-info-response-since">Aguardando pagamento confirmado</strong>
+                </div>
               </div>
 
-              <!-- Informação Operacional e Respostas Reais -->
               <div class="email-operational-banner">
                 <div class="status-indicator-live">
                   <span class="live-pulse-dot"></span>
                   <div>
-                    <strong>Funcionamento Pleno & Atendimento 100% Real:</strong>
+                    <strong>Integração ativa &bull; Agente configurável:</strong>
                     <span style="font-size: 13px; color: #065f46; display: block; margin-top: 3px;">
-                      O Drexier monitoriza continuamente a caixa de entrada do seu e-mail vinculado. Quando um cliente envia uma mensagem ou dúvida para o seu e-mail, a IA formula a resposta oficial com as diretrizes do seu negócio e responde de forma real diretamente ao remetente.
+                      A integração permite consultar as mensagens da caixa de entrada ligada. Quando as respostas automáticas estão ativadas, o agente pode responder usando as informações e instruções configuradas na conta.
                     </span>
                   </div>
                 </div>
@@ -466,7 +1345,6 @@
             </div>
           </div>
         </div>
-
       </div>
 
       <!-- ==================== ABA: FATURAÇÃO E STRIPE (PLANO BUSINESS 59€/MÊS) ==================== -->
@@ -474,28 +1352,29 @@
         <div class="panel-heading">
           <div>
             <h2>Faturação e Plano de Subscrição SaaS</h2>
-            <p class="muted">Gestão da subscrição mensal, emissão de faturas com NIF e controlo seguro de pagamentos via Stripe.</p>
+            <p class="muted">Gestão da subscrição mensal, emissão de faturas e controlo seguro de pagamentos via Stripe.</p>
           </div>
           <div id="billing-status-badge" class="badge badge-disconnected">A verificar...</div>
         </div>
 
-        <!-- Alerta caso as chaves da Stripe estejam pendentes no .env -->
         <div id="billing-env-warning" class="wa-alert-box hidden">
-          <div class="wa-alert-icon">💳</div>
+          <div class="wa-alert-icon">
+            <svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
+          </div>
           <div class="wa-alert-content">
             <strong>Configuração da Stripe Pendente no ficheiro .env</strong>
-            <p>Para ativar cobranças reais com cartão, 3D Secure e faturação automática, preencha no seu ficheiro <code>.env</code>:</p>
+            <p>Para ativar cobranças reais com cartão e faturação automática, preencha no seu ficheiro <code>.env</code>:</p>
             <ul style="margin: 6px 0 0 18px; font-size: 13px; line-height: 1.5;">
-              <li><code>STRIPE_SECRET_KEY</code> (chave secreta iniciada por <code>sk_test_...</code> ou <code>sk_live_...</code>)</li>
-              <li><code>STRIPE_PUBLISHABLE_KEY</code> (chave pública iniciada por <code>pk_test_...</code> ou <code>pk_live_...</code>)</li>
-              <li><code>STRIPE_WEBHOOK_SECRET</code> (assinatura do webhook iniciada por <code>whsec_...</code>)</li>
+              <li><code>STRIPE_SECRET_KEY</code></li>
+              <li><code>STRIPE_PUBLISHABLE_KEY</code></li>
+              <li><code>STRIPE_WEBHOOK_SECRET</code></li>
             </ul>
           </div>
         </div>
 
-        <!-- CARD PRINCIPAL SUPER DESTACADO: PLANO BUSINESS (59€/MÊS) -->
+        <!-- CARD PRINCIPAL: PLANO BUSINESS (59€/MÊS) -->
         <div class="billing-featured-card">
-          <div class="billing-badge-flag">⭐ PLANO OFICIAL · ACESSO COMPLETO SAAS</div>
+          <div class="billing-badge-flag">PLANO OFICIAL &bull; ACESSO COMPLETO SAAS</div>
           
           <div class="billing-card-header">
             <div class="billing-card-title-group">
@@ -509,79 +1388,90 @@
                 <span class="billing-cents">,00</span>
                 <span class="billing-period">/ mês</span>
               </div>
-              <span class="billing-tax-note">Cobrança mensal no cartão · Cancele quando quiser</span>
+              <span class="billing-tax-note">Cobrança mensal no cartão &bull; Cancele quando quiser</span>
             </div>
           </div>
 
-          <!-- Benefícios Detalhados -->
           <div class="billing-features-grid">
             <div class="billing-feature-item">
-              <span class="feature-icon">🤖</span>
+              <span class="feature-icon">
+                <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg>
+              </span>
               <div>
-                <strong>Atendimento Inteligente 24/7</strong>
-                <small>A IA Drexier responde instantaneamente aos seus clientes com o tom e regras da sua empresa.</small>
+                <strong>Atendimento com agente configurável</strong>
+                <small>Ative ou pause as respostas automáticas e configure o contexto do negócio.</small>
               </div>
             </div>
             <div class="billing-feature-item">
-              <span class="feature-icon">📧</span>
+              <span class="feature-icon">
+                <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+              </span>
               <div>
                 <strong>Canal E-mail Oficial (Google Gmail)</strong>
                 <small>Conexão oficial direta com a caixa de entrada para monitorização e respostas reais contínuas.</small>
               </div>
             </div>
             <div class="billing-feature-item">
-              <span class="feature-icon">📚</span>
+              <span class="feature-icon">
+                <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+              </span>
               <div>
                 <strong>Treinamento Profundo com Ficheiros</strong>
                 <small>Carregue catálogos, regulamentos internos e preçários (PDF, Word DOCX, TXT) sem limites.</small>
               </div>
             </div>
             <div class="billing-feature-item">
-              <span class="feature-icon">🎯</span>
+              <span class="feature-icon">
+                <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+              </span>
               <div>
-                <strong>Validação de Pedidos & Marcações</strong>
+                <strong>Validação de Pedidos &amp; Marcações</strong>
                 <small>A IA identifica intenções de compra/reserva e permite confirmação rápida pelo proprietário.</small>
               </div>
             </div>
             <div class="billing-feature-item">
-              <span class="feature-icon">📈</span>
+              <span class="feature-icon">
+                <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+              </span>
               <div>
                 <strong>Dashboard e Métricas em Tempo Real</strong>
                 <small>Visão clara de contactos diários, mensagens respondidas e taxas de conversão de clientes.</small>
               </div>
             </div>
             <div class="billing-feature-item">
-              <span class="feature-icon">🛡️</span>
+              <span class="feature-icon">
+                <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              </span>
               <div>
-                <strong>Pagamento Seguro & Proteção Antifraude</strong>
+                <strong>Pagamento Seguro &amp; Proteção Antifraude</strong>
                 <small>Stripe com 3D Secure / SCA obrigatório, validação de morada (AVS) e criptografia bancária.</small>
               </div>
             </div>
           </div>
 
-          <!-- Área de Ação e Status -->
           <div class="billing-action-box">
-            <!-- Caso A: Sem Assinatura Ativa -->
             <div id="billing-action-unsubscribed">
               <div class="billing-cta-details">
                 <strong>Subscreva com 1 Clique e Ative a sua Conta Imediatamente</strong>
-                <span>Ao aderir, o valor de 59€ é cobrado no seu cartão através do checkout seguro da Stripe e todas as funcionalidades do software ficam liberadas.</span>
+                <span>Ao aderir, o valor de 59€ é cobrado no seu cartão através do checkout seguro da Stripe e todas as funcionalidades ficam liberadas.</span>
               </div>
               <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
                 <button type="button" class="btn primary btn-large billing-cta-btn" id="btn-subscribe-plan">
                   <span>Subscrever Plano Business (59€/mês)</span>
-                  <span class="btn-arrow">➔</span>
+                  <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
                 </button>
                 <button type="button" class="btn outline small" id="btn-sync-billing-status" title="Já pagou? Clique aqui para verificar com a Stripe imediatamente">
-                  🔄 Já paguei / Atualizar Status
+                  <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                  <span>Já paguei / Atualizar Status</span>
                 </button>
               </div>
             </div>
 
-            <!-- Caso B: Assinatura Ativa e em Dia -->
             <div id="billing-action-active" class="hidden">
               <div class="billing-active-banner">
-                <div class="billing-active-check">✓</div>
+                <div class="billing-active-check">
+                  <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
                 <div>
                   <strong style="color: #065f46; font-size: 15px;">A sua subscrição está ativa e regularizada!</strong>
                   <span style="font-size: 13px; color: #047857; display: block; margin-top: 2px;" id="billing-active-details">
@@ -590,14 +1480,16 @@
                 </div>
               </div>
               <button type="button" class="btn outline billing-portal-btn" id="btn-manage-subscription">
-                <span>⚙️ Gerir Cartão e Descarregar Faturas na Stripe</span>
+                <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span>Gerir Cartão e Descarregar Faturas na Stripe</span>
               </button>
             </div>
 
-            <!-- Caso C: Pagamento Recusado / Em Atraso -->
             <div id="billing-action-past-due" class="hidden">
               <div class="billing-warning-banner">
-                <div class="billing-warning-icon">⚠️</div>
+                <div class="billing-warning-icon">
+                  <svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                </div>
                 <div>
                   <strong style="color: #991b1b; font-size: 15px;">Falha no Pagamento do Cartão</strong>
                   <span style="font-size: 13px; color: #b91c1c; display: block; margin-top: 2px;">
@@ -606,46 +1498,107 @@
                 </div>
               </div>
               <button type="button" class="btn primary billing-fix-btn" id="btn-fix-payment">
-                <span>Atualizar Cartão de Pagamento na Stripe ➔</span>
+                <span>Atualizar Cartão de Pagamento na Stripe</span>
+                <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
               </button>
             </div>
           </div>
         </div>
 
-        <!-- Rodapé de Garantias de Segurança Stripe -->
         <div class="billing-security-footer">
           <div class="security-badge-item">
-            <span>🔒</span>
+            <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
             <span>Criptografia Bancária SSL 256-bit</span>
           </div>
           <div class="security-badge-item">
-            <span>🛡️</span>
+            <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
             <span>3D Secure / SCA Antifraude Obrigatório</span>
           </div>
           <div class="security-badge-item">
-            <span>💳</span>
+            <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>
             <span>Conformidade PCI-DSS Nível 1 Oficial</span>
           </div>
           <div class="security-badge-item">
-            <span>⚡</span>
-            <span>Sem Fidelização · Cancelamento a Qualquer Momento</span>
+            <svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span>Sem Fidelização &bull; Cancelamento Livre</span>
           </div>
         </div>
       </div>
 
-      <div id="setting-instructions" class="panel setting-panel hidden"><h2>Instruções ao agente</h2><p class="muted">Defina o tom, o estilo e as regras gerais de atendimento.</p><form id="instructions-form" class="form"><label>Instruções personalizadas<textarea name="instructions" rows="8" placeholder="Escreva as instruções para o agente."></textarea></label><button class="btn primary" type="submit">Guardar instruções</button></form></div>
-      <div id="setting-mandatory" class="panel setting-panel hidden"><h2>Respostas obrigatórias</h2><p class="muted">Defina mensagens que devem ser usadas em etapas específicas. Deixe em branco as que não quiser configurar.</p><form id="mandatory-form" class="form"><label>Primeira resposta<textarea name="greeting" rows="2"></textarea></label><label>Quando não souber a resposta<textarea name="unknown" rows="2"></textarea></label><label>Quando o cliente demonstrar intenção de compra/marcação<textarea name="conversion" rows="2"></textarea></label><label>Encerramento<textarea name="closing" rows="2"></textarea></label><button class="btn primary" type="submit">Guardar respostas</button></form></div>
-      <div id="setting-account" class="panel setting-panel hidden"><h2>Conta</h2><form id="account-form" class="form"><label>Nome de usuário<input name="name" required></label><label>Email cadastrado<input name="email" disabled></label><label>Tipo de negócio<select name="business_type"><option>Serviços</option><option>Vendas</option><option>Serviços e vendas</option><option>Outro</option></select></label><label>Descrição do negócio<textarea name="business_description" rows="3"></textarea></label><label>Língua do agente<select name="language"><option>Português</option><option>English</option><option>Español</option><option>Deutsch</option><option>Français</option></select></label><button class="btn primary" type="submit">Guardar conta</button></form><hr><button class="btn outline" id="logout-account">Sair da conta</button></div>
+      <div id="setting-instructions" class="panel setting-panel hidden">
+        <h2>Instruções ao agente</h2>
+        <p class="muted">Defina o tom, o estilo e as regras gerais de atendimento.</p>
+        <form id="instructions-form" class="form">
+          <label>Instruções personalizadas<textarea name="instructions" rows="8" placeholder="Escreva as instruções para o agente."></textarea></label>
+          <button class="btn primary" type="submit">Guardar instruções</button>
+        </form>
+      </div>
+
+      <div id="setting-mandatory" class="panel setting-panel hidden">
+        <h2>Respostas obrigatórias</h2>
+        <p class="muted">Defina mensagens que devem ser usadas em etapas específicas. Deixe em branco as que não quiser configurar.</p>
+        <form id="mandatory-form" class="form">
+          <label>Primeira resposta<textarea name="greeting" rows="2"></textarea></label>
+          <label>Quando não souber a resposta<textarea name="unknown" rows="2"></textarea></label>
+          <label>Quando o cliente demonstrar intenção de compra/marcação<textarea name="conversion" rows="2"></textarea></label>
+          <label>Encerramento<textarea name="closing" rows="2"></textarea></label>
+          <button class="btn primary" type="submit">Guardar respostas</button>
+        </form>
+      </div>
+
+      <div id="setting-account" class="panel setting-panel hidden">
+        <h2>Conta</h2>
+        <form id="account-form" class="form">
+          <label>Nome de usuário<input name="name" required></label>
+          <label>Email cadastrado<input name="email" disabled></label>
+          <label>Tipo de negócio
+            <select name="business_type">
+              <option>Serviços</option>
+              <option>Vendas</option>
+              <option>Serviços e vendas</option>
+              <option>Outro</option>
+            </select>
+          </label>
+          <label>Descrição do negócio<textarea name="business_description" rows="3"></textarea></label>
+          <label>Língua do agente
+            <select name="language">
+              <option>Português</option>
+              <option>English</option>
+              <option>Español</option>
+              <option>Deutsch</option>
+              <option>Français</option>
+            </select>
+          </label>
+          <button class="btn primary" type="submit">Guardar conta</button>
+        </form>
+        <hr>
+        <button class="btn outline" id="logout-account">Sair da conta</button>
+      </div>
     </section>
-    <footer> DREXIER · Estrutura base · Dados da conta isolados por utilizador </footer>
+
   </main>
 </div>
-<div id="confirm-modal" class="modal hidden"><div class="modal-card"><h2>Confirmar saída?</h2><p>Tem a certeza de que deseja sair da sua conta?</p><div class="actions"><button class="btn outline" id="cancel-logout">Cancelar</button><button class="btn primary" id="confirm-logout">Sair</button></div></div></div>
 
-<!-- Modal de Paywall SaaS — Ponto Crítico de Acesso -->
+<!-- ============================================================
+     4. MODAIS DO SISTEMA (SEM EMOJIS)
+     ============================================================ -->
+<div id="confirm-modal" class="modal hidden">
+  <div class="modal-card">
+    <h2>Confirmar saída?</h2>
+    <p>Tem a certeza de que deseja sair da sua conta?</p>
+    <div class="actions">
+      <button class="btn outline" id="cancel-logout">Cancelar</button>
+      <button class="btn primary" id="confirm-logout">Sair</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de Paywall SaaS -->
 <div id="paywall-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
   <div class="modal-card paywall-modal-card">
-    <div class="paywall-modal-icon">🔒</div>
+    <div class="paywall-modal-icon">
+      <svg class="svg-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+    </div>
     <h2 class="paywall-modal-title">Funcionalidade Bloqueada</h2>
     <p class="paywall-modal-desc">
       Esta funcionalidade está disponível exclusivamente para assinantes do <strong>Plano Business</strong>.<br>
@@ -654,30 +1607,53 @@
     <div class="paywall-modal-plan">
       <div class="paywall-plan-price">59€<span>/mês</span></div>
       <ul class="paywall-plan-features">
-        <li>✓ Atendimento IA 24/7 por e-mail</li>
-        <li>✓ Treinamento ilimitado com documentos</li>
-        <li>✓ Base de conhecimento completa do negócio</li>
-        <li>✓ Instruções e regras personalizadas à IA</li>
-        <li>✓ Integração Gmail & respostas automáticas</li>
-        <li>✓ Dashboard completo de conversões</li>
+        <li>
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Respostas automáticas configuráveis por e-mail</span>
+        </li>
+        <li>
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Treinamento ilimitado com documentos</span>
+        </li>
+        <li>
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Base de conhecimento completa do negócio</span>
+        </li>
+        <li>
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Instruções e regras personalizadas à IA</span>
+        </li>
+        <li>
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Integração Gmail &amp; respostas automáticas</span>
+        </li>
+        <li>
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Dashboard completo de conversões</span>
+        </li>
       </ul>
     </div>
     <div class="paywall-modal-actions">
-      <button class="btn primary btn-large" id="paywall-btn-subscribe">💳 Ativar Plano Business (59€/mês)</button>
+      <button class="btn primary btn-large" id="paywall-btn-subscribe">
+        <span>Ativar Plano Business (59€/mês)</span>
+        <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+      </button>
       <button class="btn outline" id="paywall-btn-close">Fechar</button>
     </div>
-    <p class="paywall-modal-fine">Sem fidelização · Cancele a qualquer momento · Pagamento seguro via Stripe</p>
+    <p class="paywall-modal-fine">Sem fidelização &bull; Cancele a qualquer momento &bull; Pagamento seguro via Stripe</p>
   </div>
 </div>
+
 <div id="card-expand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" tabindex="-1">
   <div class="expanded-card-shell" id="expanded-card-content"></div>
 </div>
+
 <!-- Modal Centralizado para Validação de Pedidos / Marcações -->
-<div id="pending-expand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" tabindex="-1">
+<div id="pending-expand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pending-modal-title" tabindex="-1">
   <div class="modal-card modal-card-large">
     <div class="modal-header">
       <div>
-        <h2 style="margin:0;">Pedidos Aguardando Validação</h2>
+        <h2 id="pending-modal-title" style="margin:0;">Pedidos Aguardando Validação</h2>
         <p class="muted" style="margin:3px 0 0;font-size:13px;">Confirme ou sugira alternativas — a IA enviará a resposta oficial por e-mail no contexto da conversa.</p>
       </div>
       <button class="modal-close-btn" id="close-pending-modal" aria-label="Fechar">&times;</button>
@@ -687,5 +1663,7 @@
     </div>
   </div>
 </div>
+
 <script type="module" src="./app.js"></script>
-</body></html>
+</body>
+</html>

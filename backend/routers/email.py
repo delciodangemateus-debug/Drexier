@@ -8,8 +8,9 @@ from pydantic import BaseModel, EmailStr, Field
 
 from backend.auth import decode_token, create_token
 from backend.database import connect
-from backend.services.billing_service import is_subscription_active
+from backend.services.billing_service import get_last_successful_payment_at, is_subscription_active
 from backend.services.email_service import (
+    get_email_response_cutoff,
     build_google_auth_url,
     build_microsoft_auth_url,
     exchange_google_code,
@@ -118,6 +119,10 @@ def get_email_status(user: dict = Depends(get_current_user)):
             "integration": None,
         }
 
+    integration_data = dict(row)
+    integration_data["last_successful_payment_at"] = get_last_successful_payment_at(user["id"])
+    response_cutoff = get_email_response_cutoff(integration_data)
+
     return {
         "connected": True,
         "integration": {
@@ -128,6 +133,7 @@ def get_email_status(user: dict = Depends(get_current_user)):
             "status": row["status"],
             "auto_reply_enabled": bool(row["auto_reply_enabled"]),
             "last_sync_at": row["last_sync_at"],
+            "response_since_at": response_cutoff.isoformat() if response_cutoff else None,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         },

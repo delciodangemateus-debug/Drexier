@@ -1,5 +1,24 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+// Debounce helper para melhorar responsividade
+function debounce(fn, delay = 250) {
+  let timer;
+  return function (...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+// Throttle helper
+function throttle(fn, limit = 200) {
+  let inThrottle;
+  return function (...args) {
+    if (!inThrottle) {
+      fn.apply(this, args);
+      inThrottle = true;
+      setTimeout(() => (inThrottle = false), limit);
+    }
+  };
+}
 const initialParams = new URLSearchParams(window.location.search);
 if (initialParams.get("token")) {
   localStorage.setItem("drexier_token", initialParams.get("token"));
@@ -39,20 +58,82 @@ function closePaywallModal() {
 }
 
 // Eventos do modal de paywall
+// Listener mais rápido com captura onde possível
 document.addEventListener("DOMContentLoaded", () => {
   $("#paywall-btn-close")?.addEventListener("click", closePaywallModal);
   $("#paywall-modal")?.addEventListener("click", (e) => {
     if (e.target === e.currentTarget) closePaywallModal();
   });
-  $("#paywall-btn-subscribe")?.addEventListener("click", async () => {
-    closePaywallModal();
-    // Navega para a aba de faturação e inicia checkout
-    await navigate("settings");
-    $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
-    $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
-    await loadBillingStatus();
-    await startStripeCheckout();
-  });
+  const paywallSubscribeHandler = async () => {
+    try {
+      closePaywallModal();
+      // Navega para a aba de faturação e inicia checkout
+      await navigate("settings");
+      $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+      $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+      await loadBillingStatus();
+      await startStripeCheckout();
+    } catch (e) {
+      showNotice(e.message, true);
+    }
+  };
+  $("#paywall-btn-subscribe")?.addEventListener("click", paywallSubscribeHandler);
+});
+
+// Delegação global para garantir funcionamento dos botões de subscrição
+document.addEventListener("click", (e) => {
+  const target = e.target;
+  if (target && target.id === "paywall-btn-subscribe") {
+    e.preventDefault();
+    (async () => {
+      try {
+        closePaywallModal();
+        await navigate("settings");
+        $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+        $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+        await loadBillingStatus();
+        await startStripeCheckout();
+      } catch (err) {
+        showNotice(err.message, true);
+      }
+    })();
+    return;
+  }
+  if (target && (target.id === "btn-subscribe-plan" || target.closest("#btn-subscribe-plan"))) {
+    e.preventDefault();
+    startStripeCheckout();
+    return;
+  }
+  if (target && target.id === "btn-goto-billing") {
+    e.preventDefault();
+    (async () => {
+      try {
+        await navigate("settings");
+        $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+        $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+        await loadBillingStatus();
+      } catch (err) {
+        showNotice(err.message, true);
+      }
+    })();
+    return;
+  }
+  if (target && target.id === "paywall-overlay-activate") {
+    e.preventDefault();
+    (async () => {
+      try {
+        closePaywallModal();
+        await navigate("settings");
+        $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+        $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+        await loadBillingStatus();
+        await startStripeCheckout();
+      } catch (err) {
+        showNotice(err.message, true);
+      }
+    })();
+    return;
+  }
 });
 
 const kindNames = {
@@ -73,27 +154,27 @@ const kindNames = {
 };
 
 const kindIcons = {
-  productos: "📦",
-  servicos: "⚙️",
-  horarios: "🕐",
-  marcacoes: "📅",
-  pagamentos: "💳",
-  campanhas: "🎯",
-  devolucoes: "🔄",
-  entregas: "🚚",
-  faq: "❓",
-  localizacao: "📍",
-  contactos: "📞",
-  regras_atendimento: "🛡️",
-  personalizado: "✏️",
-  treinamento: "🧠"
+  productos: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>',
+  servicos: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>',
+  horarios: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
+  marcacoes: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>',
+  pagamentos: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect><line x1="1" y1="10" x2="23" y2="10"></line></svg>',
+  campanhas: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>',
+  devolucoes: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>',
+  entregas: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>',
+  faq: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+  localizacao: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
+  contactos: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>',
+  regras_atendimento: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>',
+  personalizado: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>',
+  treinamento: '<svg class="svg-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line></svg>'
 };
 
 const PRESET_BUSINESS_CARDS = [
   {
     kind: "productos",
     title: "Produtos e Preços",
-    icon: "📦",
+    icon: "productos",
     category: "Catálogo & Vendas",
     description: "Nomes de produtos, variantes, tamanhos, cores, estoque e preços exatos.",
     hint: "Cadastre todos os seus produtos para que a IA informe preços e feche vendas com facilidade.",
@@ -106,7 +187,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "servicos",
     title: "Serviços e Procedimentos",
-    icon: "⚙️",
+    icon: "servicos",
     category: "Prestação de Serviços",
     description: "Tabela de serviços oferecidos, etapas de realização, duração e valores.",
     hint: "Detalhe como cada serviço é realizado e quanto custa para orientar os clientes.",
@@ -119,7 +200,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "horarios",
     title: "Horários de Atendimento",
-    icon: "🕐",
+    icon: "horarios",
     category: "Funcionamento",
     description: "Dias da semana, horários de abertura e fecho, fins de semana e feriados.",
     hint: "Indique exatamente quando o negócio está aberto para que a IA nunca informe horários errados.",
@@ -132,7 +213,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "marcacoes",
     title: "Tempo e Regras de Marcações",
-    icon: "📅",
+    icon: "marcacoes",
     category: "Agendamento",
     description: "Antecedência mínima, políticas de tolerância, remarcação e cancelamento.",
     hint: "Defina como os agendamentos devem ser solicitados para evitar furos de agenda.",
@@ -145,7 +226,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "pagamentos",
     title: "Formas de Pagamento e Faturação",
-    icon: "💳",
+    icon: "pagamentos",
     category: "Financeiro",
     description: "Meios aceites (MBWay/Pix, Cartão, Transferência), parcelamento e dados para fatura.",
     hint: "Deixe claro os métodos de pagamento para acelerar o fechamento de pedidos.",
@@ -158,7 +239,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "campanhas",
     title: "Campanhas e Descontos",
-    icon: "🎯",
+    icon: "campanhas",
     category: "Promoções",
     description: "Promoções sazonais vigentes, cupons de desconto válidos e condições especiais.",
     hint: "A IA poderá oferecer condições especiais aos clientes interessados.",
@@ -171,7 +252,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "devolucoes",
     title: "Trocas, Devoluções e Garantia",
-    icon: "🔄",
+    icon: "devolucoes",
     category: "Pós-Venda",
     description: "Prazos para trocas, regras de embalagem original, reembolso e garantia.",
     hint: "Regras claras de troca trazem segurança aos clientes e evitam reclamações.",
@@ -184,7 +265,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "entregas",
     title: "Envios, Prazos de Entrega e Fretes",
-    icon: "🚚",
+    icon: "entregas",
     category: "Logística",
     description: "Regiões atendidas, valor de frete/portes, prazos médios de entrega e transportadora.",
     hint: "A IA responderá na hora o valor e prazo de envio quando o cliente perguntar.",
@@ -197,10 +278,10 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "faq",
     title: "Perguntas Frequentes (FAQ)",
-    icon: "❓",
+    icon: "faq",
     category: "Dúvidas Frequentes",
     description: "Perguntas mais repetidas pelos clientes acompanhadas das respostas oficiais.",
-    hint: "Economize tempo respondendo instantaneamente às dúvidas mais comuns.",
+    hint: "Organize orientações para responder às dúvidas mais comuns.",
     placeholders: {
       name: "Ex: Os produtos têm garantia?",
       price: "Ex: Sim, garantia oficial de 3 anos",
@@ -210,7 +291,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "localizacao",
     title: "Localização e Morada",
-    icon: "📍",
+    icon: "localizacao",
     category: "Endereço & Acesso",
     description: "Morada da loja/escritório, pontos de referência, transporte e estacionamento.",
     hint: "Facilite para o cliente encontrar o seu estabelecimento físico.",
@@ -223,7 +304,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "contactos",
     title: "Canais Oficiais de Contacto",
-    icon: "📞",
+    icon: "contactos",
     category: "Canais Diretos",
     description: "Telefone comercial, e-mails específicos e horários de suporte.",
     hint: "Permite que a IA informe o contacto humano quando necessário.",
@@ -236,7 +317,7 @@ const PRESET_BUSINESS_CARDS = [
   {
     kind: "regras_atendimento",
     title: "Regras de Suporte e Atendimento",
-    icon: "🛡️",
+    icon: "regras_atendimento",
     category: "Diretrizes",
     description: "Instruções de tom de voz, tratamento de reclamações e encaminhamento a supervisores.",
     hint: "Oriente o agente como lidar com situações delicadas ou exigências especiais.",
@@ -265,26 +346,57 @@ function authHeaders(json = true) {
   };
 }
 
+// Cache simples para evitar chamadas repetidas
+const apiCache = new Map();
+const CACHE_TTL = 15000; // 15 segundos
+
 async function api(url, options = {}) {
-  const res = await fetch(url, {
-    ...options,
-    headers: { ...authHeaders(options.body !== undefined), ...(options.headers || {}) }
-  });
-  let data = {};
-  try { data = await res.json(); } catch {}
-  if (!res.ok) {
-    if (res.status === 401 && token) { logoutNow(); }
-    if (res.status === 402) {
-      hasActiveSub = false;
-      applyPaywallState(false);
-      openPaywallModal();
-      const msg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Subscrição do Plano Business (59€/mês) necessária.");
-      throw new Error(msg);
+  const method = (options.method || "GET").toUpperCase();
+  // Cache apenas para GET sem body customizado
+  if (method === "GET") {
+    const cached = apiCache.get(url);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      return cached.data;
     }
-    const errMsg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Ocorreu um erro.");
-    throw new Error(errMsg);
   }
-  return data;
+  try {
+    const res = await fetch(url, {
+      ...options,
+      headers: { ...authHeaders(options.body !== undefined), ...(options.headers || {}) }
+    });
+    let data = {};
+    try { data = await res.json(); } catch {}
+    if (!res.ok) {
+      if (res.status === 401 && token) { logoutNow(); }
+      if (res.status === 402) {
+        hasActiveSub = false;
+        applyPaywallState(false);
+        openPaywallModal();
+        const msg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Subscrição do Plano Business (59€/mês) necessária.");
+        throw new Error(msg);
+      }
+      const errMsg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Ocorreu um erro.");
+      throw new Error(errMsg);
+    }
+    if (method === "GET") {
+      apiCache.set(url, { data, ts: Date.now() });
+    } else {
+      // Invalidar cache em mutações
+      for (const key of apiCache.keys()) {
+        if (key.startsWith("/api/")) {
+          apiCache.delete(key);
+        }
+      }
+    }
+    return data;
+  } catch (e) {
+    // Em caso de erro de rede, tentar usar cache se existir
+    if (method === "GET") {
+      const cached = apiCache.get(url);
+      if (cached) return cached.data;
+    }
+    throw e;
+  }
 }
 
 function showNotice(msg, error = false) {
@@ -297,12 +409,23 @@ function showNotice(msg, error = false) {
 }
 
 /* Modal Expansível Global com Fundo Desfocado */
+let modalReturnFocus = null;
+
 function openModal(htmlContent) {
   const modal = $("#card-expand-modal");
   const shell = $("#expanded-card-content");
+  modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   shell.innerHTML = htmlContent;
+  const heading = shell.querySelector(".expanded-header-title");
+  if (heading) {
+    heading.id = "expanded-modal-title";
+    modal.setAttribute("aria-labelledby", heading.id);
+  }
   modal.classList.remove("hidden");
   document.body.style.overflow = "hidden";
+  requestAnimationFrame(() => {
+    shell.querySelector("#modal-close-btn")?.focus();
+  });
 }
 
 function closeModal() {
@@ -311,6 +434,8 @@ function closeModal() {
   document.body.style.overflow = "";
   currentExpandedCardId = null;
   currentEditingItemIndex = null;
+  if (modalReturnFocus?.isConnected) modalReturnFocus.focus();
+  modalReturnFocus = null;
 }
 
 $("#card-expand-modal").addEventListener("click", e => {
@@ -318,8 +443,28 @@ $("#card-expand-modal").addEventListener("click", e => {
 });
 
 window.addEventListener("keydown", e => {
-  if (e.key === "Escape" && !$("#card-expand-modal").classList.contains("hidden")) {
+  const modal = $("#card-expand-modal");
+  if (modal.classList.contains("hidden")) return;
+  if (e.key === "Escape") {
     closeModal();
+    return;
+  }
+  if (e.key === "Tab") {
+    const focusable = $$("#expanded-card-content button:not(:disabled), #expanded-card-content input:not(:disabled), #expanded-card-content textarea:not(:disabled), #expanded-card-content select:not(:disabled), #expanded-card-content [tabindex]:not([tabindex='-1'])");
+    if (!focusable.length) {
+      e.preventDefault();
+      modal.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 });
 
@@ -364,9 +509,27 @@ $("#signup-form").addEventListener("submit", async e => {
   }
 });
 
+function showLanding() {
+  $("#landing")?.classList.remove("hidden");
+  $("#auth")?.classList.add("hidden");
+  $("#app")?.classList.add("hidden");
+}
+
+function showAuth(mode = "login") {
+  $("#landing")?.classList.add("hidden");
+  $("#auth")?.classList.remove("hidden");
+  $("#app")?.classList.add("hidden");
+  $$("#auth .tab").forEach(t => t.classList.toggle("active", t.dataset.auth === mode));
+  $("#login-form")?.classList.toggle("hidden", mode !== "login");
+  $("#signup-form")?.classList.toggle("hidden", mode !== "signup");
+  const errEl = $("#auth-error");
+  if (errEl) errEl.textContent = "";
+}
+
 function openApp() {
-  $("#auth").classList.add("hidden");
-  $("#app").classList.remove("hidden");
+  $("#landing")?.classList.add("hidden");
+  $("#auth")?.classList.add("hidden");
+  $("#app")?.classList.remove("hidden");
 }
 
 async function boot() {
@@ -375,7 +538,6 @@ async function boot() {
     openApp();
     startLivePolling();
     $("#side-user").textContent = me.name;
-    $("#top-user").textContent = me.email;
     fillSettings();
 
     // Limpeza de chaves residuais de legado se presentes
@@ -393,17 +555,31 @@ async function boot() {
       if (sessionId) {
         try {
           const verified = await api(`/api/billing/verify-session?session_id=${encodeURIComponent(sessionId)}`);
-          if (verified && verified.has_active_subscription) {
-            hasActiveSub = true;
-            applyPaywallState(true);
+          if (verified) {
+            if (verified.has_active_subscription) {
+              hasActiveSub = true;
+              applyPaywallState(true);
+            } else {
+              // Forçar revalidação via status para garantir desbloqueio
+              try {
+                const st = await api("/api/billing/status");
+                hasActiveSub = !!(st && st.has_active_subscription);
+                if (hasActiveSub) applyPaywallState(true);
+              } catch (_) {}
+            }
           }
         } catch (e) {
           // Fallback: loadBillingStatus fará auto-reconciliação com a Stripe
           console.warn("verify-session falhou, a recorrer a loadBillingStatus:", e);
+          try {
+            const st = await api("/api/billing/status");
+            hasActiveSub = !!(st && st.has_active_subscription);
+            if (hasActiveSub) applyPaywallState(true);
+          } catch (_) {}
         }
       }
 
-      showNotice("🎉 Pagamento efetuado com sucesso! O seu Plano Business (59€/mês) está ativo e o acesso total está desbloqueado.");
+      showNotice("Pagamento efetuado com sucesso! O seu Plano Business (59€/mês) está ativo e o acesso total está desbloqueado.");
       await navigate("settings");
       $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
       $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
@@ -436,9 +612,11 @@ async function boot() {
     await navigate("dashboard");
   } catch (err) {
     if (token) {
-      $("#auth").classList.remove("hidden");
-      $("#app").classList.add("hidden");
-      $("#auth-error").textContent = err.message;
+      showAuth("login");
+      const errEl = $("#auth-error");
+      if (errEl) errEl.textContent = err.message;
+    } else {
+      showLanding();
     }
   }
 }
@@ -449,9 +627,9 @@ function logoutNow() {
   me = null;
   localStorage.removeItem("drexier_token");
   $("#app").classList.add("hidden");
-  $("#auth").classList.remove("hidden");
   $("#confirm-modal").classList.add("hidden");
   closeModal();
+  showLanding();
 }
 
 $("#logout").addEventListener("click", () => $("#confirm-modal").classList.remove("hidden"));
@@ -459,8 +637,14 @@ $("#logout-account").addEventListener("click", () => $("#confirm-modal").classLi
 $("#cancel-logout").addEventListener("click", () => $("#confirm-modal").classList.add("hidden"));
 $("#confirm-logout").addEventListener("click", logoutNow);
 $("#mobile-menu").addEventListener("click", () => $(".sidebar").classList.toggle("open"));
-$$("[data-page]").forEach(b => b.addEventListener("click", () => navigate(b.dataset.page)));
-$$("[data-goto]").forEach(b => b.addEventListener("click", () => navigate(b.dataset.goto)));
+$$("[data-page]").forEach(b => b.addEventListener("click", (e) => {
+  e.preventDefault();
+  navigate(b.dataset.page);
+}));
+$$("[data-goto]").forEach(b => b.addEventListener("click", (e) => {
+  e.preventDefault();
+  navigate(b.dataset.goto);
+}));
 
 const pageMeta = {
   dashboard: ["Dashboard", "Visão geral do atendimento"],
@@ -474,28 +658,26 @@ async function navigate(page) {
   activePage = page;
   $$("[data-page]").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   $$(".page").forEach(s => s.classList.toggle("hidden", s.id !== `page-${page}`));
-  $("#page-title").textContent = pageMeta[page][0];
-  $("#page-subtitle").textContent = pageMeta[page][1];
+  const meta = pageMeta[page] || ["", ""];
+  $("#page-title").textContent = meta[0];
+  $("#page-subtitle").textContent = meta[1];
   $(".sidebar").classList.remove("open");
+  // Executa carregamentos de forma não bloqueante onde possível
   try {
     if (page === "dashboard") {
-      await loadDashboard();
-      await loadBillingStatus();
-    }
-    if (page === "messages") {
+      Promise.allSettled([loadDashboard(), loadBillingStatus()]).catch(() => {});
+    } else if (page === "messages") {
       if (!selectedContact) {
         $("#messages-chat-view")?.classList.add("hidden");
         $("#messages-inbox-view")?.classList.remove("hidden");
       }
-      await loadContacts();
-      await loadEmailStatus();
-    }
-    if (page === "reports") await loadReports();
-    if (page === "business") await loadInfo();
-    if (page === "settings") {
-      await loadMe();
-      await loadEmailStatus();
-      await loadBillingStatus();
+      Promise.allSettled([loadContacts(), loadEmailStatus()]).catch(() => {});
+    } else if (page === "reports") {
+      loadReports().catch((e) => showNotice(e.message, true));
+    } else if (page === "business") {
+      loadInfo().catch((e) => showNotice(e.message, true));
+    } else if (page === "settings") {
+      Promise.allSettled([loadMe(), loadEmailStatus(), loadBillingStatus()]).catch(() => {});
     }
   } catch (e) {
     showNotice(e.message, true);
@@ -505,23 +687,32 @@ async function navigate(page) {
 /* Gráfico de Barras */
 function renderBars(target, values) {
   const el = $(target);
+  if (!el) return;
   el.innerHTML = "";
-  const max = Math.max(1, ...values.map(x => x.count));
+  el.setAttribute("role", "img");
+  el.setAttribute("aria-label", "Comparação de novos clientes entre hoje e ontem");
+  const max = Math.max(1, ...values.map(x => Number(x.count) || 0));
   values.forEach(v => {
-    const g = document.createElement("div");
-    g.className = "bar-group";
+    const column = document.createElement("div");
+    column.className = "bar-col";
     const val = document.createElement("span");
-    val.className = "bar-value";
-    val.textContent = v.count;
-    const bar = document.createElement("div");
-    bar.className = "bar";
-    bar.style.height = `${Math.max(2, (v.count / max) * 125)}px`;
-    bar.title = `${v.date}: ${v.count}`;
+    val.className = "bar-val";
+    val.textContent = String(v.count);
+    const track = document.createElement("div");
+    track.className = "bar-fill-track";
+    const fill = document.createElement("div");
+    fill.className = "bar-fill";
+    const count = Number(v.count) || 0;
+    fill.style.height = `${count === 0 ? 3 : Math.max(8, (count / max) * 138)}px`;
+    fill.title = `${v.date}: ${count}`;
+    track.append(fill);
     const label = document.createElement("span");
     label.className = "bar-label";
-    label.textContent = v.date.slice(5);
-    g.append(val, bar, label);
-    el.append(g);
+    label.textContent = /^\d{4}-\d{2}-\d{2}$/.test(v.date)
+      ? v.date.slice(5)
+      : v.date;
+    column.append(val, track, label);
+    el.append(column);
   });
 }
 
@@ -531,9 +722,9 @@ function expandMetricCard(title, value, description) {
     <div class="expanded-header">
       <div class="expanded-header-left">
         <div class="expanded-header-kbadge"><span class="expanded-header-kbadge-dot"></span>MÉTRICA</div>
-        <h2 class="expanded-header-title">${escapeHtml(title)}</h2>
+        <h2 class="expanded-header-title" id="expanded-modal-title">${escapeHtml(title)}</h2>
       </div>
-      <button class="expanded-close" id="modal-close-btn">✕</button>
+      <button class="expanded-close" id="modal-close-btn">&times;</button>
     </div>
     <div class="expanded-body">
       <div class="modal-metric-center">
@@ -556,6 +747,9 @@ async function loadDashboard() {
   $("#metric-today").textContent = d.today_contacts;
   $("#metric-pending").textContent = d.pending_count;
   $("#compare-yesterday").textContent = `Dia anterior: ${d.yesterday_contacts}`;
+  if (d.pending_count > 0 && activePage !== "messages") {
+    $("#nav-messages-dot")?.classList.remove("hidden");
+  }
 
   // Tornar os 4 cards de métricas clicáveis e expansíveis
   const metrics = $$(".metric");
@@ -568,6 +762,14 @@ async function loadDashboard() {
   metrics.forEach((m, i) => {
     m.classList.add("clickable-card");
     m.title = "Clique para expandir";
+    m.setAttribute("role", "button");
+    m.setAttribute("tabindex", "0");
+    m.onkeydown = e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        m.click();
+      }
+    };
     if (i === 3 || m.id === "card-metric-pending") {
       m.onclick = () => openPendingConfirmationsModal();
     } else {
@@ -630,20 +832,27 @@ async function loadDashboard() {
     list.append(card);
   });
 
-  // Atualiza banner de indução de conhecimento e precisão da IA
+  // Atualiza o indicador de preenchimento da base de conhecimento
   await updateDashboardKnowledgeBanner();
 }
 
 $("#btn-open-pending-modal")?.addEventListener("click", () => openPendingConfirmationsModal());
 
 /* Modal Centralizado de Confirmação Automática / Alternativa com IA */
+let pendingModalReturnFocus = null;
+
 async function openPendingConfirmationsModal() {
   const modal = $("#pending-expand-modal");
   const modalBody = $("#pending-modal-body");
   if (!modal || !modalBody) return;
 
+  const wasHidden = modal.classList.contains("hidden");
+  if (wasHidden) {
+    pendingModalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
   modal.classList.remove("hidden");
   document.body.style.overflow = "hidden";
+  modalBody.setAttribute("aria-busy", "true");
   modalBody.innerHTML = '<div class="empty">A carregar pedidos pendentes...</div>';
 
   try {
@@ -651,14 +860,19 @@ async function openPendingConfirmationsModal() {
     const requests = d.pending_requests || [];
     renderPendingModalList(requests);
   } catch (err) {
-    modalBody.innerHTML = `<div class="empty">Erro ao carregar pedidos: ${escapeHtml(err.message)}</div>`;
+    modalBody.innerHTML = `<div class="empty error-notice">Erro ao carregar pedidos: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    modalBody.setAttribute("aria-busy", "false");
+    if (wasHidden && !modal.classList.contains("hidden")) $("#close-pending-modal")?.focus();
   }
 }
 
 function closePendingConfirmationsModal() {
   const modal = $("#pending-expand-modal");
   if (modal) modal.classList.add("hidden");
-  document.body.style.overflow = "";
+  if ($("#card-expand-modal").classList.contains("hidden")) document.body.style.overflow = "";
+  if (pendingModalReturnFocus?.isConnected) pendingModalReturnFocus.focus();
+  pendingModalReturnFocus = null;
 }
 
 $("#close-pending-modal")?.addEventListener("click", closePendingConfirmationsModal);
@@ -722,7 +936,7 @@ function renderPendingModalList(requests) {
 
     const btnConfirm = document.createElement("button");
     btnConfirm.className = "btn-confirm-action";
-    btnConfirm.innerHTML = "✓ Confirmar (Enviar E-mail via IA)";
+    btnConfirm.innerHTML = "Confirmar (Enviar E-mail via IA)";
     btnConfirm.onclick = async () => {
       btnConfirm.disabled = true;
       btnReject.disabled = true;
@@ -739,13 +953,13 @@ function renderPendingModalList(requests) {
         showNotice(err.message, true);
         btnConfirm.disabled = false;
         btnReject.disabled = false;
-        btnConfirm.innerHTML = "✓ Confirmar (Enviar E-mail via IA)";
+        btnConfirm.innerHTML = "Confirmar (Enviar E-mail via IA)";
       }
     };
 
     const btnReject = document.createElement("button");
     btnReject.className = "btn-reject-action";
-    btnReject.innerHTML = "✕ Não Disponível / Sugerir Outro (IA)";
+    btnReject.innerHTML = "Não Disponível / Sugerir Outro (IA)";
     btnReject.onclick = async () => {
       btnConfirm.disabled = true;
       btnReject.disabled = true;
@@ -762,7 +976,7 @@ function renderPendingModalList(requests) {
         showNotice(err.message, true);
         btnConfirm.disabled = false;
         btnReject.disabled = false;
-        btnReject.innerHTML = "✕ Não Disponível / Sugerir Outro (IA)";
+        btnReject.innerHTML = "Não Disponível / Sugerir Outro (IA)";
       }
     };
 
@@ -803,6 +1017,9 @@ async function loadContacts(keepChatOpen = true) {
     return;
   }
   list.className = "contact-card-grid";
+  if (contactsCache.length && activePage !== "messages" && contactsCache.some(c => c.last_message)) {
+    $("#nav-messages-dot")?.classList.remove("hidden");
+  }
 
   contactsCache.forEach(c => {
     const card = document.createElement("article");
@@ -823,7 +1040,7 @@ async function loadContacts(keepChatOpen = true) {
 
     const channelBadge = document.createElement("span");
     channelBadge.className = isWa ? "contact-channel-badge wa" : "contact-channel-badge email";
-    channelBadge.textContent = isWa ? "💬 WhatsApp" : "📧 E-mail";
+    channelBadge.textContent = isWa ? "WhatsApp" : "E-mail";
     name.appendChild(channelBadge);
 
     const email = document.createElement("div");
@@ -864,7 +1081,7 @@ async function openConversation(id) {
   $("#messages-chat-view")?.classList.remove("hidden");
 
   $("#conversation-title").textContent = c ? (c.name || c.contact_key) : "Conversa";
-  $("#conversation-subtitle").textContent = c ? (isWa ? `💬 WhatsApp Oficial: ${c.contact_key}` : `📧 E-mail oficial: ${c.contact_key}`) : "";
+  $("#conversation-subtitle").textContent = c ? (isWa ? `WhatsApp Oficial: ${c.contact_key}` : `E-mail oficial: ${c.contact_key}`) : "";
   $("#btn-delete-conversation")?.classList.remove("hidden");
 
   await renderConversationMessages(id, true);
@@ -905,7 +1122,7 @@ async function renderConversationMessages(id, autoScroll = true) {
       delBtn.type = "button";
       delBtn.className = "btn-delete-msg";
       delBtn.title = "Eliminar esta mensagem";
-      delBtn.textContent = "🗑️";
+      delBtn.innerHTML = '<svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
       delBtn.onclick = async (ev) => {
         ev.stopPropagation();
         if (!confirm("Tem a certeza de que deseja eliminar esta mensagem?")) return;
@@ -1019,7 +1236,14 @@ async function loadReports() {
   const d = await api("/api/analytics");
   const el = $("#reports-chart");
   el.innerHTML = "";
-  const vals = d.acquisitions;
+  const vals = Array.isArray(d.acquisitions) ? d.acquisitions : [];
+  if (!vals.length) {
+    el.classList.add("empty");
+    el.textContent = "Ainda não existem dados de aquisição para este período.";
+    $("#chart-labels").innerHTML = "";
+    return;
+  }
+  el.classList.remove("empty");
   const w = 760, h = 190, pad = 18, max = Math.max(1, ...vals.map(v => v.count));
   const pts = vals.map((v, i) => ({
     x: pad + i * (w - 2 * pad) / Math.max(1, vals.length - 1),
@@ -1028,11 +1252,26 @@ async function loadReports() {
   }));
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Aquisição diária de clientes");
+  [0.25, 0.5, 0.75].forEach(ratio => {
+    const guide = document.createElementNS(svg.namespaceURI, "line");
+    const y = pad + ratio * (h - 2 * pad);
+    guide.setAttribute("x1", String(pad));
+    guide.setAttribute("x2", String(w - pad));
+    guide.setAttribute("y1", String(y));
+    guide.setAttribute("y2", String(y));
+    guide.setAttribute("stroke", "#e5e9ef");
+    guide.setAttribute("stroke-width", "1");
+    svg.append(guide);
+  });
   const poly = document.createElementNS(svg.namespaceURI, "polyline");
   poly.setAttribute("points", pts.map(p => `${p.x},${p.y}`).join(" "));
   poly.setAttribute("fill", "none");
-  poly.setAttribute("stroke", "#111");
-  poly.setAttribute("stroke-width", "2.5");
+  poly.setAttribute("stroke", "#34465b");
+  poly.setAttribute("stroke-width", "3");
+  poly.setAttribute("stroke-linecap", "round");
+  poly.setAttribute("stroke-linejoin", "round");
   svg.append(poly);
 
   pts.forEach(p => {
@@ -1040,7 +1279,9 @@ async function loadReports() {
     circle.setAttribute("cx", p.x);
     circle.setAttribute("cy", p.y);
     circle.setAttribute("r", "3.5");
-    circle.setAttribute("fill", "#111");
+    circle.setAttribute("fill", "#34465b");
+    circle.setAttribute("stroke", "#ffffff");
+    circle.setAttribute("stroke-width", "2");
     const title = document.createElementNS(svg.namespaceURI, "title");
     title.textContent = `${p.date}: ${p.count} clientes`;
     circle.append(title);
@@ -1049,7 +1290,9 @@ async function loadReports() {
   el.append(svg);
 
   $("#chart-labels").innerHTML = "";
-  [vals[0], vals[Math.floor(vals.length / 2)], vals[vals.length - 1]].forEach(v => {
+  [...new Map([vals[0], vals[Math.floor(vals.length / 2)], vals[vals.length - 1]]
+    .filter(Boolean)
+    .map(v => [v.date, v])).values()].forEach(v => {
     const s = document.createElement("span");
     s.textContent = `${v.date} · ${v.count}`;
     $("#chart-labels").append(s);
@@ -1078,9 +1321,9 @@ async function loadReports() {
         <div class="expanded-header">
           <div class="expanded-header-left">
             <div class="expanded-header-kbadge"><span class="expanded-header-kbadge-dot"></span>VARIANTE DE RESPOSTA</div>
-            <h2 class="expanded-header-title">${escapeHtml(v.label)}</h2>
+            <h2 class="expanded-header-title" id="expanded-modal-title">${escapeHtml(v.label)}</h2>
           </div>
-          <button class="expanded-close" id="modal-close-btn">✕</button>
+          <button class="expanded-close" id="modal-close-btn">&times;</button>
         </div>
         <div class="expanded-body">
           <div class="modal-section">
@@ -1161,7 +1404,7 @@ function compileItemsToContent(items, generalNote = "") {
 /* ────────────────────────────────────────────────────────────
    CÁLCULO DE PRECISÃO DA IA & INDUÇÃO DE CONHECIMENTO
    ─────────────────────────────────────────────────────────── */
-function calculateKnowledgeAccuracy() {
+function calculateKnowledgeReadiness() {
   const trainingTopics = infoCache.filter(x => x.kind === "treinamento");
 
   // Verifica quais dos 12 cards pré-gerados estão configurados
@@ -1187,7 +1430,7 @@ function calculateKnowledgeAccuracy() {
     trainingWords += w;
   });
 
-  // Base de 15%
+  // Readiness index based on configured cards and training content.
   let score = 15;
   score += Math.min(60, configuredPresets.length * 5); // até +60% com os 12 cards
   score += Math.min(15, customCards.length * 3);        // até +15% com cards customizados
@@ -1196,17 +1439,17 @@ function calculateKnowledgeAccuracy() {
   if (trainingWords > 800) score += 5;
   score = Math.min(100, Math.max(15, score));
 
-  let levelTag = "Calibração Inicial (Básico)";
-  let levelDesc = "O seu agente de IA dispõe de poucas informações reais. Insira um volume massivo de dados para evitar hesitações e garantir 100% de precisão.";
+  let levelTag = "Base inicial";
+  let levelDesc = "A base ainda tem poucas informações estruturadas. Adicione produtos, políticas e orientações para dar mais contexto às respostas do agente.";
   if (score >= 40 && score < 70) {
-    levelTag = "Conhecimento Moderado";
-    levelDesc = "A IA já compreende a rotina da sua empresa, mas ainda precisa de regulamentos e mais detalhes para atingir a excelência.";
+    levelTag = "Base em desenvolvimento";
+    levelDesc = "Já existe um conjunto inicial de informações. Reveja os dados e complete as áreas importantes para a sua operação.";
   } else if (score >= 70 && score < 90) {
-    levelTag = "Alta Precisão e Assertividade";
-    levelDesc = "Excelente base de conhecimento! A IA responde com segurança e fidelidade às diretrizes do negócio.";
+    levelTag = "Base bem estruturada";
+    levelDesc = "A base contém várias informações do negócio. Mantenha os dados atualizados e reveja as respostas do agente.";
   } else if (score >= 90) {
-    levelTag = "Modo Expert / Precisão Máxima 🔥";
-    levelDesc = "Base de dados ultra rica! O agente tem conhecimento profundo para responder com perfeição a qualquer dúvida de cliente.";
+    levelTag = "Base ampla";
+    levelDesc = "A base reúne bastante conteúdo. Este índice mede apenas o preenchimento, não a precisão das respostas.";
   }
 
   const emptyPresets = PRESET_BUSINESS_CARDS.filter(p => !configuredPresets.some(cp => cp.kind === p.kind));
@@ -1232,7 +1475,7 @@ async function updateDashboardKnowledgeBanner() {
     }
   }
 
-  const stats = calculateKnowledgeAccuracy();
+  const stats = calculateKnowledgeReadiness();
 
   const fillEl = $("#dash-knowledge-fill");
   const pctEl = $("#dash-knowledge-percent-text");
@@ -1242,7 +1485,7 @@ async function updateDashboardKnowledgeBanner() {
   const pillsEl = $("#dash-missing-pills");
 
   if (fillEl) fillEl.style.width = `${stats.score}%`;
-  if (pctEl) pctEl.textContent = `${stats.score}% Precisão`;
+  if (pctEl) pctEl.textContent = `${stats.score}/100 Índice da base`;
   if (statusEl) statusEl.textContent = `Cards configurados: ${stats.configuredPresetsCount} / ${stats.totalPresetsCount} · Treinamentos: ${stats.trainingTopicsCount}`;
   if (levelEl) levelEl.textContent = stats.levelTag;
   if (descEl) descEl.innerHTML = stats.levelDesc;
@@ -1250,7 +1493,7 @@ async function updateDashboardKnowledgeBanner() {
   if (pillsEl) {
     pillsEl.innerHTML = "";
     if (stats.emptyPresets.length === 0) {
-      pillsEl.innerHTML = '<span class="stat-pill" style="color:#059669;background:#d1fae5;">✓ Todos os 12 cards preenchidos!</span>';
+      pillsEl.innerHTML = '<span class="stat-pill" style="color:#059669;background:#d1fae5;">Todos os 12 cards preenchidos!</span>';
     } else {
       stats.emptyPresets.slice(0, 5).forEach(preset => {
         const btn = document.createElement("button");
@@ -1301,7 +1544,7 @@ async function updateDashboardKnowledgeBanner() {
 }
 
 function updateBusinessPageKnowledgeUI() {
-  const stats = calculateKnowledgeAccuracy();
+  const stats = calculateKnowledgeReadiness();
 
   // Atualizar badges nas sub-abas
   const cardsBadge = $("#badge-cards-stat");
@@ -1310,6 +1553,16 @@ function updateBusinessPageKnowledgeUI() {
   const trainBadge = $("#badge-training-stat");
   if (trainBadge) trainBadge.textContent = `${stats.trainingTopicsCount} ${stats.trainingTopicsCount === 1 ? 'tópico' : 'tópicos'}`;
 
+  // Atualizar badge do stock
+  try {
+    const stockBadge = $("#badge-stock-stat");
+    if (stockBadge) {
+      const productosCard = infoCache.find(x => x.kind === "productos");
+      const items = Array.isArray(productosCard?.metadata?.items) ? productosCard.metadata.items : [];
+      stockBadge.textContent = `${items.length} ${items.length === 1 ? 'produto' : 'produtos'}`;
+    }
+  } catch (_) {}
+
   // Atualizar banner dentro de Negócios
   const fillEl = $("#business-ai-fill");
   const pctEl = $("#business-ai-pct");
@@ -1317,14 +1570,125 @@ function updateBusinessPageKnowledgeUI() {
   const descEl = $("#business-ai-desc");
 
   if (fillEl) fillEl.style.width = `${stats.score}%`;
-  if (pctEl) pctEl.textContent = `${stats.score}% Precisão`;
+  if (pctEl) pctEl.textContent = `${stats.score}/100 Índice da base`;
   if (titleEl) {
-    titleEl.textContent = `Potência da Base da IA: ${stats.score}% (${stats.levelTag})`;
+    titleEl.textContent = `Preenchimento da base: ${stats.score}/100 (${stats.levelTag})`;
   }
   if (descEl) {
     descEl.textContent = `Volume atual: ${stats.configuredPresetsCount} cards configurados e ${stats.trainingTopicsCount} tópicos (${stats.trainingWords} palavras de treino). Quanto mais dados detalhados inserir, mais certeira e humanizada será a resposta da IA.`;
   }
 }
+
+let stockDataCache = {};
+
+function loadStockTab() {
+  try {
+    if (!infoCache || !infoCache.length) {
+      // Não bloqueia se não carregou ainda
+    }
+    const productosCard = infoCache.find(x => x.kind === "productos");
+    const items = Array.isArray(productosCard?.metadata?.items) ? productosCard.metadata.items : [];
+    const tbody = $("#stock-table-body");
+    const badge = $("#badge-stock-stat");
+    if (badge) badge.textContent = `${items.length} ${items.length === 1 ? 'produto' : 'produtos'}`;
+
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!items.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 5;
+      td.style.padding = "14px";
+      td.style.textAlign = "center";
+      td.style.color = "var(--muted)";
+      td.textContent = 'Nenhum produto encontrado no card "Produtos e Preços". Adicione produtos no card "Produtos e Preços" primeiro.';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    // Carregar stock existente
+    const saved = localStorage.getItem("drexier_stock_map");
+    if (saved) {
+      try { stockDataCache = JSON.parse(saved); } catch { stockDataCache = {}; }
+    }
+
+    items.forEach((it, idx) => {
+      const key = it.name || `item_${idx}`;
+      if (stockDataCache[key] === undefined) {
+        stockDataCache[key] = { inStock: true, qty: 0 };
+      }
+      const tr = document.createElement("tr");
+      tr.style.borderBottom = "1px solid var(--border)";
+
+      const tdName = document.createElement("td");
+      tdName.style.padding = "10px 12px";
+      tdName.style.fontWeight = "600";
+      tdName.textContent = it.name || "Produto sem nome";
+
+      const tdPrice = document.createElement("td");
+      tdPrice.style.padding = "10px 12px";
+      tdPrice.textContent = it.price || "-";
+
+      const tdDetails = document.createElement("td");
+      tdDetails.style.padding = "10px 12px";
+      tdDetails.style.color = "var(--muted)";
+      tdDetails.style.fontSize = "12.5px";
+      tdDetails.textContent = it.details || "";
+
+      const tdInStock = document.createElement("td");
+      tdInStock.style.padding = "10px 12px";
+      const select = document.createElement("select");
+      select.style.padding = "6px 8px";
+      select.style.border = "1px solid var(--border)";
+      select.style.borderRadius = "8px";
+      const optYes = document.createElement("option");
+      optYes.value = "yes";
+      optYes.textContent = "Sim";
+      const optNo = document.createElement("option");
+      optNo.value = "no";
+      optNo.textContent = "Não";
+      if (stockDataCache[key].inStock) select.value = "yes"; else select.value = "no";
+      select.onchange = () => {
+        stockDataCache[key].inStock = select.value === "yes";
+      };
+      select.append(optYes, optNo);
+      tdInStock.appendChild(select);
+
+      const tdQty = document.createElement("td");
+      tdQty.style.padding = "10px 12px";
+      const inputQty = document.createElement("input");
+      inputQty.type = "number";
+      inputQty.min = "0";
+      inputQty.step = "1";
+      inputQty.value = stockDataCache[key].qty ?? 0;
+      inputQty.style.padding = "6px 8px";
+      inputQty.style.width = "100px";
+      inputQty.style.border = "1px solid var(--border)";
+      inputQty.style.borderRadius = "8px";
+      inputQty.onchange = () => {
+        stockDataCache[key].qty = parseInt(inputQty.value || "0", 10) || 0;
+      };
+      tdQty.appendChild(inputQty);
+
+      tr.append(tdName, tdPrice, tdDetails, tdInStock, tdQty);
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    showNotice("Erro ao carregar stock.", true);
+  }
+}
+
+$("#btn-refresh-stock")?.addEventListener("click", () => loadStockTab());
+$("#btn-save-stock")?.addEventListener("click", () => {
+  try {
+    localStorage.setItem("drexier_stock_map", JSON.stringify(stockDataCache));
+    showNotice("Stock guardado com sucesso. A IA irá apenas informar se tem ou não o produto.");
+  } catch (e) {
+    showNotice("Erro ao guardar stock.", true);
+  }
+});
 
 function switchBusinessSubtab(subtab) {
   currentBusinessSubtab = subtab;
@@ -1332,7 +1696,11 @@ function switchBusinessSubtab(subtab) {
     b.classList.toggle("active", b.dataset.subtab === subtab);
   });
   $("#subview-cards")?.classList.toggle("hidden", subtab !== "cards");
+  $("#subview-stock")?.classList.toggle("hidden", subtab !== "stock");
   $("#subview-training")?.classList.toggle("hidden", subtab !== "training");
+  if (subtab === "stock") {
+    loadStockTab();
+  }
 }
 
 function renderBusinessCardItemsHtml(it, editingIndex = null) {
@@ -1362,7 +1730,7 @@ function renderBusinessCardItemsHtml(it, editingIndex = null) {
         </div>
         <div class="item-entry-actions">
           <button class="btn xs ghost edit-item-action" data-idx="${idx}">Editar</button>
-          <button class="btn xs danger delete-item-action" data-idx="${idx}">✕</button>
+          <button class="btn xs danger delete-item-action" data-idx="${idx}">&times;</button>
         </div>
       </div>
     `).join("") + `</div>`;
@@ -1378,10 +1746,10 @@ function renderBusinessCardItemsHtml(it, editingIndex = null) {
     <div class="expanded-header">
       <div class="expanded-header-left">
         <div class="expanded-header-kbadge"><span class="expanded-header-kbadge-dot"></span>${kindTitle}</div>
-        <h2 class="expanded-header-title">${escapeHtml(it.title)}</h2>
+        <h2 class="expanded-header-title" id="expanded-modal-title">${escapeHtml(it.title)}</h2>
         <p class="expanded-header-subtitle">${items.length} ${items.length === 1 ? 'item cadastrado' : 'itens cadastrados'}</p>
       </div>
-      <button class="expanded-close" id="modal-close-btn" title="Fechar">✕</button>
+      <button class="expanded-close" id="modal-close-btn" title="Fechar">&times;</button>
     </div>
     <div class="expanded-body">
       <div class="modal-section">
@@ -1592,7 +1960,7 @@ async function saveCardGeneralData(cardId) {
 async function loadInfo() {
   infoCache = await api("/api/business-info");
 
-  // Atualiza indicadores de precisão e gauges
+  // Atualiza o indicador de preenchimento e os medidores de conteúdo
   updateBusinessPageKnowledgeUI();
   updateDashboardKnowledgeBanner();
 
@@ -1611,6 +1979,9 @@ async function loadInfo() {
 
       const card = document.createElement("article");
       card.className = hasContent ? "info-card is-preset-configured clickable-card" : "info-card is-preset-empty clickable-card";
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-label", `${hasContent ? "Gerir" : "Preencher"} ${savedCard ? savedCard.title : preset.title}`);
 
       // Faixa no topo
       const stripe = document.createElement("div");
@@ -1628,7 +1999,7 @@ async function loadInfo() {
       kindBadge.className = "card-kind-badge";
       const icon = document.createElement("span");
       icon.className = "card-kind-icon";
-      icon.textContent = preset.icon;
+      icon.innerHTML = kindIcons[preset.kind] || kindIcons.personalizado;
       kindBadge.append(icon, document.createTextNode(preset.category));
 
       const chevron = document.createElement("span");
@@ -1678,7 +2049,7 @@ async function loadInfo() {
       } else {
         const tag = document.createElement("span");
         tag.className = "preset-empty-tag";
-        tag.textContent = "⚠️ Sem dados (+8% Precisão IA)";
+        tag.textContent = "Ainda não preenchido";
 
         const desc = document.createElement("p");
         desc.className = "preset-guide-text";
@@ -1688,6 +2059,12 @@ async function loadInfo() {
       }
 
       body.append(top, h, preview);
+      card.onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openPresetCardDirectly(preset);
+        }
+      };
 
       // Rodapé
       const footer = document.createElement("div");
@@ -1715,6 +2092,9 @@ async function loadInfo() {
 
       const card = document.createElement("article");
       card.className = "info-card clickable-card";
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-label", `Gerir ${it.title}`);
 
       const stripe = document.createElement("div");
       stripe.className = "info-card-stripe";
@@ -1729,7 +2109,7 @@ async function loadInfo() {
       kindBadge.className = "card-kind-badge";
       const icon = document.createElement("span");
       icon.className = "card-kind-icon";
-      icon.textContent = kindIcons[it.kind] || "📋";
+      icon.innerHTML = kindIcons[it.kind] || kindIcons[it.icon] || kindIcons.personalizado;
       kindBadge.append(icon, document.createTextNode(kindNames[it.kind] || it.kind));
 
       const chevron = document.createElement("span");
@@ -1749,6 +2129,12 @@ async function loadInfo() {
       preview.append(count);
 
       body.append(top, h, preview);
+      card.onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openExpandBusinessCard(it.id);
+        }
+      };
 
       const footer = document.createElement("div");
       footer.className = "info-card-footer";
@@ -1790,23 +2176,23 @@ function updateTrainingMeter() {
     if (words === 0) {
       statusEl.className = "gauge-pill gauge-empty";
       statusEl.textContent = "Sem texto";
-      descEl.textContent = "Insira dados massivos para calibrar a IA";
+      descEl.textContent = "Adicione as informações necessárias sobre este tópico";
     } else if (words < 60) {
       statusEl.className = "gauge-pill gauge-low";
-      statusEl.textContent = "⚠️ Volume Básico";
-      descEl.textContent = "Precisão baixa. Adicione mais cláusulas e detalhes";
+      statusEl.textContent = "Volume Básico";
+      descEl.textContent = "Inclua detalhes importantes, condições e exemplos";
     } else if (words < 200) {
       statusEl.className = "gauge-pill gauge-mid";
-      statusEl.textContent = "🟡 Volume Médio";
-      descEl.textContent = "Bom começo! Inclua regras de exceção e perguntas frequentes";
+      statusEl.textContent = "Volume Médio";
+      descEl.textContent = "Bom começo. Considere incluir exceções e perguntas frequentes";
     } else if (words < 600) {
       statusEl.className = "gauge-pill gauge-good";
-      statusEl.textContent = "🟢 Bom Volume";
-      descEl.textContent = "Excelente volume! A IA responderá com autoridade sobre este tópico";
+      statusEl.textContent = "Bom Volume";
+      descEl.textContent = "Revise se as regras e os exemplos estão completos e atualizados";
     } else {
       statusEl.className = "gauge-pill gauge-epic";
-      statusEl.textContent = "🔥 Volume Massivo!";
-      descEl.textContent = "Nível máximo de riqueza! Zero risco de confusão e máxima assertividade";
+      statusEl.textContent = "Texto extenso";
+      descEl.textContent = "Considere dividir o conteúdo em tópicos para facilitar a revisão";
     }
   }
 }
@@ -1882,7 +2268,7 @@ async function handleTrainingFileUpload(file) {
 
     if (notice) {
       notice.className = "upload-feedback success";
-      notice.textContent = `✓ Documento "${data.filename}" extraído com sucesso! (${data.word_count} palavras adicionadas).`;
+      notice.textContent = `Documento "${data.filename}" extraído com sucesso! (${data.word_count} palavras adicionadas).`;
     }
     showNotice(`Documento "${data.filename}" carregado com sucesso.`);
   } catch (err) {
@@ -1924,13 +2310,13 @@ function renderTrainingTopics() {
 
     const tagBadge = document.createElement("span");
     tagBadge.className = "topic-tag-badge";
-    tagBadge.textContent = isIsolated ? "🏷️ Tópico Isolado" : "📄 Conhecimento Geral";
+    tagBadge.textContent = isIsolated ? "Tópico Isolado" : "Conhecimento Geral";
     badges.append(tagBadge);
 
     if (meta.filename) {
       const fileBadge = document.createElement("span");
       fileBadge.className = "topic-file-badge";
-      fileBadge.textContent = `📎 ${meta.filename}`;
+      fileBadge.textContent = `Ficheiro: ${meta.filename}`;
       badges.append(fileBadge);
     }
 
@@ -1988,7 +2374,17 @@ function renderTrainingTopics() {
 }
 
 // Sub-abas de negócio
-$$(".business-subtab").forEach(b => b.addEventListener("click", () => switchBusinessSubtab(b.dataset.subtab)));
+$$(".business-subtab").forEach(b => b.addEventListener("click", () => {
+  if (!hasActiveSub && b.dataset.subtab !== "cards") {
+    openPaywallModal();
+    return;
+  }
+  if (b.hasAttribute("data-paywall-locked") && !hasActiveSub) {
+    openPaywallModal();
+    return;
+  }
+  switchBusinessSubtab(b.dataset.subtab);
+}));
 
 // Eventos do formulário de treinamento
 $("#training-content-input")?.addEventListener("input", updateTrainingMeter);
@@ -2162,13 +2558,13 @@ function applyPaywallState(isActive) {
 
   // Aplica indicador visual nas sub-abas de Negócio e Configurações bloqueadas
   const paywallTabs = [
-    { tab: "#subtab-btn-cards", icon: "🔒 " },
-    { tab: "#subtab-btn-training", icon: "🔒 " },
+    { tab: "#subtab-btn-cards" },
+    { tab: "#subtab-btn-stock" },
+    { tab: "#subtab-btn-training" },
   ];
-  paywallTabs.forEach(({ tab, icon }) => {
+  paywallTabs.forEach(({ tab }) => {
     const el = $(tab);
     if (!el) return;
-    const subtabText = el.querySelector(".subtab-icon");
     if (isActive) {
       el.removeAttribute("data-paywall-locked");
     } else {
@@ -2188,12 +2584,25 @@ function applyPaywallState(isActive) {
       overlay.className = "paywall-page-overlay";
       overlay.innerHTML = `
         <div class="paywall-page-overlay-inner">
-          <span class="paywall-page-overlay-icon">🔒</span>
+          <span class="paywall-page-overlay-icon"><svg class="svg-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span>
           <div class="paywall-page-overlay-title">Plano Business Necessário</div>
           <p class="paywall-page-overlay-desc">Ative a sua subscrição de 59€/mês para configurar e personalizar o seu agente IA Drexier.</p>
-          <button class="btn primary" onclick="openPaywallModal()">Ativar Subscrição</button>
+          <button type="button" class="btn primary" id="paywall-overlay-activate">Ativar Subscrição</button>
         </div>`;
       panel.appendChild(overlay);
+      overlay.querySelector("#paywall-overlay-activate")?.addEventListener("click", async (e) => {
+        e.preventDefault();
+        try {
+          closePaywallModal?.();
+          await navigate("settings");
+          $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
+          $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
+          await loadBillingStatus();
+          await startStripeCheckout();
+        } catch (err) {
+          showNotice(err.message, true);
+        }
+      });
     } else {
       panel.style.position = "";
     }
@@ -2280,7 +2689,7 @@ async function loadBillingStatus() {
         paywallBanner.classList.remove("hidden");
         const titleEl = $("#billing-paywall-title");
         const descEl = $("#billing-paywall-desc");
-        if (titleEl) titleEl.textContent = "⚠️ Pagamento Recusado no Cartão";
+        if (titleEl) titleEl.textContent = "Pagamento Recusado no Cartão";
         if (descEl) descEl.textContent = "Atualize os dados do seu cartão na Stripe para manter o atendimento com IA ativo.";
       }
 
@@ -2299,7 +2708,7 @@ async function loadBillingStatus() {
         const titleEl = $("#billing-paywall-title");
         const descEl = $("#billing-paywall-desc");
         if (titleEl) titleEl.textContent = "Ative o Plano Business (59€/mês) para desbloquear a sua IA Drexier";
-        if (descEl) descEl.textContent = "Acesso total às respostas automáticas 24/7 por e-mail e treinamento ilimitado da IA.";
+        if (descEl) descEl.textContent = "Acesso às respostas automáticas por e-mail quando o agente estiver ativado, além das ferramentas de treinamento.";
       }
     }
 
@@ -2380,7 +2789,7 @@ $("#btn-sync-billing-status")?.addEventListener("click", async () => {
     hasActiveSub = !!(status && status.has_active_subscription);
     applyPaywallState(hasActiveSub);
     if (hasActiveSub) {
-      showNotice("✅ Subscrição ativa confirmada! Todas as funcionalidades estão desbloqueadas.");
+      showNotice("Subscrição ativa confirmada! Todas as funcionalidades estão desbloqueadas.");
     } else {
       showNotice("Não encontrámos uma subscrição ativa. Se acabou de pagar, aguarde 30 segundos e tente novamente.", true);
     }
@@ -2393,11 +2802,12 @@ $("#btn-sync-billing-status")?.addEventListener("click", async () => {
 });
 
 // Botão de atalho do Dashboard para a aba Faturação
-$("#btn-goto-billing")?.addEventListener("click", async () => {
+$("#btn-goto-billing")?.addEventListener("click", async (e) => {
+  e.preventDefault();
   await navigate("settings");
   $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
   $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
-  await loadBillingStatus();
+  loadBillingStatus().catch(() => {});
 });
 
 function fillSettings() {
@@ -2553,6 +2963,7 @@ async function loadEmailStatus() {
       const infoProv = $("#email-info-provider");
       const infoName = $("#email-info-name");
       const infoLastSync = $("#email-info-last-sync");
+      const infoResponseSince = $("#email-info-response-since");
 
       if (dispProvider) dispProvider.textContent = `${providerName} Conectado`;
       if (dispAddr) dispAddr.textContent = it.email_address;
@@ -2560,6 +2971,11 @@ async function loadEmailStatus() {
       if (infoName) infoName.textContent = it.display_name || me?.name || "Atendimento Oficial";
       if (infoLastSync) {
         infoLastSync.textContent = it.last_sync_at ? new Date(it.last_sync_at).toLocaleString("pt-PT") : "Ainda não sincronizado";
+      }
+      if (infoResponseSince) {
+        infoResponseSince.textContent = it.response_since_at
+          ? new Date(it.response_since_at).toLocaleString("pt-PT")
+          : "Aguardando pagamento confirmado";
       }
 
       updateAutoReplyUI(Boolean(it.auto_reply_enabled), true);
@@ -2654,6 +3070,17 @@ function updateAutoReplyUI(enabled, connected = true) {
   const liveStatusDot = $("#live-status-dot");
   const liveStatusBar = $("#conversation-live-status");
   const liveStatusText = $("#live-status-text");
+  const agentSwitchBtn = $("#btn-toggle-agent-global");
+
+  if (agentSwitchBtn) {
+    agentSwitchBtn.classList.toggle("active", Boolean(enabled && connected));
+    agentSwitchBtn.setAttribute("aria-checked", Boolean(enabled && connected) ? "true" : "false");
+    agentSwitchBtn.disabled = !connected;
+    agentSwitchBtn.setAttribute(
+      "aria-label",
+      enabled && connected ? "Desativar respostas automáticas do agente" : "Ativar respostas automáticas do agente"
+    );
+  }
 
   if (!connected) {
     if (autoReplyText) {
@@ -2715,29 +3142,63 @@ function updateAutoReplyUI(enabled, connected = true) {
 }
 
 async function toggleAutoReply() {
-  if (!paywallCheck()) return;
-  try {
-    const statusData = await api("/api/email/status");
-    if (!statusData.connected) {
-      showNotice("Conecte primeiro o seu e-mail nas configurações para gerir as respostas automáticas.", true);
-      return;
+    if (!paywallCheck()) return;
+    try {
+      const statusData = await api("/api/email/status");
+      if (!statusData.connected) {
+        showNotice("Conecte primeiro o seu e-mail nas configurações para gerir as respostas automáticas.", true);
+        return;
+      }
+      const currentEnabled = Boolean(statusData.integration.auto_reply_enabled);
+      const newEnabled = !currentEnabled;
+      const res = await api("/api/email/auto-reply", {
+        method: "POST",
+        body: JSON.stringify({ enabled: newEnabled })
+      });
+      showNotice(res.message);
+      updateAutoReplyUI(newEnabled, true);
+      const msgToggleBtnLocal = $("#btn-toggle-auto-reply-messages");
+      if (msgToggleBtnLocal) {
+        msgToggleBtnLocal.textContent = res.auto_reply_enabled ? "Respostas IA: Ativas" : "Respostas IA: Pausadas";
+      }
+      await loadEmailStatus();
+    } catch (err) {
+      showNotice(err.message, true);
     }
-    const currentEnabled = Boolean(statusData.integration.auto_reply_enabled);
-    const newEnabled = !currentEnabled;
-    const res = await api("/api/email/auto-reply", {
-      method: "POST",
-      body: JSON.stringify({ enabled: newEnabled })
-    });
-    showNotice(res.message);
-    updateAutoReplyUI(newEnabled, true);
-    await loadEmailStatus();
-  } catch (err) {
-    showNotice(err.message, true);
   }
-}
 
 $("#btn-toggle-auto-reply")?.addEventListener("click", toggleAutoReply);
 $("#btn-toggle-auto-reply-messages")?.addEventListener("click", toggleAutoReply);
+
+// Botão interruptor de ativação do agente na aba Mensagens (Switch com animação)
+const agentGlobalBtn2 = $("#btn-toggle-agent-global");
+if (agentGlobalBtn2) {
+  agentGlobalBtn2.onclick = async () => {
+    if (!paywallCheck()) return;
+    try {
+      const statusData = await api("/api/email/status");
+      if (!statusData.connected) {
+        showNotice("Conecte primeiro o seu e-mail comercial Google Gmail nas configurações.", true);
+        return;
+      }
+      const currentEnabled = Boolean(statusData.integration.auto_reply_enabled);
+      const newEnabled = !currentEnabled;
+      // Animação imediata na UI para alta reatividade
+      agentGlobalBtn2.classList.toggle("active", newEnabled);
+      agentGlobalBtn2.setAttribute("aria-checked", newEnabled ? "true" : "false");
+      const res = await api("/api/email/auto-reply", {
+        method: "POST",
+        body: JSON.stringify({ enabled: newEnabled })
+      });
+      updateAutoReplyUI(!!res.auto_reply_enabled, true);
+      showNotice(res.auto_reply_enabled ? "Agente ativado com sucesso! As respostas automáticas estão ativas." : "Agente pausado com sucesso.");
+      await loadEmailStatus();
+    } catch (err) {
+      showNotice(err.message, true);
+      await loadEmailStatus();
+    }
+  };
+}
 
 // Monitorização e atualização contínua em segundo plano (tempo real)
 let livePollTimer = null;
@@ -2765,4 +3226,65 @@ function stopLivePolling() {
   }
 }
 
-if (token) boot();
+if (token) {
+  boot();
+} else {
+  showLanding();
+}
+
+/* ============================================================
+   INICIALIZAÇÃO DA LANDING PAGE E NAVEGAÇÃO
+   ============================================================ */
+document.addEventListener("DOMContentLoaded", () => {
+  // Botões de navegação na Landing Page
+  $("#lp-btn-login")?.addEventListener("click", () => showAuth("login"));
+  $("#lp-link-footer-login")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    showAuth("login");
+  });
+
+  // Botões de Começar Agora / Criar Conta
+  const signupTriggers = [
+    "#lp-btn-signup-nav",
+    "#lp-btn-hero-start",
+    "#lp-btn-cta-compare",
+    "#lp-btn-final-start",
+    "#lp-link-footer-signup"
+  ];
+  signupTriggers.forEach(sel => {
+    $(sel)?.addEventListener("click", (e) => {
+      e.preventDefault();
+      showAuth("signup");
+    });
+  });
+
+  $$(".lp-cta-btn").forEach(btn => {
+    btn.addEventListener("click", () => showAuth("signup"));
+  });
+
+  // Botão Voltar à Landing Page a partir do Auth
+  $("#btn-back-to-landing")?.addEventListener("click", () => showLanding());
+
+  // Acordeão FAQ interativo com clique para abrir/fechar suave
+  $$(".lp-faq-question").forEach(q => {
+    q.addEventListener("click", () => {
+      const item = q.closest(".lp-faq-item");
+      const wasExpanded = q.getAttribute("aria-expanded") === "true";
+      $$(".lp-faq-item").forEach(other => {
+        if (other !== item) {
+          other.classList.remove("active");
+          other.querySelector(".lp-faq-question")?.setAttribute("aria-expanded", "false");
+        }
+      });
+      item?.classList.toggle("active", !wasExpanded);
+      q.setAttribute("aria-expanded", !wasExpanded ? "true" : "false");
+    });
+  });
+
+  // Limpar ponto de notificação ao navegar para Mensagens
+  $$("[data-page='messages']").forEach(btn => {
+    btn.addEventListener("click", () => {
+      $("#nav-messages-dot")?.classList.add("hidden");
+    });
+  });
+});

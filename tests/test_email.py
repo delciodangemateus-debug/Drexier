@@ -6,10 +6,13 @@ from unittest.mock import AsyncMock, patch
 from backend.main import app
 from backend.database import connect, init_db
 from backend.auth import create_token
+from backend.services.billing_service import _save_stored_subscription
 from backend.services.email_service import (
     clean_email_body,
+    get_email_response_cutoff,
     parse_sender_info,
     create_mime_message,
+    sync_emails_for_user,
 )
 
 
@@ -73,6 +76,18 @@ def test_create_mime_message():
     assert msg["Subject"] == "Re: Informações"
 
 
+def test_email_response_cutoff_starts_after_payment_and_connection():
+    integration = {
+        "last_successful_payment_at": "2026-10-10T12:00:00+00:00",
+        "created_at": "2026-10-09 12:00:00",
+    }
+    assert get_email_response_cutoff(integration).isoformat() == "2026-10-10T12:00:00+00:00"
+
+    integration["created_at"] = "2026-10-11 12:00:00"
+    assert get_email_response_cutoff(integration).isoformat() == "2026-10-11T12:00:00+00:00"
+    assert get_email_response_cutoff({"created_at": "2026-10-09 12:00:00"}) is None
+
+
 def test_email_public_config(auth_client):
     client, _, _ = auth_client
     res = client.get("/api/email/config")
@@ -89,6 +104,26 @@ def test_email_status_when_disconnected(auth_client):
     data = res.json()
     assert data["connected"] is False
     assert data["integration"] is None
+
+
+def test_email_status_exposes_paid_response_start(auth_client):
+    client, token, user_id = auth_client
+    with connect() as c:
+        c.execute(
+            """INSERT INTO email_integrations
+               (user_id, provider, email_address, display_name, access_token, status, created_at)
+               VALUES (?, 'google', 'empresa@gmail.com', 'Empresa Silva', 'ya29_token', 'connected', ?)""",
+            (user_id, "2026-10-01 09:00:00"),
+        )
+    _save_stored_subscription(user_id, {
+        "status": "active",
+        "last_successful_payment_at": "2026-10-15T10:00:00+00:00",
+    })
+
+    res = client.get("/api/email/status", headers={"Authorization": f"Bearer {token}"})
+
+    assert res.status_code == 200
+    assert res.json()["integration"]["response_since_at"] == "2026-10-15T10:00:00+00:00"
 
 
 def test_manual_email_connect_and_disconnect(auth_client):
@@ -247,6 +282,10 @@ async def test_email_sync_triggers_ai_and_records_conversation(auth_client):
                VALUES (?, 'google', 'empresa@gmail.com', 'Empresa Silva', 'ya29_token', 'connected')""",
             (user_id,),
         )
+    _save_stored_subscription(user_id, {
+        "status": "active",
+        "last_successful_payment_at": "2026-10-01T10:00:00+00:00",
+    })
 
     # 2. Mock da busca de e-mails no Google e envio de resposta
     mock_processed = [
@@ -266,6 +305,21 @@ async def test_email_sync_triggers_ai_and_records_conversation(auth_client):
         data = res.json()
         assert data["ok"] is True
         assert data["processed_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_email_sync_does_not_run_without_successful_payment(auth_client):
+    client, token, user_id = auth_client
+    with connect() as c:
+        c.execute(
+            """INSERT INTO email_integrations (user_id, provider, email_address, display_name, access_token, status)
+               VALUES (?, 'google', 'empresa@gmail.com', 'Empresa Silva', 'ya29_token', 'connected')""",
+            (user_id,),
+        )
+
+    with patch("backend.services.email_service.sync_google_emails", new_callable=AsyncMock) as mock_sync:
+        assert await sync_emails_for_user(user_id) == []
+        mock_sync.assert_not_awaited()
 
 
 def test_toggle_auto_reply(auth_client):

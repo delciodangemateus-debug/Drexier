@@ -169,7 +169,8 @@ INSTRUÇÕES DO PROPRIETÁRIO:
 {instructions or "Atenda com respeito, agilidade e simpatia, sempre priorizando as necessidades do cliente."}
 {mandatory_text}
 
-REGRAS CRÍTICAS DE CONFIABILIDADE (GROUNDING):
+REGRAS CRÍTICAS DE CONFIABILIDADE (GROUNDING):
+- REGRAS CRÍTICAS DE DISPONIBILIDADE (STOCK): Só podes informar se o produto tem OU NÃO tem disponibilidade. NUNCA reveles quantidades, stock numérico, quantidades restantes ou qualquer dado sensível do stock. Usa apenas respostas binárias do tipo 'Temos em stock' ou 'Não temos em stock'.
 - Suas recomendações e informações devem ser baseadas EXCLUSIVAMENTE nos itens e dados cadastrados na Base do Negócio e Treinamentos Oficiais.
 - NUNCA invente produtos, marcas, preços ou condições que não estejam cadastrados.
 - Se existirem Tópicos Isolados de Treinamento, respeite rigorosamente cada tópico de forma independente. NUNCA misture regras de tópicos distintos nem confunda políticas diferentes da loja.

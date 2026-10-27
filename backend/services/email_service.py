@@ -12,12 +12,14 @@ import os
 import re
 import smtplib
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.parse
 from dotenv import load_dotenv
 import httpx
 
 from backend.database import connect
+from backend.services.billing_service import get_last_successful_payment_at
 from backend.services.agent import draft_reply
 
 load_dotenv()
@@ -84,6 +86,32 @@ def get_email_config() -> Dict[str, Any]:
             "configured": bool(ms_client_id and ms_client_secret),
         },
     }
+
+
+def _parse_utc_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return None
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    if not value:
+        return None
+    raw_value = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def get_email_response_cutoff(integration: Dict[str, Any]) -> Optional[datetime]:
+    """Define o primeiro instante em que a IA pode responder após um pagamento confirmado."""
+    payment_at = _parse_utc_datetime(integration.get("last_successful_payment_at"))
+    if payment_at is None:
+        return None
+    connected_at = _parse_utc_datetime(integration.get("created_at"))
+    return max(payment_at, connected_at) if connected_at else payment_at
 
 
 # ==============================================================================
@@ -668,6 +696,12 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
     headers = {"Authorization": f"Bearer {token}"}
     my_email = (integration.get("email_address") or "").lower().strip()
 
+    cutoff_at = get_email_response_cutoff(integration)
+    if cutoff_at is None:
+        logger.warning("Sincronização Gmail bloqueada: não há data de pagamento confirmado válida.")
+        return []
+    cutoff_ts = int(cutoff_at.timestamp() * 1000)
+
     processed_items = []
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -690,6 +724,24 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
 
             msg_data = msg_res.json()
             label_ids = msg_data.get("labelIds", [])
+
+            # Filtro por data de recebimento: após pagamento e ligação da integração
+            if cutoff_ts is not None:
+                try:
+                    internal_date = msg_data.get("internalDate")
+                    if internal_date is None or int(internal_date) < cutoff_ts:
+                        if internal_date is not None:
+                            await client.post(
+                                f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
+                                headers=headers,
+                                json={"removeLabelIds": ["UNREAD"]}
+                            )
+                            logger.info(f"E-mail Gmail {msg_id} anterior ao início da cobertura paga ignorado.")
+                        continue
+                except (TypeError, ValueError):
+                    logger.warning(f"Data de recebimento inválida no e-mail Gmail {msg_id}; mensagem mantida sem resposta.")
+                    continue
+
             payload = msg_data.get("payload", {})
             headers_list = payload.get("headers", [])
 
@@ -765,6 +817,11 @@ async def sync_microsoft_emails(user_dict: dict, integration: dict) -> List[Dict
     headers = {"Authorization": f"Bearer {token}"}
     my_email = (integration.get("email_address") or "").lower().strip()
 
+    cutoff_at = get_email_response_cutoff(integration)
+    if cutoff_at is None:
+        logger.warning("Sincronização Outlook bloqueada: não há data de pagamento confirmado válida.")
+        return []
+
     processed_items = []
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -785,6 +842,28 @@ async def sync_microsoft_emails(user_dict: dict, integration: dict) -> List[Dict
             customer_name = sender_obj.get("name", "")
             body_content = m.get("body", {}).get("content", "")
             content_type = m.get("body", {}).get("contentType", "text")
+            received_dt = m.get("receivedDateTime")
+
+            # Filtro por data de recebimento: após pagamento e ligação da integração
+            if received_dt:
+                try:
+                    received_at = _parse_utc_datetime(received_dt)
+                    if received_at is None:
+                        raise ValueError("data de recebimento ausente ou inválida")
+                    if received_at < cutoff_at:
+                        await client.patch(
+                            f"{MICROSOFT_GRAPH_BASE}/me/messages/{msg_id}",
+                            headers=headers,
+                            json={"isRead": True}
+                        )
+                        logger.info(f"E-mail Outlook {msg_id} anterior ao início da cobertura paga ignorado.")
+                        continue
+                except ValueError:
+                    logger.warning(f"Data de recebimento inválida no e-mail Outlook {msg_id}; mensagem mantida sem resposta.")
+                    continue
+            else:
+                logger.warning(f"Data de recebimento ausente no e-mail Outlook {msg_id}; mensagem mantida sem resposta.")
+                continue
 
             if not sender_email or sender_email == my_email:
                 continue
@@ -1026,6 +1105,11 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
     password = integration.get("smtp_password")
     my_email = (integration.get("email_address") or "").lower().strip()
 
+    cutoff_at = get_email_response_cutoff(integration)
+    if cutoff_at is None:
+        logger.warning("Sincronização IMAP bloqueada: não há data de pagamento confirmado válida.")
+        return []
+
     processed_items = []
 
     def _fetch_imap_messages():
@@ -1062,8 +1146,28 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
                         for part, enc in decoded
                     )
                 message_id = msg.get("Message-ID", "")
+                date_hdr = msg.get("Date")
                 sender_email, customer_name = parse_sender_info(raw_from)
                 if not sender_email or sender_email == my_email:
+                    continue
+
+                # Filtro por data de recebimento: após pagamento e ligação da integração
+                if date_hdr:
+                    try:
+                        from email.utils import parsedate_to_datetime
+                        received_at = parsedate_to_datetime(date_hdr)
+                        if received_at.tzinfo is None:
+                            received_at = received_at.replace(tzinfo=timezone.utc)
+                        received_at = received_at.astimezone(timezone.utc)
+                        if received_at < cutoff_at:
+                            mail.store(mid, "+FLAGS", "\\Seen")
+                            logger.info(f"E-mail IMAP {message_id or mid} anterior ao início da cobertura paga ignorado.")
+                            continue
+                    except (TypeError, ValueError):
+                        logger.warning(f"Data de recebimento inválida no e-mail IMAP {message_id or mid}; mensagem mantida sem resposta.")
+                        continue
+                else:
+                    logger.warning(f"Data de recebimento ausente no e-mail IMAP {message_id or mid}; mensagem mantida sem resposta.")
                     continue
 
                 body_text = clean_email_body(extract_imap_body(msg)) or "(Email sem corpo legível)"
@@ -1135,6 +1239,11 @@ async def sync_emails_for_user(user_id: int) -> List[Dict[str, Any]]:
 
     user_dict = dict(user)
     integration_dict = dict(integration)
+    payment_at = get_last_successful_payment_at(user_id)
+    integration_dict["last_successful_payment_at"] = payment_at
+    if get_email_response_cutoff(integration_dict) is None:
+        logger.info(f"[SaaS Paywall] Sincronização de e-mail bloqueada para user {user_id}: aguarda pagamento confirmado.")
+        return []
     provider = integration_dict.get("provider")
 
     processed = []

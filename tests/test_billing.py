@@ -7,6 +7,7 @@ validação criptográfica de webhooks e controle de acesso SaaS.
 import time
 import json
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
@@ -14,6 +15,7 @@ from backend.main import app
 from backend.database import connect, init_db
 from backend.services.billing_service import (
     get_user_subscription_status,
+    get_last_successful_payment_at,
     is_subscription_active,
     _save_stored_subscription,
     handle_stripe_webhook,
@@ -235,6 +237,54 @@ def test_webhook_invoice_payment_failed(auth_client):
         status = get_user_subscription_status(user_id)
         assert status["status"] == "past_due"
         assert status["has_active_subscription"] is False
+
+
+def test_successful_invoice_payment_updates_last_payment_date(auth_client):
+    _, _, user_id = auth_client
+    _save_stored_subscription(user_id, {
+        "stripe_customer_id": "cus_paid_123",
+        "stripe_subscription_id": "sub_paid_456",
+        "status": "active",
+    })
+
+    paid_timestamp = 1_798_500_000
+    event = {
+        "id": "evt_paid_123",
+        "created": paid_timestamp - 10,
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "customer": "cus_paid_123",
+                "subscription": "sub_paid_456",
+                "amount_paid": PLAN_AMOUNT_CENTS,
+                "status_transitions": {"paid_at": paid_timestamp},
+            }
+        },
+    }
+    mock_subscription = MagicMock()
+    mock_subscription.current_period_end = paid_timestamp + 30 * 86400
+    mock_subscription.cancel_at_period_end = False
+    mock_subscription.get.side_effect = lambda key, default=None: {"metadata": {}}.get(key, default)
+
+    with patch("stripe.Webhook.construct_event", return_value=event), \
+         patch("stripe.Subscription.retrieve", return_value=mock_subscription):
+        handle_stripe_webhook(b"payload", "signature")
+
+    expected = datetime.fromtimestamp(paid_timestamp, tz=timezone.utc).isoformat()
+    assert get_last_successful_payment_at(user_id) == expected
+
+
+def test_subscription_updates_preserve_last_successful_payment(auth_client):
+    _, _, user_id = auth_client
+    paid_at = "2026-10-01T10:30:00+00:00"
+    _save_stored_subscription(user_id, {
+        "status": "active",
+        "last_successful_payment_at": paid_at,
+    })
+
+    _save_stored_subscription(user_id, {"status": "past_due"})
+
+    assert get_last_successful_payment_at(user_id) == paid_at
 
 
 def test_webhook_customer_subscription_deleted(auth_client):
