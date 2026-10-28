@@ -63,34 +63,63 @@ def test_login_email_escapes_session_metadata(monkeypatch):
     assert "Browser&lt;/td&gt;" in payload["html"]
 
 
-def test_signup_and_login_schedule_resend_notifications(monkeypatch):
-    monkeypatch.setattr(
-        "backend.main.send_account_created_email",
-        Mock(),
-    )
-    monkeypatch.setattr(
-        "backend.main.send_login_confirmation_email",
-        Mock(),
-    )
+def test_signup_and_login_require_resend_codes(monkeypatch):
+    sent_codes = []
+
+    def send_code(email, name, code, purpose):
+        sent_codes.append((email, name, code, purpose))
+        return {"status": "sent", "id": "email_123"}
+
+    account_mock = Mock()
+    login_mock = Mock()
+    monkeypatch.setattr("backend.main.send_auth_code_email", send_code)
+    monkeypatch.setattr("backend.main.send_account_created_email", account_mock)
+    monkeypatch.setattr("backend.main.send_login_confirmation_email", login_mock)
+
     email = f"resend-auth-{uuid.uuid4().hex}@example.com"
     with TestClient(app) as client:
-        response = client.post("/api/auth/signup", json={
+        signup = client.post("/api/auth/signup", json={
             "name": "Resend Test",
             "email": email,
             "password": "SecurePassword123",
             "confirm_password": "SecurePassword123",
             "business_type": "Serviços",
         })
-        assert response.status_code == 200
+        assert signup.status_code == 200
+        assert signup.json()["challenge_required"] is True
+        signup_challenge = signup.json()["challenge_id"]
+        assert len(sent_codes[-1][2]) == 6
+        assert sent_codes[-1][2].isdigit()
 
-        response = client.post(
+        rejected = client.post("/api/auth/verify", json={
+            "challenge_id": signup_challenge,
+            "code": "000000",
+        })
+        assert rejected.status_code == 400
+
+        verified = client.post("/api/auth/verify", json={
+            "challenge_id": signup_challenge,
+            "code": sent_codes[-1][2],
+        })
+        assert verified.status_code == 200, verified.text
+        assert verified.json()["token"]
+
+        login = client.post(
             "/api/auth/login",
             json={"email": email, "password": "SecurePassword123"},
             headers={"user-agent": "Test Browser"},
         )
-        assert response.status_code == 200
+        assert login.status_code == 200
+        assert login.json()["challenge_required"] is True
 
-    assert sys.modules["backend.main"].send_account_created_email.call_count == 1
-    login_mock = sys.modules["backend.main"].send_login_confirmation_email
+        verified_login = client.post("/api/auth/verify", json={
+            "challenge_id": login.json()["challenge_id"],
+            "code": sent_codes[-1][2],
+        })
+        assert verified_login.status_code == 200
+        assert verified_login.json()["token"]
+
+    assert [item[3] for item in sent_codes] == ["signup", "login"]
+    assert account_mock.call_count == 1
     assert login_mock.call_count == 1
     assert login_mock.call_args.kwargs["user_agent"] == "Test Browser"

@@ -638,6 +638,12 @@
       <label>Confirmar senha<input name="confirm_password" type="password" minlength="8" required placeholder="••••••••"></label>
       <button class="btn primary" type="submit">Criar Conta e Começar</button>
     </form>
+    <form id="auth-code-form" class="form hidden">
+      <p class="muted" id="auth-code-message">Introduza o código de 6 dígitos enviado para o seu email.</p>
+      <label>Código de confirmação<input id="auth-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"></label>
+      <button class="btn primary" type="submit">Confirmar código</button>
+      <button id="auth-code-back" class="btn ghost" type="button">Voltar</button>
+    </form>
     <p id="auth-error" class="error" role="alert"></p>
   </section>
 </div>

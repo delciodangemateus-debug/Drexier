@@ -470,10 +470,23 @@ window.addEventListener("keydown", e => {
 });
 
 /* Autenticação */
+let authChallengeId = null;
+
+function showAuthCodeChallenge(response) {
+  authChallengeId = response.challenge_id;
+  $("login-form").classList.add("hidden");
+  $("signup-form").classList.add("hidden");
+  $("auth-code-form").classList.remove("hidden");
+  $("auth-code-message").textContent = `Introduza o código de 6 dígitos enviado para ${response.email}.`;
+  $("auth-code").value = "";
+  $("auth-code").focus();
+}
+
 function setAuthTab(tab) {
   $$("[data-auth]").forEach(b => b.classList.toggle("active", b.dataset.auth === tab));
   $("#login-form").classList.toggle("hidden", tab !== "login");
   $("#signup-form").classList.toggle("hidden", tab !== "signup");
+  $("#auth-code-form").classList.add("hidden");
   $("#auth-error").textContent = "";
 }
 $$("[data-auth]").forEach(b => b.addEventListener("click", () => setAuthTab(b.dataset.auth)));
@@ -484,6 +497,10 @@ $("#login-form").addEventListener("submit", async e => {
   const d = Object.fromEntries(new FormData(e.target));
   try {
     const r = await api("/api/auth/login", { method: "POST", body: JSON.stringify(d) });
+    if (r.challenge_required) {
+      showAuthCodeChallenge(r);
+      return;
+    }
     token = r.token;
     localStorage.setItem("drexier_token", token);
     await boot();
@@ -502,12 +519,38 @@ $("#signup-form").addEventListener("submit", async e => {
   }
   try {
     const r = await api("/api/auth/signup", { method: "POST", body: JSON.stringify(d) });
+    if (r.challenge_required) {
+      showAuthCodeChallenge(r);
+      return;
+    }
     token = r.token;
     localStorage.setItem("drexier_token", token);
     await boot();
   } catch (err) {
     $("#auth-error").textContent = err.message;
   }
+});
+
+$("auth-code-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("auth-error").textContent = "";
+  try {
+    const r = await api("/api/auth/verify", {
+      method: "POST",
+      body: JSON.stringify({ challenge_id: authChallengeId, code: $("auth-code").value }),
+    });
+    token = r.token;
+    localStorage.setItem("drexier_token", token);
+    authChallengeId = null;
+    await boot();
+  } catch (err) {
+    $("auth-error").textContent = err.message;
+  }
+});
+
+$("auth-code-back").addEventListener("click", () => {
+  authChallengeId = null;
+  setAuthTab($("login-form").classList.contains("hidden") ? "signup" : "login");
 });
 
 function showLanding() {
@@ -523,6 +566,7 @@ function showAuth(mode = "login") {
   $$("#auth .tab").forEach(t => t.classList.toggle("active", t.dataset.auth === mode));
   $("#login-form")?.classList.toggle("hidden", mode !== "login");
   $("#signup-form")?.classList.toggle("hidden", mode !== "signup");
+  $("#auth-code-form")?.classList.add("hidden");
   const errEl = $("#auth-error");
   if (errEl) errEl.textContent = "";
 }

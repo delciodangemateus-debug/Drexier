@@ -1,7 +1,7 @@
 import asyncio, json, logging, re
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -11,7 +11,8 @@ from backend.auth import hash_password, verify_password, create_token, decode_to
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
 from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
-from backend.services.resend_email import send_account_created_email, send_login_confirmation_email
+from backend.services.resend_email import send_auth_code_email, send_account_created_email, send_login_confirmation_email
+from backend.services.auth_challenge import create_auth_challenge, consume_auth_challenge, invalidate_auth_challenge
 from backend.services.billing_service import is_subscription_active, get_user_subscription_status
 from backend.routers.whatsapp import router as whatsapp_router
 from backend.routers.email import router as email_router
@@ -146,6 +147,10 @@ class Login(BaseModel):
     email: EmailStr
     password: str
 
+class AuthCode(BaseModel):
+    challenge_id: str = Field(min_length=32, max_length=64)
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
 class BusinessInfoIn(BaseModel):
     kind: str
     title: str = Field(min_length=1, max_length=250)
@@ -178,27 +183,39 @@ class ConversionActionIn(BaseModel):
     action: str = Field(pattern="^(confirm|reject)$")
     custom_note: Optional[str] = ""
 
+def _start_auth_challenge(email: str, name: str, purpose: str, payload: dict):
+    challenge_id, code = create_auth_challenge(purpose, payload)
+    result = send_auth_code_email(email, name, code, purpose)
+    if result.get("status") != "sent":
+        invalidate_auth_challenge(challenge_id)
+        raise HTTPException(
+            status_code=503,
+            detail="O código não pôde ser enviado. Verifique a configuração do Resend e o email autorizado.",
+        )
+    return challenge_id
+
 @app.post("/api/auth/signup")
-def signup(data: Signup, background_tasks: BackgroundTasks):
+def signup(data: Signup):
     if data.password != data.confirm_password:
         raise HTTPException(400, "As senhas não coincidem.")
     if not re.search(r"[A-Za-z]", data.password) or not re.search(r"\d", data.password):
         raise HTTPException(400, "A senha deve conter pelo menos uma letra e um número.")
-    with connect() as c:
-        try:
-            cur = c.execute("INSERT INTO users(name,email,password_hash,business_type) VALUES(?,?,?,?)",
-                (data.name.strip(), data.email.lower(), hash_password(data.password), data.business_type))
-            uid = cur.lastrowid
-        except Exception as e:
-            if "UNIQUE" in str(e):
-                raise HTTPException(409, "Este email já está registado.")
-            raise
-
-    background_tasks.add_task(send_account_created_email, data.email.lower(), data.name.strip())
-    return {"token": create_token(uid), "user_id": uid}
+    email = data.email.lower()
+    challenge_id = _start_auth_challenge(
+        email,
+        data.name.strip(),
+        "signup",
+        {
+            "name": data.name.strip(),
+            "email": email,
+            "password_hash": hash_password(data.password),
+            "business_type": data.business_type,
+        },
+    )
+    return {"challenge_required": True, "challenge_id": challenge_id, "email": email}
 
 @app.post("/api/auth/login")
-def login(data: Login, request: Request, background_tasks: BackgroundTasks):
+def login(data: Login, request: Request):
     with connect() as c:
         row = c.execute(
             "SELECT id,name,email,password_hash FROM users WHERE email=?",
@@ -207,14 +224,54 @@ def login(data: Login, request: Request, background_tasks: BackgroundTasks):
     if not row or not verify_password(data.password, row["password_hash"]):
         raise HTTPException(401, "Email ou senha incorretos.")
 
-    background_tasks.add_task(
-        send_login_confirmation_email,
+    challenge_id = _start_auth_challenge(
         row["email"],
         row["name"],
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
+        "login",
+        {
+            "user_id": row["id"],
+            "email": row["email"],
+            "name": row["name"],
+            "ip_address": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent"),
+        },
     )
-    return {"token": create_token(row["id"]), "user_id": row["id"]}
+    return {"challenge_required": True, "challenge_id": challenge_id, "email": row["email"]}
+
+@app.post("/api/auth/verify")
+def verify_auth_code(data: AuthCode):
+    signup_payload = consume_auth_challenge(data.challenge_id, data.code, "signup")
+    if signup_payload:
+        with connect() as c:
+            try:
+                cur = c.execute(
+                    "INSERT INTO users(name,email,password_hash,business_type) VALUES(?,?,?,?)",
+                    (
+                        signup_payload["name"],
+                        signup_payload["email"],
+                        signup_payload["password_hash"],
+                        signup_payload["business_type"],
+                    ),
+                )
+                uid = cur.lastrowid
+            except Exception as exc:
+                if "UNIQUE" in str(exc):
+                    raise HTTPException(409, "Este email já está registado.")
+                raise
+        send_account_created_email(signup_payload["email"], signup_payload["name"])
+        return {"token": create_token(uid), "user_id": uid}
+
+    login_payload = consume_auth_challenge(data.challenge_id, data.code, "login")
+    if login_payload:
+        send_login_confirmation_email(
+            login_payload["email"],
+            login_payload["name"],
+            ip_address=login_payload.get("ip_address"),
+            user_agent=login_payload.get("user_agent"),
+        )
+        return {"token": create_token(login_payload["user_id"]), "user_id": login_payload["user_id"]}
+
+    raise HTTPException(400, "Código inválido ou expirado.")
 
 @app.get("/api/me")
 def me(user=Depends(current_user)):

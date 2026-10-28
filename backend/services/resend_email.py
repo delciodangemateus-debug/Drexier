@@ -76,6 +76,19 @@ def _send_email(to_email: str, subject: str, html_body: str) -> dict:
         return {"status": "failed", "error": str(exc)}
 
 
+def send_auth_code_email(to_email: str, name: str, code: str, purpose: str) -> dict:
+    action = "criar a sua conta" if purpose == "signup" else "entrar na sua conta"
+    body = f"""
+      <p style="margin:0 0 16px">Use o código abaixo para {action} no Drexier:</p>
+      <p style="margin:24px 0;text-align:center">
+        <strong style="display:inline-block;letter-spacing:8px;font-size:34px;color:#5a34a4">{html.escape(code)}</strong>
+      </p>
+      <p style="margin:16px 0 0">Este código expira em 10 minutos e só pode ser usado uma vez.</p>
+    """
+    subject = "Código de confirmação da conta Drexier" if purpose == "signup" else "Código de confirmação de login Drexier"
+    return _send_email(to_email, subject, _base_template("Confirme a sua identidade", name, body))
+
+
 def send_account_created_email(to_email: str, name: str) -> dict:
     body = """
       <p style="margin:0 0 16px">A sua conta foi criada com sucesso no Drexier.</p>
