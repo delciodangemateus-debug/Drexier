@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<script type="module" src="./i18n.js"></script>
 </head>
 <body>
 
@@ -32,6 +33,10 @@
         <a href="#lp-about" class="lp-nav-link">Sobre o Software</a>
       </nav>
       <div class="lp-header-actions">
+        <div class="language-selector" role="group" aria-label="Idioma / Language">
+          <button type="button" class="lang-btn active" data-lang="pt" title="Português">PT</button>
+          <button type="button" class="lang-btn" data-lang="en" title="English">EN</button>
+        </div>
         <button type="button" class="btn outline small lp-nav-login" id="lp-btn-login">Entrar</button>
         <button type="button" class="btn primary small lp-cta-btn lp-nav-signup" id="lp-btn-signup-nav">Começar Agora</button>
       </div>
@@ -685,6 +690,10 @@
   <main class="main">
     <header class="topbar">
       <button id="mobile-menu" class="btn outline small">Menu</button>
+      <div class="language-selector app-language-selector" role="group" aria-label="Idioma / Language">
+        <button type="button" class="lang-btn active" data-lang="pt" title="Português">PT</button>
+        <button type="button" class="lang-btn" data-lang="en" title="English">EN</button>
+      </div>
       <div>
         <h1 id="page-title">Dashboard</h1>
         <p id="page-subtitle" class="muted">Visão geral do atendimento</p>

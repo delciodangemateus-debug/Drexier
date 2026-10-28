@@ -1,7 +1,7 @@
 import asyncio, json, logging, re
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -11,6 +11,7 @@ from backend.auth import hash_password, verify_password, create_token, decode_to
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
 from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
+from backend.services.resend_email import send_account_created_email, send_login_confirmation_email
 from backend.services.billing_service import is_subscription_active, get_user_subscription_status
 from backend.routers.whatsapp import router as whatsapp_router
 from backend.routers.email import router as email_router
@@ -94,6 +95,10 @@ def get_styles():
 def get_app_js():
     return FileResponse(ROOT / "frontend" / "app.js")
 
+@app.get("/i18n.js")
+def get_i18n_js():
+    return FileResponse(ROOT / "frontend" / "i18n.js")
+
 def current_user(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Sessão necessária.")
@@ -174,7 +179,7 @@ class ConversionActionIn(BaseModel):
     custom_note: Optional[str] = ""
 
 @app.post("/api/auth/signup")
-def signup(data: Signup):
+def signup(data: Signup, background_tasks: BackgroundTasks):
     if data.password != data.confirm_password:
         raise HTTPException(400, "As senhas não coincidem.")
     if not re.search(r"[A-Za-z]", data.password) or not re.search(r"\d", data.password):
@@ -188,14 +193,27 @@ def signup(data: Signup):
             if "UNIQUE" in str(e):
                 raise HTTPException(409, "Este email já está registado.")
             raise
+
+    background_tasks.add_task(send_account_created_email, data.email.lower(), data.name.strip())
     return {"token": create_token(uid), "user_id": uid}
 
 @app.post("/api/auth/login")
-def login(data: Login):
+def login(data: Login, request: Request, background_tasks: BackgroundTasks):
     with connect() as c:
-        row = c.execute("SELECT id,password_hash FROM users WHERE email=?", (data.email.lower(),)).fetchone()
+        row = c.execute(
+            "SELECT id,name,email,password_hash FROM users WHERE email=?",
+            (data.email.lower(),),
+        ).fetchone()
     if not row or not verify_password(data.password, row["password_hash"]):
         raise HTTPException(401, "Email ou senha incorretos.")
+
+    background_tasks.add_task(
+        send_login_confirmation_email,
+        row["email"],
+        row["name"],
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return {"token": create_token(row["id"]), "user_id": row["id"]}
 
 @app.get("/api/me")

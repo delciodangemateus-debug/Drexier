@@ -456,6 +456,81 @@ hr {
   width: 100%;
 }
 
+/* Language switcher shared by landing and internal app */
+.language-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: .35px;
+  box-shadow: var(--shadow-xs);
+  transition: all var(--transition);
+}
+
+.language-toggle:hover,
+.language-toggle.is-en {
+  border-color: var(--gold-border);
+  color: var(--purple-dark);
+  background: var(--surface-card-subtle);
+}
+
+/* Segmented Language Selector */
+.language-selector {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-card-subtle, #f5f4f8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  padding: 3px;
+  gap: 3px;
+  box-shadow: var(--shadow-xs);
+}
+
+.lang-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  min-width: 32px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition, 0.2s ease);
+  user-select: none;
+}
+
+.lang-btn:hover {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.lang-btn.active {
+  background: var(--white);
+  color: var(--purple-dark);
+  border-color: var(--gold-border, var(--border));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  font-weight: 800;
+}
+
+.app-language-selector {
+  margin-left: auto;
+  order: 10;
+}
+
 .lp-header-actions {
   display: flex;
   align-items: center;
@@ -1855,6 +1930,11 @@ hr {
 
 #mobile-menu {
   display: none;
+}
+
+.app-language-toggle {
+  margin-left: auto;
+  order: 10;
 }
 
 .notice {
@@ -5703,10 +5783,6 @@ hr {
   #app .sidebar-bottom .btn {
     padding: 7px 9px;
     font-size: 11px;
-  }
-
-  #app .main {
-    padding: 18px 14px 32px;
   }
 }
 

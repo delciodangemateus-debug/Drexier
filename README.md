@@ -50,6 +50,15 @@ Abra **dois terminais**:
 - `.env.example`: modelo de variáveis de ambiente.
 - `data/`: base SQLite criada automaticamente.
 
+## Emails transacionais de autenticação (Resend)
+
+No cadastro e em cada login bem-sucedido, o backend envia notificações através do Resend sem bloquear a resposta da API. Configure no `.env`:
+
+- `RESEND_API_KEY`: chave criada em [Resend API Keys](https://resend.com/api-keys).
+- `RESEND_FROM_EMAIL`: remetente verificado no formato `Drexier <email@seudominio.com>`.
+
+Enquanto estas variáveis estiverem vazias, o envio é ignorado com um aviso no log. O código está em `backend/services/resend_email.py` e é acionado pelos endpoints `POST /api/auth/signup` e `POST /api/auth/login`.
+
 ## Integração Oficial de E-mail (Google Gmail & Microsoft Outlook)
 
 O Drexier atende clientes, tira dúvidas e conduz conversas **exclusivamente por e-mail** utilizando IA inteligente com suporte a tom de voz, regras do negócio e respostas obrigatórias:

@@ -139,7 +139,14 @@ def build_system_instruction(
             mandatory_text = "\nRESPOSTAS OBRIGATÓRIAS / DIRETRIZES ESPECÍFICAS:\n" + "\n".join(valid_items)
 
     system_prompt = f"""Você é o atendente consultivo oficial de {business_name} ({business_type}).
-Idioma principal: {language}.
+Idioma preferencial da empresa: {language}.
+
+DIRETRIZ MANDATÓRIA E SUPREMA DE IDIOMA (ORDEM ABSOLUTA):
+- Você DEVE identificar o idioma utilizado pelo cliente na mensagem (ou na primeira mensagem da conversa) e responder RIGOROSAMENTE NO MESMO IDIOMA em que o cliente enviou a mensagem, independentemente de qual idioma seja (Português, Inglês, Espanhol, Francês, Alemão, Italiano, ou qualquer outro idioma).
+- Se o cliente mandou a mensagem em inglês (ou qualquer outro idioma), responda 100% nesse mesmo idioma, com fluência natural, simpatia e correção gramatical.
+- NUNCA responda em português a um cliente que se comunicou em inglês ou noutro idioma.
+- Toda e qualquer mensagem do atendimento (acolhimento, esclarecimento de dúvidas, agendamentos, verificação de stock e despedida) deve acompanhar fielmente o idioma do cliente.
+- Caso precise informar que não possui uma informação cadastrada no momento, faça-o sempre no mesmo idioma do cliente (exemplo em inglês: "At the moment, I do not have this information registered. Is there anything else I can help you with?").
 
 MISSÃO E POSTURA:
 1. Você responde às mensagens dos clientes e é responsável por DIRIGIR a conversa ativamente com foco no objetivo do negócio (esclarecer dúvidas, agendamentos, atendimento e vendas).
@@ -169,7 +176,8 @@ INSTRUÇÕES DO PROPRIETÁRIO:
 {instructions or "Atenda com respeito, agilidade e simpatia, sempre priorizando as necessidades do cliente."}
 {mandatory_text}
 
-REGRAS CRÍTICAS DE CONFIABILIDADE (GROUNDING):
+REGRAS CRÍTICAS DE CONFIABILIDADE (GROUNDING):
+
 - REGRAS CRÍTICAS DE DISPONIBILIDADE (STOCK): Só podes informar se o produto tem OU NÃO tem disponibilidade. NUNCA reveles quantidades, stock numérico, quantidades restantes ou qualquer dado sensível do stock. Usa apenas respostas binárias do tipo 'Temos em stock' ou 'Não temos em stock'.
 - Suas recomendações e informações devem ser baseadas EXCLUSIVAMENTE nos itens e dados cadastrados na Base do Negócio e Treinamentos Oficiais.
 - NUNCA invente produtos, marcas, preços ou condições que não estejam cadastrados.
@@ -209,7 +217,7 @@ def format_gemini_contents(history: List[Dict[str, str]], current_message: str) 
     return contents
 
 def ensure_complete_sentence(text: str) -> str:
-    """
+    r"""
     Garante que a resposta gerada pela IA nunca seja entregue cortada no meio de uma frase.
     Se o texto tiver sido truncado por limites de tokens ou interrupção na conexão:
     1. Se já terminar com pontuação terminal válida (. ! ? … » " ' ) ou emoji, preserva.
@@ -351,27 +359,53 @@ async def call_openai_compatible_api(
         logger.warning(f"Falha na API OpenAI compatível: {e}")
         return None
 
+def detect_message_language(text: str) -> str:
+    """Detecta se a mensagem do cliente foi enviada em inglês ou português/outro."""
+    clean = text.lower()
+    en_markers = [
+        r"\bhello\b", r"\bhi\b", r"\bhey\b", r"\bgood\b", r"\bmorning\b",
+        r"\bafternoon\b", r"\bevening\b", r"\bhow\b", r"\bwhat\b", r"\bwhere\b",
+        r"\bwhen\b", r"\bprice\b", r"\bpricing\b", r"\bcost\b", r"\bavailable\b",
+        r"\bstock\b", r"\bhelp\b", r"\bcan i\b", r"\bdo you\b", r"\bthanks\b",
+        r"\bthank you\b", r"\bplease\b", r"\bhours\b", r"\border\b", r"\bbook\b"
+    ]
+    if any(re.search(marker, clean) for marker in en_markers):
+        return "en"
+    return "pt"
+
 def is_initial_greeting(text: str) -> bool:
     clean = re.sub(r"[^\w\s]", "", text.lower()).strip()
     words = clean.split()
     if not words:
         return False
-    greeting_words = {"ola", "olá", "oi", "bom", "boa", "dia", "tarde", "noite", "tudo", "bem", "prezados", "caros", "alô", "alo"}
-    if all(w in greeting_words for w in words) or (len(words) <= 3 and words[0] in ("ola", "olá", "oi", "bom", "boa")):
+    greeting_words = {
+        "ola", "olá", "oi", "bom", "boa", "dia", "tarde", "noite", "tudo", "bem",
+        "prezados", "caros", "alô", "alo", "hello", "hi", "hey", "morning", "afternoon",
+        "evening", "hola", "buenas", "bonjour", "salut", "greetings", "there", "how", "are", "you"
+    }
+    if all(w in greeting_words for w in words) or (len(words) <= 5 and words[0] in ("ola", "olá", "oi", "bom", "boa", "hello", "hi", "hey", "hola", "bonjour")):
         return True
     return False
 
 def local_fallback(message: str, info_rows: List[Any], business_name: str = "nosso negócio") -> str:
     """
     Fallback seguro e determinístico caso a IA externa não esteja disponível.
-    Responde cordialmente a saudações ou fornece a informação específica solicitada sem despejar catálogos.
+    Responde cordialmente a saudações ou fornece a informação específica solicitada no idioma do cliente.
     """
+    lang = detect_message_language(message)
+    unknown_msg = (
+        "At the moment, I do not have this information registered. Is there anything else I can help you with?"
+        if lang == "en" else UNKNOWN_REPLY
+    )
+
     if is_initial_greeting(message):
+        if lang == "en":
+            return f"Hello! This is customer support for {business_name}. How can we help you today?"
         return f"Olá, boa tarde! Aqui é do atendimento de {business_name}. Em que podemos ajudar hoje?"
 
     context = compose_context(info_rows)
     if not context.strip() or context.startswith("(Ainda sem"):
-        return UNKNOWN_REPLY
+        return unknown_msg
 
     words = {w.lower().strip(".,?!:;") for w in message.split() if len(w) > 3}
     scored = []
@@ -385,10 +419,12 @@ def local_fallback(message: str, info_rows: List[Any], business_name: str = "nos
             scored.append((score, text))
 
     if not scored:
-        return UNKNOWN_REPLY
+        return unknown_msg
 
     scored.sort(key=lambda item: item[0], reverse=True)
     best_item = scored[0][1]
+    if lang == "en":
+        return f"Hello! Regarding your inquiry:\n• {best_item}\n\nPlease let us know if you would like more information or to make a booking!"
     return f"Olá! Relativamente ao que perguntou:\n• {best_item}\n\nFicamos à sua inteira disposição se desejar saber mais ou agendar!"
 
 async def draft_reply(

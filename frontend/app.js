@@ -401,7 +401,8 @@ async function api(url, options = {}) {
 
 function showNotice(msg, error = false) {
   const n = $("#notice");
-  n.textContent = msg;
+  const translated = window.t ? window.t(msg) : msg;
+  n.textContent = translated;
   n.classList.remove("hidden", "error-notice");
   if (error) n.classList.add("error-notice");
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -659,8 +660,9 @@ async function navigate(page) {
   $$("[data-page]").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   $$(".page").forEach(s => s.classList.toggle("hidden", s.id !== `page-${page}`));
   const meta = pageMeta[page] || ["", ""];
-  $("#page-title").textContent = meta[0];
-  $("#page-subtitle").textContent = meta[1];
+  const t = window.t || ((x) => x);
+  $("#page-title").textContent = t(meta[0]);
+  $("#page-subtitle").textContent = t(meta[1]);
   $(".sidebar").classList.remove("open");
   // Executa carregamentos de forma não bloqueante onde possível
   try {
@@ -2892,20 +2894,6 @@ $("#tab-channel-email")?.addEventListener("click", () => switchIntegrationChanne
 
 // Módulo WhatsApp desativado no software
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* ════════════════════════════════════════════════════════════
    INTEGRAÇÃO DE E-MAIL OFICIAL (GOOGLE GMAIL & MICROSOFT OUTLOOK)
    ════════════════════════════════════════════════════════════ */
@@ -3018,8 +3006,6 @@ $("#btn-connect-google")?.addEventListener("click", async () => {
     showNotice(err.message, true);
   }
 });
-
-
 
 // Desconectar E-mail
 $("#btn-email-disconnect")?.addEventListener("click", async () => {
@@ -3287,4 +3273,22 @@ document.addEventListener("DOMContentLoaded", () => {
       $("#nav-messages-dot")?.classList.add("hidden");
     });
   });
+});
+
+// Listener para atualização dinâmica quando o idioma é alterado pelo utilizador
+window.addEventListener("drexier:languagechange", () => {
+  if (typeof activePage !== "undefined" && activePage && pageMeta[activePage]) {
+    const meta = pageMeta[activePage];
+    const t = window.t || ((x) => x);
+    $("#page-title").textContent = t(meta[0]);
+    $("#page-subtitle").textContent = t(meta[1]);
+  }
+  if (typeof activePage !== "undefined" && activePage === "dashboard") {
+    loadDashboard().catch(() => {});
+    loadBillingStatus().catch(() => {});
+  } else if (typeof activePage !== "undefined" && activePage === "business") {
+    loadInfo().catch(() => {});
+  } else if (typeof activePage !== "undefined" && activePage === "reports") {
+    loadReports().catch(() => {});
+  }
 });
