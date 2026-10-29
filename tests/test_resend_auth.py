@@ -91,12 +91,12 @@ def test_signup_and_login_require_resend_codes(monkeypatch):
         assert len(sent_codes[-1][2]) == 6
         assert sent_codes[-1][2].isdigit()
 
+        wrong_code = "000000" if sent_codes[-1][2] != "000000" else "000001"
         rejected = client.post("/api/auth/verify", json={
             "challenge_id": signup_challenge,
-            "code": "000000",
+            "code": wrong_code,
         })
         assert rejected.status_code == 400
-
         verified = client.post("/api/auth/verify", json={
             "challenge_id": signup_challenge,
             "code": sent_codes[-1][2],
@@ -123,3 +123,42 @@ def test_signup_and_login_require_resend_codes(monkeypatch):
     assert account_mock.call_count == 1
     assert login_mock.call_count == 1
     assert login_mock.call_args.kwargs["user_agent"] == "Test Browser"
+
+
+def test_signup_reports_missing_resend_configuration(monkeypatch):
+    monkeypatch.setattr(
+        "backend.main.send_auth_code_email",
+        Mock(return_value={"status": "skipped", "reason": "resend_not_configured"}),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/auth/signup", json={
+            "name": "Resend Test",
+            "email": f"resend-missing-{uuid.uuid4().hex}@example.com",
+            "password": "SecurePassword123",
+            "confirm_password": "SecurePassword123",
+            "business_type": "Serviços",
+        })
+
+    assert response.status_code == 503
+    assert "RESEND_API_KEY" in response.json()["detail"]
+    assert "RESEND_FROM_EMAIL" in response.json()["detail"]
+
+
+def test_signup_reports_resend_delivery_failure(monkeypatch):
+    monkeypatch.setattr(
+        "backend.main.send_auth_code_email",
+        Mock(return_value={"status": "failed", "error": "provider rejected sender"}),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/auth/signup", json={
+            "name": "Resend Test",
+            "email": f"resend-failed-{uuid.uuid4().hex}@example.com",
+            "password": "SecurePassword123",
+            "confirm_password": "SecurePassword123",
+            "business_type": "Serviços",
+        })
+
+    assert response.status_code == 503
+    assert "autorizado no Resend" in response.json()["detail"]

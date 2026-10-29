@@ -52,12 +52,12 @@ Abra **dois terminais**:
 
 ## Emails transacionais de autenticação (Resend)
 
-No cadastro e em cada login bem-sucedido, o backend envia notificações através do Resend sem bloquear a resposta da API. Configure no `.env`:
+No cadastro e em cada login, o backend envia um código de confirmação através do Resend. O cadastro/login só prossegue quando o envio é confirmado; configure no `.env`:
 
 - `RESEND_API_KEY`: chave criada em [Resend API Keys](https://resend.com/api-keys).
-- `RESEND_FROM_EMAIL`: remetente verificado no formato `Drexier <email@seudominio.com>`.
+- `RESEND_FROM_EMAIL`: endereço remetente autorizado no Resend (por exemplo, `Drexier <email@seudominio.com>`). O domínio do endereço precisa estar verificado no Resend.
 
-Enquanto estas variáveis estiverem vazias, o envio é ignorado com um aviso no log. O código está em `backend/services/resend_email.py` e é acionado pelos endpoints `POST /api/auth/signup` e `POST /api/auth/login`.
+Se alguma variável estiver ausente ou o Resend rejeitar o envio, a interface exibirá uma mensagem e não criará uma sessão sem confirmação. O código está em `backend/services/resend_email.py` e é acionado pelos endpoints `POST /api/auth/signup` e `POST /api/auth/login`.
 
 ## Integração Oficial de E-mail (Google Gmail & Microsoft Outlook)
 

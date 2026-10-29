@@ -54,14 +54,15 @@ def consume_auth_challenge(challenge_id: str, code: str, purpose: str) -> Option
         challenge = _challenges.get(challenge_id)
         if not challenge:
             return None
-        if challenge.purpose != purpose or challenge.expires_at <= time.time():
-            _challenges.pop(challenge_id, None)
+        if challenge.purpose != purpose:
             return None
-        challenge.attempts += 1
-        if challenge.attempts > MAX_ATTEMPTS:
+        if challenge.expires_at <= time.time():
             _challenges.pop(challenge_id, None)
             return None
         if not hmac.compare_digest(challenge.code_hash, _hash_code(normalized)):
+            challenge.attempts += 1
+            if challenge.attempts >= MAX_ATTEMPTS:
+                _challenges.pop(challenge_id, None)
             return None
         _challenges.pop(challenge_id, None)
         return challenge.payload

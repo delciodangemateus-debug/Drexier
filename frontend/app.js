@@ -395,6 +395,9 @@ async function api(url, options = {}) {
       const cached = apiCache.get(url);
       if (cached) return cached.data;
     }
+    if (e instanceof TypeError) {
+      throw new Error("Não foi possível contactar o servidor. Verifique se a API está em execução e tente novamente.");
+    }
     throw e;
   }
 }
@@ -495,6 +498,10 @@ $("#login-form").addEventListener("submit", async e => {
   e.preventDefault();
   $("#auth-error").textContent = "";
   const d = Object.fromEntries(new FormData(e.target));
+  const submitButton = e.currentTarget.querySelector('button[type="submit"]');
+  const originalLabel = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = "A entrar...";
   try {
     const r = await api("/api/auth/login", { method: "POST", body: JSON.stringify(d) });
     if (r.challenge_required) {
@@ -506,6 +513,9 @@ $("#login-form").addEventListener("submit", async e => {
     await boot();
   } catch (err) {
     $("#auth-error").textContent = err.message;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = originalLabel;
   }
 });
 
@@ -517,6 +527,10 @@ $("#signup-form").addEventListener("submit", async e => {
     $("#auth-error").textContent = "As senhas não coincidem.";
     return;
   }
+  const submitButton = e.currentTarget.querySelector('button[type="submit"]');
+  const originalLabel = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = "A criar conta...";
   try {
     const r = await api("/api/auth/signup", { method: "POST", body: JSON.stringify(d) });
     if (r.challenge_required) {
@@ -528,12 +542,19 @@ $("#signup-form").addEventListener("submit", async e => {
     await boot();
   } catch (err) {
     $("#auth-error").textContent = err.message;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = originalLabel;
   }
 });
 
-$("auth-code-form").addEventListener("submit", async e => {
+$("auth-code-form")?.addEventListener("submit", async e => {
   e.preventDefault();
   $("auth-error").textContent = "";
+  const submitButton = e.currentTarget.querySelector('button[type="submit"]');
+  const originalLabel = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = "A confirmar...";
   try {
     const r = await api("/api/auth/verify", {
       method: "POST",
@@ -545,10 +566,13 @@ $("auth-code-form").addEventListener("submit", async e => {
     await boot();
   } catch (err) {
     $("auth-error").textContent = err.message;
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = originalLabel;
   }
 });
 
-$("auth-code-back").addEventListener("click", () => {
+$("auth-code-back")?.addEventListener("click", () => {
   authChallengeId = null;
   setAuthTab($("login-form").classList.contains("hidden") ? "signup" : "login");
 });

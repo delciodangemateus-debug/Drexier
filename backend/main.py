@@ -188,9 +188,16 @@ def _start_auth_challenge(email: str, name: str, purpose: str, payload: dict):
     result = send_auth_code_email(email, name, code, purpose)
     if result.get("status") != "sent":
         invalidate_auth_challenge(challenge_id)
+        if result.get("status") == "skipped":
+            detail = "O envio de email não está configurado. Configure RESEND_API_KEY e RESEND_FROM_EMAIL."
+        else:
+            detail = (
+                "O Resend não conseguiu enviar o código. Verifique se a chave API é válida "
+                "e se o endereço/domínio remetente está autorizado no Resend."
+            )
         raise HTTPException(
             status_code=503,
-            detail="O código não pôde ser enviado. Verifique a configuração do Resend e o email autorizado.",
+            detail=detail,
         )
     return challenge_id
 
