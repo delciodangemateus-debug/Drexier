@@ -88,7 +88,18 @@ def _send_email(to_email: str, subject: str, html_body: str) -> dict:
 
 
 def send_auth_code_email(to_email: str, name: str, code: str, purpose: str) -> dict:
-    action = "criar a sua conta" if purpose == "signup" else "entrar na sua conta"
+    if purpose == "signup":
+        action = "criar a sua conta"
+        subject = "Código de confirmação da conta Drexier"
+        title = "Confirme a sua identidade"
+    elif purpose == "password_reset":
+        action = "redefinir a sua senha"
+        subject = "Código para redefinir a senha Drexier"
+        title = "Redefina a sua senha"
+    else:
+        action = "entrar na sua conta"
+        subject = "Código de confirmação de login Drexier"
+        title = "Confirme a sua identidade"
     body = f"""
       <p style="margin:0 0 16px">Use o código abaixo para {action} no Drexier:</p>
       <p style="margin:24px 0;text-align:center">
@@ -96,8 +107,7 @@ def send_auth_code_email(to_email: str, name: str, code: str, purpose: str) -> d
       </p>
       <p style="margin:16px 0 0">Este código expira em 10 minutos e só pode ser usado uma vez.</p>
     """
-    subject = "Código de confirmação da conta Drexier" if purpose == "signup" else "Código de confirmação de login Drexier"
-    return _send_email(to_email, subject, _base_template("Confirme a sua identidade", name, body))
+    return _send_email(to_email, subject, _base_template(title, name, body))
 
 
 def send_account_created_email(to_email: str, name: str) -> dict:

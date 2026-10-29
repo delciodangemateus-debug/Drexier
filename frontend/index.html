@@ -621,6 +621,7 @@
       <label>Email<input name="email" type="email" required autocomplete="email" placeholder="seuemail@empresa.com"></label>
       <label>Senha<input name="password" type="password" required autocomplete="current-password" placeholder="••••••••"></label>
       <button class="btn primary" type="submit">Próximo</button>
+      <button id="forgot-password" class="btn ghost" type="button">Esqueci a minha senha</button>
     </form>
     <form id="signup-form" class="form hidden">
       <label>Nome completo<input name="name" required minlength="2" placeholder="Seu nome ou da empresa"></label>
@@ -645,6 +646,13 @@
       <button class="btn primary" type="submit">Confirmar e continuar</button>
       <button id="auth-code-back" class="btn ghost" type="button">Voltar</button>
     </form>
+    <form id="password-reset-form" class="form hidden">
+      <p class="muted">Escolha uma nova senha para a sua conta.</p>
+      <label>Nova senha (mínimo 8 caracteres, com letra e número)<input name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="••••••••"></label>
+      <label>Confirmar nova senha<input name="confirm_password" type="password" minlength="8" required autocomplete="new-password" placeholder="••••••••"></label>
+      <button class="btn primary" type="submit">Alterar senha</button>
+    </form>
+    <p id="auth-notice" class="muted hidden" role="status"></p>
     <p id="auth-error" class="error" role="alert"></p>
   </section>
 </div>

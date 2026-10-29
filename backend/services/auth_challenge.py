@@ -17,11 +17,18 @@ from backend.database import is_test_environment
 
 TTL_SECONDS = 10 * 60
 MAX_ATTEMPTS = 5
+LOCKOUT_SECONDS = 15 * 60
 logger = logging.getLogger("drexier.auth_challenge")
 
 
 class AuthChallengeStoreError(RuntimeError):
     """Raised when the persistent authentication challenge store is unavailable."""
+
+
+class AuthCodeLocked(RuntimeError):
+    def __init__(self, retry_after: int):
+        self.retry_after = max(1, retry_after)
+        super().__init__("Foram feitas 5 tentativas inválidas. Tente novamente em 15 minutos.")
 
 
 @dataclass
@@ -34,6 +41,7 @@ class AuthChallenge:
 
 
 _challenges: dict[str, AuthChallenge] = {}
+_failed_attempts: dict[tuple[str, str], tuple[int, float]] = {}
 _lock = threading.Lock()
 
 
@@ -59,6 +67,42 @@ def _get_supabase_auth_client():
     return client
 
 
+def get_auth_code_lockout_seconds(email: str, purpose: str) -> int:
+    key = (email.strip().lower(), purpose)
+    if _uses_supabase_store():
+        try:
+            result = _get_supabase_auth_client().rpc(
+                "auth_code_lockout_seconds",
+                {"p_email": key[0], "p_purpose": purpose},
+            ).execute()
+            seconds = result.data
+            if isinstance(seconds, list):
+                seconds = seconds[0] if seconds else 0
+            if isinstance(seconds, dict):
+                seconds = next(iter(seconds.values()), 0)
+            return max(0, int(seconds or 0))
+        except AuthChallengeStoreError:
+            raise
+        except Exception as exc:
+            logger.exception("Falha ao consultar o bloqueio de códigos no Supabase.")
+            raise AuthChallengeStoreError(
+                "Não foi possível verificar as tentativas no Supabase. Confira se a migração de autenticação foi aplicada."
+            ) from exc
+
+    now = time.time()
+    with _lock:
+        failure = _failed_attempts.get(key)
+        if not failure:
+            return 0
+        _, locked_until = failure
+        if locked_until == 0:
+            return 0
+        if locked_until <= now:
+            _failed_attempts.pop(key, None)
+            return 0
+        return max(1, int(locked_until - now))
+
+
 def create_auth_challenge(purpose: str, payload: dict[str, Any]) -> tuple[str, str]:
     code = f"{secrets.randbelow(1_000_000):06d}"
     challenge_id = uuid.uuid4().hex
@@ -78,6 +122,7 @@ def create_auth_challenge(purpose: str, payload: dict[str, Any]) -> tuple[str, s
             ).execute()
             client.table("auth_challenges").insert({
                 "challenge_id": challenge_id,
+                "email": str(payload["email"]).strip().lower(),
                 "code_hash": challenge.code_hash,
                 "payload": challenge.payload,
                 "purpose": purpose,
@@ -127,6 +172,17 @@ def consume_auth_challenge(challenge_id: str, code: str, purpose: str) -> Option
             payload = payload[0] if payload else None
         if isinstance(payload, dict) and set(payload) == {"consume_auth_challenge"}:
             payload = payload["consume_auth_challenge"]
+        if isinstance(payload, str):
+            import json
+
+            payload = json.loads(payload)
+        if isinstance(payload, dict) and payload.get("status") == "locked":
+            raise AuthCodeLocked(int(payload.get("retry_after", LOCKOUT_SECONDS)))
+        if isinstance(payload, dict) and payload.get("status") == "ok":
+            result_payload = payload.get("payload")
+            return result_payload if isinstance(result_payload, dict) else None
+        if isinstance(payload, dict) and payload.get("status") in {"invalid", "expired"}:
+            return None
         return payload if isinstance(payload, dict) else None
 
     with _lock:
@@ -140,9 +196,19 @@ def consume_auth_challenge(challenge_id: str, code: str, purpose: str) -> Option
             return None
         if not hmac.compare_digest(challenge.code_hash, _hash_code(normalized)):
             challenge.attempts += 1
-            if challenge.attempts >= MAX_ATTEMPTS:
+            key = (str(challenge.payload["email"]).strip().lower(), purpose)
+            failed_count, locked_until = _failed_attempts.get(key, (0, 0.0))
+            if locked_until > time.time():
+                raise AuthCodeLocked(int(locked_until - time.time()))
+            failed_count += 1
+            if failed_count >= MAX_ATTEMPTS:
+                locked_until = time.time() + LOCKOUT_SECONDS
+                _failed_attempts[key] = (failed_count, locked_until)
                 _challenges.pop(challenge_id, None)
+                raise AuthCodeLocked(LOCKOUT_SECONDS)
+            _failed_attempts[key] = (failed_count, 0.0)
             return None
+        _failed_attempts.pop((str(challenge.payload["email"]).strip().lower(), purpose), None)
         _challenges.pop(challenge_id, None)
         return challenge.payload
 

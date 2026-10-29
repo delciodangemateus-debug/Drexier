@@ -7,7 +7,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from backend.database import init_db, connect
 from backend.supabase_client import get_supabase_status
-from backend.auth import hash_password, verify_password, create_token, decode_token
+from backend.auth import (
+    create_password_reset_token,
+    decode_password_reset_token,
+    hash_password,
+    verify_password,
+    create_token,
+    decode_token,
+)
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
 from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
@@ -19,9 +26,11 @@ from backend.services.resend_email import (
     send_login_confirmation_email,
 )
 from backend.services.auth_challenge import (
+    AuthCodeLocked,
     AuthChallengeStoreError,
     create_auth_challenge,
     consume_auth_challenge,
+    get_auth_code_lockout_seconds,
     invalidate_auth_challenge,
 )
 from backend.services.billing_service import is_subscription_active, get_user_subscription_status
@@ -162,6 +171,14 @@ class AuthCode(BaseModel):
     challenge_id: str = Field(min_length=32, max_length=64)
     code: str = Field(pattern=r"^[0-9]{6}$")
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+class PasswordResetComplete(BaseModel):
+    reset_token: str = Field(min_length=1)
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str
+
 class BusinessInfoIn(BaseModel):
     kind: str
     title: str = Field(min_length=1, max_length=250)
@@ -196,6 +213,21 @@ class ConversionActionIn(BaseModel):
 
 def _start_auth_challenge(email: str, name: str, purpose: str, payload: dict):
     try:
+        retry_after = get_auth_code_lockout_seconds(email, purpose)
+    except AuthChallengeStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "AUTH_CODE_LOCKED",
+                "message": "Foram feitas 5 tentativas inválidas. Tente novamente após 15 minutos.",
+                "retry_after": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    try:
         challenge_id, code = create_auth_challenge(purpose, payload)
     except AuthChallengeStoreError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -222,6 +254,15 @@ def _start_auth_challenge(email: str, name: str, purpose: str, payload: dict):
         )
     return challenge_id
 
+
+def _challenge_response(challenge_id: str, email: str):
+    return {
+        "challenge_required": True,
+        "challenge_id": challenge_id,
+        "email": email,
+        "expires_in": 10 * 60,
+    }
+
 @app.post("/api/auth/signup")
 def signup(data: Signup):
     if data.password != data.confirm_password:
@@ -240,7 +281,7 @@ def signup(data: Signup):
             "business_type": data.business_type,
         },
     )
-    return {"challenge_required": True, "challenge_id": challenge_id, "email": email}
+    return _challenge_response(challenge_id, email)
 
 @app.post("/api/auth/login")
 def login(data: Login, request: Request):
@@ -264,7 +305,31 @@ def login(data: Login, request: Request):
             "user_agent": request.headers.get("user-agent"),
         },
     )
-    return {"challenge_required": True, "challenge_id": challenge_id, "email": row["email"]}
+    return _challenge_response(challenge_id, row["email"])
+
+
+@app.post("/api/auth/password-reset")
+def request_password_reset(data: PasswordResetRequest):
+    email = data.email.lower()
+    with connect() as c:
+        row = c.execute(
+            "SELECT id,name,email FROM users WHERE email=?",
+            (email,),
+        ).fetchone()
+
+    if not row:
+        return {
+            "challenge_required": False,
+            "message": "Se existir uma conta para este email, receberá um código de recuperação.",
+        }
+
+    challenge_id = _start_auth_challenge(
+        row["email"],
+        row["name"],
+        "password_reset",
+        {"user_id": row["id"], "email": row["email"], "name": row["name"]},
+    )
+    return _challenge_response(challenge_id, row["email"])
 
 @app.post("/api/auth/verify")
 def verify_auth_code(data: AuthCode):
@@ -273,6 +338,21 @@ def verify_auth_code(data: AuthCode):
         login_payload = None
         if not signup_payload:
             login_payload = consume_auth_challenge(data.challenge_id, data.code, "login")
+        password_reset_payload = None
+        if not signup_payload and not login_payload:
+            password_reset_payload = consume_auth_challenge(
+                data.challenge_id, data.code, "password_reset"
+            )
+    except AuthCodeLocked as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "AUTH_CODE_LOCKED",
+                "message": str(exc),
+                "retry_after": exc.retry_after,
+            },
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
     except AuthChallengeStoreError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -305,7 +385,32 @@ def verify_auth_code(data: AuthCode):
         )
         return {"token": create_token(login_payload["user_id"]), "user_id": login_payload["user_id"]}
 
+    if password_reset_payload:
+        return {
+            "password_reset_required": True,
+            "reset_token": create_password_reset_token(password_reset_payload["user_id"]),
+        }
+
     raise HTTPException(400, "Código inválido ou expirado.")
+
+
+@app.post("/api/auth/password-reset/complete")
+def complete_password_reset(data: PasswordResetComplete):
+    if data.password != data.confirm_password:
+        raise HTTPException(400, "As senhas não coincidem.")
+    if not re.search(r"[A-Za-z]", data.password) or not re.search(r"\d", data.password):
+        raise HTTPException(400, "A senha deve conter pelo menos uma letra e um número.")
+
+    user_id = decode_password_reset_token(data.reset_token)
+    if not user_id:
+        raise HTTPException(401, "O processo de recuperação expirou. Solicite um novo código.")
+
+    with connect() as c:
+        c.execute(
+            "UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (hash_password(data.password), user_id),
+        )
+    return {"password_updated": True, "message": "Senha atualizada. Já pode iniciar sessão."}
 
 @app.get("/api/me")
 def me(user=Depends(current_user)):

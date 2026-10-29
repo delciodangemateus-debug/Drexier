@@ -28,6 +28,54 @@ let me = null, selectedContact = null, infoCache = [], activePage = "dashboard";
 let currentExpandedCardId = null, currentEditingItemIndex = null;
 let currentBusinessSubtab = "cards"; // "cards" | "training"
 let currentUploadedFile = "";
+let authExpiryTimer = null;
+let authChallengeTimer = null;
+let authLockoutTimer = null;
+let resetToken = null;
+let authSessionExpired = false;
+
+function getTokenExpiration(tokenValue) {
+  try {
+    const encodedPayload = tokenValue.split(".")[1];
+    if (!encodedPayload) return null;
+    const normalizedPayload = encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(normalizedPayload));
+    return Number.isFinite(payload.exp) ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function scheduleAuthExpiration(tokenValue) {
+  clearTimeout(authExpiryTimer);
+  const expiration = getTokenExpiration(tokenValue);
+  if (!expiration) return;
+  authExpiryTimer = setTimeout(
+    expireAuthSession,
+    Math.max(0, expiration - Date.now()),
+  );
+}
+
+function saveAuthToken(tokenValue) {
+  token = tokenValue;
+  authSessionExpired = false;
+  localStorage.setItem("drexier_token", token);
+  scheduleAuthExpiration(token);
+}
+
+function expireAuthSession() {
+  if (!token) return;
+  clearTimeout(authExpiryTimer);
+  stopLivePolling();
+  token = "";
+  me = null;
+  localStorage.removeItem("drexier_token");
+  authSessionExpired = true;
+  showAuth("login");
+  $("#auth-error").textContent = "A sua sessão expirou após 10 minutos. Entre novamente.";
+}
+
+scheduleAuthExpiration(token);
 
 /* ==============================================================================
    PAYWALL SAAS — CONTROLO DE ACESSO POR ASSINATURA STRIPE
@@ -367,7 +415,7 @@ async function api(url, options = {}) {
     let data = {};
     try { data = await res.json(); } catch {}
     if (!res.ok) {
-      if (res.status === 401 && token) { logoutNow(); }
+      if (res.status === 401 && token) { expireAuthSession(); }
       if (res.status === 402) {
         hasActiveSub = false;
         applyPaywallState(false);
@@ -376,7 +424,10 @@ async function api(url, options = {}) {
         throw new Error(msg);
       }
       const errMsg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Ocorreu um erro.");
-      throw new Error(errMsg);
+      const error = new Error(errMsg);
+      error.status = res.status;
+      error.retryAfter = Number(data.detail?.retry_after || res.headers.get("Retry-After") || 0);
+      throw error;
     }
     if (method === "GET") {
       apiCache.set(url, { data, ts: Date.now() });
@@ -479,25 +530,153 @@ let authChallengeReturnTab = "login";
 function showAuthCodeChallenge(response, returnTab) {
   authChallengeId = response.challenge_id;
   authChallengeReturnTab = returnTab;
-  $("#auth-tabs").classList.add("hidden");
-  $("login-form").classList.add("hidden");
-  $("signup-form").classList.add("hidden");
-  $("auth-code-form").classList.remove("hidden");
-  $("auth-code-message").textContent = `Introduza o código de 6 dígitos enviado para ${response.email}.`;
-  $("auth-code").value = "";
-  $("auth-code").focus();
+  resetToken = null;
+  clearTimeout(authChallengeTimer);
+  clearInterval(authLockoutTimer);
+  $("#auth-tabs")?.classList.add("hidden");
+  $("#login-form").classList.add("hidden");
+  $("#signup-form").classList.add("hidden");
+  $("#password-reset-form").classList.add("hidden");
+  $("#auth-code-form").classList.remove("hidden");
+  $("#auth-code-message").textContent = `Introduza o código de 6 dígitos enviado para ${response.email}.`;
+  $("#auth-code").value = "";
+  $("#auth-code").disabled = false;
+  $("#auth-code-form button[type='submit']").disabled = false;
+  $("#auth-code-back").disabled = false;
+  $("#auth-notice").classList.add("hidden");
+  $("#auth-error").textContent = "";
+  $("#auth-code").focus();
+  authChallengeTimer = setTimeout(() => {
+    authChallengeId = null;
+    if (returnTab === "password_reset") {
+      setAuthTab("login");
+    } else {
+      setAuthTab(returnTab);
+    }
+    $("#auth-error").textContent = "O código expirou. Solicite um novo código para continuar.";
+  }, Math.max(1, Number(response.expires_in || 600)) * 1000);
 }
 
 function setAuthTab(tab) {
   authChallengeId = null;
-  $("#auth-tabs").classList.remove("hidden");
+  clearTimeout(authChallengeTimer);
+  clearInterval(authLockoutTimer);
+  resetToken = null;
+  $("#auth-tabs")?.classList.remove("hidden");
   $$("[data-auth]").forEach(b => b.classList.toggle("active", b.dataset.auth === tab));
   $("#login-form").classList.toggle("hidden", tab !== "login");
   $("#signup-form").classList.toggle("hidden", tab !== "signup");
+  $("#password-reset-form").classList.add("hidden");
   $("#auth-code-form").classList.add("hidden");
   $("#auth-error").textContent = "";
+  $("#auth-notice").classList.add("hidden");
+}
+
+function showAuthNotice(message) {
+  const notice = $("#auth-notice");
+  notice.textContent = message;
+  notice.classList.remove("hidden");
+}
+
+function startAuthLockoutCountdown(retryAfter) {
+  const retryAt = Date.now() + retryAfter * 1000;
+  clearTimeout(authChallengeTimer);
+  const input = $("#auth-code");
+  const submitButton = $("#auth-code-form button[type='submit']");
+  const backButton = $("#auth-code-back");
+  input.disabled = true;
+  submitButton.disabled = true;
+  backButton.disabled = true;
+  clearInterval(authLockoutTimer);
+  authLockoutTimer = setInterval(() => {
+    const remaining = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+    if (remaining === 0) {
+      clearInterval(authLockoutTimer);
+      input.disabled = false;
+      submitButton.disabled = false;
+      backButton.disabled = false;
+      authChallengeId = null;
+      if (authChallengeReturnTab === "password_reset") {
+        setAuthTab("login");
+      } else {
+        setAuthTab(authChallengeReturnTab);
+      }
+      $("#auth-error").textContent = "O bloqueio terminou. Solicite um novo código para tentar novamente.";
+      return;
+    }
+    const minutes = Math.floor(remaining / 60);
+    const seconds = String(remaining % 60).padStart(2, "0");
+    $("#auth-error").textContent = `Muitas tentativas. Tente novamente em ${minutes}:${seconds}.`;
+  }, 1000);
 }
 $$("[data-auth]").forEach(b => b.addEventListener("click", () => setAuthTab(b.dataset.auth)));
+$("#forgot-password")?.addEventListener("click", async e => {
+  const email = $("#login-form input[name='email']").value;
+  const emailInput = $("#login-form input[name='email']");
+  if (!emailInput.checkValidity()) {
+    emailInput.reportValidity();
+    return;
+  }
+  $("#auth-error").textContent = "";
+  $("#auth-notice").classList.add("hidden");
+  const submitButton = e.currentTarget;
+  const originalLabel = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = "A enviar código...";
+  try {
+    const response = await api("/api/auth/password-reset", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+    if (response.challenge_required) {
+      showAuthCodeChallenge(response, "password_reset");
+    } else {
+      showAuthNotice(response.message);
+    }
+  } catch (error) {
+    $("#auth-error").textContent = error.message;
+    if (error.retryAfter > 0) {
+      $("#auth-error").textContent = "Este email está temporariamente bloqueado. Tente novamente após 15 minutos.";
+    }
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = originalLabel;
+  }
+});
+
+$("#password-reset-form")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#auth-error").textContent = "";
+  const data = Object.fromEntries(new FormData(e.currentTarget));
+  if (data.password !== data.confirm_password) {
+    $("#auth-error").textContent = "As senhas não coincidem.";
+    return;
+  }
+  const submitButton = e.currentTarget.querySelector("button[type='submit']");
+  const originalLabel = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = "A alterar senha...";
+  try {
+    const response = await api("/api/auth/password-reset/complete", {
+      method: "POST",
+      body: JSON.stringify({ ...data, reset_token: resetToken }),
+    });
+    resetToken = null;
+    clearTimeout(authChallengeTimer);
+    setAuthTab("login");
+    showAuthNotice(response.message);
+  } catch (error) {
+    $("#auth-error").textContent = error.message;
+    if (error.status === 401) {
+      resetToken = null;
+      setAuthTab("login");
+      $("#auth-error").textContent = "A recuperação expirou. Solicite um novo código.";
+    }
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = originalLabel;
+  }
+});
 
 $("#login-form").addEventListener("submit", async e => {
   e.preventDefault();
@@ -513,11 +692,13 @@ $("#login-form").addEventListener("submit", async e => {
       showAuthCodeChallenge(r, "login");
       return;
     }
-    token = r.token;
-    localStorage.setItem("drexier_token", token);
+    saveAuthToken(r.token);
     await boot();
   } catch (err) {
     $("#auth-error").textContent = err.message;
+    if (err.retryAfter > 0) {
+      $("#auth-error").textContent = `Muitas tentativas. Tente novamente após 15 minutos.`;
+    }
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = originalLabel;
@@ -542,20 +723,22 @@ $("#signup-form").addEventListener("submit", async e => {
       showAuthCodeChallenge(r, "signup");
       return;
     }
-    token = r.token;
-    localStorage.setItem("drexier_token", token);
+    saveAuthToken(r.token);
     await boot();
   } catch (err) {
     $("#auth-error").textContent = err.message;
+    if (err.retryAfter > 0) {
+      startAuthLockoutCountdown(err.retryAfter);
+    }
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = originalLabel;
   }
 });
 
-$("auth-code-form")?.addEventListener("submit", async e => {
+$("#auth-code-form")?.addEventListener("submit", async e => {
   e.preventDefault();
-  $("auth-error").textContent = "";
+  $("#auth-error").textContent = "";
   const submitButton = e.currentTarget.querySelector('button[type="submit"]');
   const originalLabel = submitButton.textContent;
   submitButton.disabled = true;
@@ -563,21 +746,37 @@ $("auth-code-form")?.addEventListener("submit", async e => {
   try {
     const r = await api("/api/auth/verify", {
       method: "POST",
-      body: JSON.stringify({ challenge_id: authChallengeId, code: $("auth-code").value }),
+      body: JSON.stringify({ challenge_id: authChallengeId, code: $("#auth-code").value }),
     });
-    token = r.token;
-    localStorage.setItem("drexier_token", token);
+    clearTimeout(authChallengeTimer);
+    if (r.password_reset_required) {
+      resetToken = r.reset_token;
+      $("#auth-code-form").classList.add("hidden");
+      $("#password-reset-form").classList.remove("hidden");
+      $("#auth-error").textContent = "";
+      $("#password-reset-form input[name='password']").focus();
+      authChallengeTimer = setTimeout(() => {
+        resetToken = null;
+        setAuthTab("login");
+        $("#auth-error").textContent = "A recuperação expirou. Solicite um novo código.";
+      }, 10 * 60 * 1000);
+      return;
+    }
+    saveAuthToken(r.token);
     authChallengeId = null;
     await boot();
   } catch (err) {
-    $("auth-error").textContent = err.message;
+    $("#auth-error").textContent = err.message;
+    if (err.retryAfter > 0) {
+      startAuthLockoutCountdown(err.retryAfter);
+    }
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = originalLabel;
   }
 });
 
-$("auth-code-back")?.addEventListener("click", () => {
+$("#auth-code-back")?.addEventListener("click", () => {
   authChallengeId = null;
   setAuthTab(authChallengeReturnTab);
 });
@@ -591,6 +790,8 @@ function showLanding() {
 function showAuth(mode = "login") {
   authChallengeId = null;
   authChallengeReturnTab = mode;
+  clearTimeout(authChallengeTimer);
+  clearInterval(authLockoutTimer);
   $("#landing")?.classList.add("hidden");
   $("#auth")?.classList.remove("hidden");
   $("#app")?.classList.add("hidden");
@@ -599,6 +800,8 @@ function showAuth(mode = "login") {
   $("#login-form")?.classList.toggle("hidden", mode !== "login");
   $("#signup-form")?.classList.toggle("hidden", mode !== "signup");
   $("#auth-code-form")?.classList.add("hidden");
+  $("#password-reset-form")?.classList.add("hidden");
+  $("#auth-notice")?.classList.add("hidden");
   const errEl = $("#auth-error");
   if (errEl) errEl.textContent = "";
 }
@@ -688,7 +891,12 @@ async function boot() {
 
     await navigate("dashboard");
   } catch (err) {
-    if (token) {
+    if (authSessionExpired) {
+      authSessionExpired = false;
+      showAuth("login");
+      const errEl = $("#auth-error");
+      if (errEl) errEl.textContent = "A sua sessão expirou após 10 minutos. Entre novamente.";
+    } else if (token) {
       showAuth("login");
       const errEl = $("#auth-error");
       if (errEl) errEl.textContent = err.message;
@@ -699,6 +907,7 @@ async function boot() {
 }
 
 function logoutNow() {
+  clearTimeout(authExpiryTimer);
   stopLivePolling();
   token = "";
   me = null;

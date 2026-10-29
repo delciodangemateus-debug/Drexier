@@ -20,12 +20,34 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 def create_token(user_id: int) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(days=7)
+    exp = datetime.now(timezone.utc) + timedelta(minutes=10)
     return jwt.encode({"sub": str(user_id), "exp": exp}, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_password_reset_token(user_id: int) -> str:
+    exp = datetime.now(timezone.utc) + timedelta(minutes=10)
+    return jwt.encode(
+        {"sub": str(user_id), "purpose": "password_reset", "exp": exp},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def decode_password_reset_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") != "password_reset":
+            return None
+        return int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        return None
+
 
 def decode_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") == "password_reset":
+            return None
         return int(payload["sub"])
     except (JWTError, KeyError, ValueError):
         return None

@@ -1,11 +1,21 @@
+import hashlib
 import sys
+import time
 import uuid
 from types import SimpleNamespace
 from unittest.mock import Mock
-import hashlib
 
 from fastapi.testclient import TestClient
+from jose import jwt
 
+from backend.auth import (
+    ALGORITHM,
+    SECRET_KEY,
+    create_password_reset_token,
+    create_token,
+    decode_password_reset_token,
+    decode_token,
+)
 from backend.main import app
 from backend.services import auth_challenge
 from backend.services.resend_email import (
@@ -261,3 +271,117 @@ def test_auth_challenge_uses_persistent_supabase_store(monkeypatch):
     }
     assert auth_challenge.consume_auth_challenge(challenge_id, code, "signup") is None
     assert rpc_calls[-1]["p_code_hash"] == hashlib.sha256(code.encode()).hexdigest()
+
+
+def test_fifth_invalid_code_locks_email_for_fifteen_minutes():
+    email = f"auth-lockout-{uuid.uuid4().hex}@example.com"
+    payload = {
+        "name": "Lockout Test",
+        "email": email,
+        "password": "SecurePassword123",
+        "confirm_password": "SecurePassword123",
+        "business_type": "Serviços",
+    }
+
+    with TestClient(app) as client:
+        signup = client.post("/api/auth/signup", json=payload)
+        assert signup.status_code == 200
+        challenge_id = signup.json()["challenge_id"]
+        correct_code = app.state.test_auth_codes[(email, "signup")]
+        wrong_code = "000000" if correct_code != "000000" else "000001"
+
+        for attempt in range(5):
+            response = client.post("/api/auth/verify", json={
+                "challenge_id": challenge_id,
+                "code": wrong_code,
+            })
+            assert response.status_code == (429 if attempt == 4 else 400)
+
+        assert response.json()["detail"]["retry_after"] == 900
+        blocked_signup = client.post("/api/auth/signup", json=payload)
+        assert blocked_signup.status_code == 429
+        assert blocked_signup.json()["detail"]["code"] == "AUTH_CODE_LOCKED"
+        assert auth_challenge.get_auth_code_lockout_seconds(email, "signup") > 0
+
+
+def test_password_reset_code_changes_password_and_allows_login():
+    email = f"password-reset-{uuid.uuid4().hex}@example.com"
+    old_password = "OldSecurePassword123"
+    new_password = "NewSecurePassword456"
+    signup_payload = {
+        "name": "Password Reset Test",
+        "email": email,
+        "password": old_password,
+        "confirm_password": old_password,
+        "business_type": "Serviços",
+    }
+
+    with TestClient(app) as client:
+        signup = client.post("/api/auth/signup", json=signup_payload)
+        assert signup.status_code == 200
+        signup_code = app.state.test_auth_codes[(email, "signup")]
+        verified_signup = client.post("/api/auth/verify", json={
+            "challenge_id": signup.json()["challenge_id"],
+            "code": signup_code,
+        })
+        assert verified_signup.status_code == 200
+
+        reset = client.post("/api/auth/password-reset", json={"email": email})
+        assert reset.status_code == 200
+        reset_code = app.state.test_auth_codes[(email, "password_reset")]
+        verified_reset = client.post("/api/auth/verify", json={
+            "challenge_id": reset.json()["challenge_id"],
+            "code": reset_code,
+        })
+        assert verified_reset.status_code == 200
+        reset_token = verified_reset.json()["reset_token"]
+        assert verified_reset.json()["password_reset_required"] is True
+        assert decode_password_reset_token(reset_token)
+        assert decode_token(reset_token) is None
+
+        mismatched = client.post("/api/auth/password-reset/complete", json={
+            "reset_token": reset_token,
+            "password": new_password,
+            "confirm_password": "DifferentPassword123",
+        })
+        assert mismatched.status_code == 400
+
+        updated = client.post("/api/auth/password-reset/complete", json={
+            "reset_token": reset_token,
+            "password": new_password,
+            "confirm_password": new_password,
+        })
+        assert updated.status_code == 200
+        assert updated.json()["password_updated"] is True
+
+        old_login = client.post("/api/auth/login", json={"email": email, "password": old_password})
+        assert old_login.status_code == 401
+        new_login = client.post("/api/auth/login", json={"email": email, "password": new_password})
+        assert new_login.status_code == 200
+        login_code = app.state.test_auth_codes[(email, "login")]
+        logged_in = client.post("/api/auth/verify", json={
+            "challenge_id": new_login.json()["challenge_id"],
+            "code": login_code,
+        })
+        assert logged_in.status_code == 200
+
+
+def test_access_and_password_reset_tokens_expire_after_ten_minutes():
+    access_claims = jwt.decode(
+        create_token(123),
+        SECRET_KEY,
+        algorithms=[ALGORITHM],
+        options={"verify_exp": False},
+    )
+    reset_claims = jwt.decode(
+        reset_token := create_password_reset_token(123),
+        SECRET_KEY,
+        algorithms=[ALGORITHM],
+        options={"verify_exp": False},
+    )
+    now = int(time.time())
+
+    assert 0 < access_claims["exp"] - now <= 600
+    assert 0 < reset_claims["exp"] - now <= 600
+    assert reset_claims["purpose"] == "password_reset"
+    assert decode_password_reset_token(reset_token) == 123
