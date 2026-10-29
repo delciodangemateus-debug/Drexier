@@ -11,6 +11,7 @@ from backend.services.whatsapp import (
     extract_incoming_messages,
     verify_webhook_signature,
 )
+from tests.auth_helpers import signup_and_verify
 
 
 @pytest.fixture(autouse=True)
@@ -28,17 +29,13 @@ def setup_test_db(tmp_path, monkeypatch):
 def auth_client():
     client = TestClient(app)
     # Cria conta de usuário para teste
-    signup_res = client.post(
-        "/api/auth/signup",
-        json={
-            "name": "Maria Silva",
-            "email": "maria@empresa.com",
-            "password": "Password123",
-            "confirm_password": "Password123",
-            "business_type": "Serviços",
-        },
-    )
-    assert signup_res.status_code == 200
+    signup_res = signup_and_verify(client, {
+        "name": "Maria Silva",
+        "email": "maria@empresa.com",
+        "password": "Password123",
+        "confirm_password": "Password123",
+        "business_type": "Serviços",
+    })
     token = signup_res.json()["token"]
     user_id = signup_res.json()["user_id"]
     with connect() as c:

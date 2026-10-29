@@ -56,8 +56,11 @@ No cadastro e em cada login, o backend envia um código de confirmação atravé
 
 - `RESEND_API_KEY`: chave criada em [Resend API Keys](https://resend.com/api-keys).
 - `RESEND_FROM_EMAIL`: endereço remetente autorizado no Resend (por exemplo, `Drexier <email@seudominio.com>`). O domínio do endereço precisa estar verificado no Resend.
+- `SUPABASE_SERVICE_ROLE_KEY`: chave privada do backend; é necessária para persistir e consumir os desafios de autenticação na tabela `auth_challenges`.
 
 Se alguma variável estiver ausente ou o Resend rejeitar o envio, a interface exibirá uma mensagem e não criará uma sessão sem confirmação. O código está em `backend/services/resend_email.py` e é acionado pelos endpoints `POST /api/auth/signup` e `POST /api/auth/login`.
+
+O remetente de teste `onboarding@resend.dev` só pode entregar mensagens de teste para o email da própria conta Resend. Para enviar códigos a outros usuários, verifique um domínio no Resend e use um remetente desse domínio. Em uma base Supabase já existente, execute `supabase_auth_challenges.sql` no SQL Editor para criar a tabela segura de desafios e a função que valida cada código de forma atômica. Em uma instalação nova, o `schema.sql` já inclui essa estrutura.
 
 ## Integração Oficial de E-mail (Google Gmail & Microsoft Outlook)
 

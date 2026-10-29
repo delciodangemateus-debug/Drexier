@@ -613,14 +613,14 @@
   <section class="auth-card">
     <div class="wordmark auth-mark">Drexier</div>
     <p class="muted auth-sub">Atendimento ao cliente inteligente e organizado.</p>
-    <div class="tabs">
+    <div class="tabs" id="auth-tabs">
       <button class="tab active" data-auth="login">Entrar</button>
       <button class="tab" data-auth="signup">Criar conta</button>
     </div>
     <form id="login-form" class="form">
       <label>Email<input name="email" type="email" required autocomplete="email" placeholder="seuemail@empresa.com"></label>
       <label>Senha<input name="password" type="password" required autocomplete="current-password" placeholder="••••••••"></label>
-      <button class="btn primary" type="submit">Entrar na Plataforma</button>
+      <button class="btn primary" type="submit">Próximo</button>
     </form>
     <form id="signup-form" class="form hidden">
       <label>Nome completo<input name="name" required minlength="2" placeholder="Seu nome ou da empresa"></label>
@@ -636,12 +636,13 @@
       </label>
       <label>Senha (mínimo 8 caracteres, com letra e número)<input name="password" type="password" minlength="8" required placeholder="••••••••"></label>
       <label>Confirmar senha<input name="confirm_password" type="password" minlength="8" required placeholder="••••••••"></label>
-      <button class="btn primary" type="submit">Criar Conta e Começar</button>
+      <button class="btn primary" type="submit">Próximo</button>
     </form>
     <form id="auth-code-form" class="form hidden">
+      <p class="muted"><strong>Passo 2 de 2:</strong> confirme o seu email para continuar.</p>
       <p class="muted" id="auth-code-message">Introduza o código de 6 dígitos enviado para o seu email.</p>
       <label>Código de confirmação<input id="auth-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="000000"></label>
-      <button class="btn primary" type="submit">Confirmar código</button>
+      <button class="btn primary" type="submit">Confirmar e continuar</button>
       <button id="auth-code-back" class="btn ghost" type="button">Voltar</button>
     </form>
     <p id="auth-error" class="error" role="alert"></p>

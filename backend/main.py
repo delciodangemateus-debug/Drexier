@@ -11,8 +11,19 @@ from backend.auth import hash_password, verify_password, create_token, decode_to
 from backend.services.agent import draft_reply
 from backend.services.analytics import daily_acquisitions
 from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
-from backend.services.resend_email import send_auth_code_email, send_account_created_email, send_login_confirmation_email
-from backend.services.auth_challenge import create_auth_challenge, consume_auth_challenge, invalidate_auth_challenge
+from backend.services.resend_email import (
+    get_resend_config,
+    is_resend_test_sender,
+    send_auth_code_email,
+    send_account_created_email,
+    send_login_confirmation_email,
+)
+from backend.services.auth_challenge import (
+    AuthChallengeStoreError,
+    create_auth_challenge,
+    consume_auth_challenge,
+    invalidate_auth_challenge,
+)
 from backend.services.billing_service import is_subscription_active, get_user_subscription_status
 from backend.routers.whatsapp import router as whatsapp_router
 from backend.routers.email import router as email_router
@@ -184,12 +195,22 @@ class ConversionActionIn(BaseModel):
     custom_note: Optional[str] = ""
 
 def _start_auth_challenge(email: str, name: str, purpose: str, payload: dict):
-    challenge_id, code = create_auth_challenge(purpose, payload)
+    try:
+        challenge_id, code = create_auth_challenge(purpose, payload)
+    except AuthChallengeStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     result = send_auth_code_email(email, name, code, purpose)
     if result.get("status") != "sent":
         invalidate_auth_challenge(challenge_id)
         if result.get("status") == "skipped":
             detail = "O envio de email não está configurado. Configure RESEND_API_KEY e RESEND_FROM_EMAIL."
+        elif is_resend_test_sender(get_resend_config().from_email):
+            detail = (
+                "O remetente de teste do Resend só permite enviar para o email da própria conta Resend. "
+                "Para enviar códigos a outros usuários, configure RESEND_FROM_EMAIL com um endereço "
+                "de um domínio verificado no Resend."
+            )
         else:
             detail = (
                 "O Resend não conseguiu enviar o código. Verifique se a chave API é válida "
@@ -247,7 +268,14 @@ def login(data: Login, request: Request):
 
 @app.post("/api/auth/verify")
 def verify_auth_code(data: AuthCode):
-    signup_payload = consume_auth_challenge(data.challenge_id, data.code, "signup")
+    try:
+        signup_payload = consume_auth_challenge(data.challenge_id, data.code, "signup")
+        login_payload = None
+        if not signup_payload:
+            login_payload = consume_auth_challenge(data.challenge_id, data.code, "login")
+    except AuthChallengeStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     if signup_payload:
         with connect() as c:
             try:
@@ -268,7 +296,6 @@ def verify_auth_code(data: AuthCode):
         send_account_created_email(signup_payload["email"], signup_payload["name"])
         return {"token": create_token(uid), "user_id": uid}
 
-    login_payload = consume_auth_challenge(data.challenge_id, data.code, "login")
     if login_payload:
         send_login_confirmation_email(
             login_payload["email"],

@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from backend.main import app
 from backend.database import init_db, connect
 from backend.services.billing_service import _save_stored_subscription
+from tests.auth_helpers import login_and_verify, signup_and_verify
 
 @pytest.fixture(autouse=True)
 def setup_db():
@@ -33,12 +34,11 @@ def test_full_auth_and_business_flow():
         "confirm_password": pwd,
         "business_type": "Serviços e vendas"
     }
-    res_signup = client.post("/api/auth/signup", json=signup_payload)
+    res_signup = signup_and_verify(client, signup_payload)
     assert res_signup.status_code == 200
 
     # 2. Login
-    res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
-    assert res_login.status_code == 200
+    res_login = login_and_verify(client, email, pwd)
     token = res_login.json()["token"]
     user_id = res_login.json()["user_id"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -141,14 +141,14 @@ def test_owner_reply_and_conversion_actions():
     email = f"owner_test_{int(time.time()*1000)}@example.com"
     contact_key = f"cliente_{int(time.time()*1000)}@externo.com"
     pwd = "SecurePassword123"
-    client.post("/api/auth/signup", json={
+    signup_and_verify(client, {
         "name": "Dono da Loja",
         "email": email,
         "password": pwd,
         "confirm_password": pwd,
         "business_type": "Comércio"
     })
-    res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+    res_login = login_and_verify(client, email, pwd)
     token = res_login.json()["token"]
     user_id = res_login.json()["user_id"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -206,14 +206,14 @@ def test_training_document_upload_and_isolated_topics():
     import time
     email = f"training_test_{int(time.time()*1000)}@example.com"
     pwd = "SecurePassword123"
-    client.post("/api/auth/signup", json={
+    signup_and_verify(client, {
         "name": "Gestor de Treinamento",
         "email": email,
         "password": pwd,
         "confirm_password": pwd,
         "business_type": "Comércio"
     })
-    res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+    res_login = login_and_verify(client, email, pwd)
     token = res_login.json()["token"]
     user_id = res_login.json()["user_id"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -259,7 +259,7 @@ def test_paywall_strict_enforcement():
     pwd = "SecurePassword123"
 
     # 1. Utilizador cria conta normalmente
-    res_signup = client.post("/api/auth/signup", json={
+    res_signup = signup_and_verify(client, {
         "name": "Cliente Sem Plano",
         "email": email,
         "password": pwd,
@@ -269,7 +269,7 @@ def test_paywall_strict_enforcement():
     assert res_signup.status_code == 200
 
     # 2. Utilizador entra na conta normalmente
-    res_login = client.post("/api/auth/login", json={"email": email, "password": pwd})
+    res_login = login_and_verify(client, email, pwd)
     assert res_login.status_code == 200
     token = res_login.json()["token"]
     user_id = res_login.json()["user_id"]
@@ -329,7 +329,6 @@ def test_paywall_strict_enforcement():
         "mandatory_responses": {}
     }, headers=headers)
     assert res_agent_ok.status_code == 200
-
 
 
 

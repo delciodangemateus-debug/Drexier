@@ -2,12 +2,15 @@ import sys
 import uuid
 from types import SimpleNamespace
 from unittest.mock import Mock
+import hashlib
 
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.services import auth_challenge
 from backend.services.resend_email import (
     get_resend_config,
+    is_resend_test_sender,
     send_account_created_email,
     send_login_confirmation_email,
 )
@@ -26,6 +29,11 @@ def test_resend_config_is_loaded_from_environment(monkeypatch):
 
     assert get_resend_config().api_key == "re_test_key"
     assert get_resend_config().from_email == "Drexier <hello@example.com>"
+
+
+def test_resend_test_sender_is_detected():
+    assert is_resend_test_sender("Drexier <onboarding@resend.dev>")
+    assert not is_resend_test_sender("Drexier <no-reply@example.com>")
 
 
 def test_account_email_is_sent_through_resend(monkeypatch):
@@ -146,6 +154,7 @@ def test_signup_reports_missing_resend_configuration(monkeypatch):
 
 
 def test_signup_reports_resend_delivery_failure(monkeypatch):
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "Drexier <hello@example.com>")
     monkeypatch.setattr(
         "backend.main.send_auth_code_email",
         Mock(return_value={"status": "failed", "error": "provider rejected sender"}),
@@ -162,3 +171,93 @@ def test_signup_reports_resend_delivery_failure(monkeypatch):
 
     assert response.status_code == 503
     assert "autorizado no Resend" in response.json()["detail"]
+
+
+def test_signup_explains_resend_test_sender_restriction(monkeypatch):
+    monkeypatch.setenv("RESEND_FROM_EMAIL", "Drexier <onboarding@resend.dev>")
+    monkeypatch.setattr(
+        "backend.main.send_auth_code_email",
+        Mock(return_value={"status": "failed", "error": "recipient not allowed"}),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/auth/signup", json={
+            "name": "Resend Test",
+            "email": f"resend-test-sender-{uuid.uuid4().hex}@example.com",
+            "password": "SecurePassword123",
+            "confirm_password": "SecurePassword123",
+            "business_type": "Serviços",
+        })
+
+    assert response.status_code == 503
+    assert "só permite enviar" in response.json()["detail"]
+    assert "domínio verificado" in response.json()["detail"]
+
+
+def test_auth_challenge_uses_persistent_supabase_store(monkeypatch):
+    stored_challenges = {}
+    rpc_calls = []
+
+    class FakeQuery:
+        def __init__(self, table):
+            self.table_name = table
+            self.challenge_id = None
+
+        def insert(self, values):
+            values.setdefault("attempts", 0)
+            stored_challenges[values["challenge_id"]] = values
+            return self
+
+        def delete(self):
+            return self
+
+        def lt(self, column, value):
+            assert column == "expires_at"
+            return self
+
+        def eq(self, column, value):
+            assert column == "challenge_id"
+            self.challenge_id = value
+            return self
+
+        def execute(self):
+            if self.challenge_id:
+                stored_challenges.pop(self.challenge_id, None)
+            return SimpleNamespace(data=[])
+
+    class FakeSupabase:
+        def table(self, name):
+            assert name == "auth_challenges"
+            return FakeQuery(name)
+
+        def rpc(self, name, params):
+            assert name == "consume_auth_challenge"
+            rpc_calls.append(params)
+
+            class FakeRpc:
+                def execute(self):
+                    challenge = stored_challenges.get(params["p_challenge_id"])
+                    if not challenge or challenge["purpose"] != params["p_purpose"]:
+                        return SimpleNamespace(data=None)
+                    if challenge["code_hash"] != params["p_code_hash"]:
+                        challenge["attempts"] += 1
+                        return SimpleNamespace(data=None)
+                    stored_challenges.pop(params["p_challenge_id"])
+                    return SimpleNamespace(data=challenge["payload"])
+
+            return FakeRpc()
+
+    monkeypatch.setattr(auth_challenge, "_uses_supabase_store", lambda: True)
+    monkeypatch.setattr(auth_challenge, "_get_supabase_auth_client", lambda: FakeSupabase())
+
+    challenge_id, code = auth_challenge.create_auth_challenge("signup", {"email": "owner@example.com"})
+
+    assert challenge_id in stored_challenges
+    assert stored_challenges[challenge_id]["code_hash"] == hashlib.sha256(code.encode()).hexdigest()
+    assert code not in str(stored_challenges[challenge_id])
+    assert auth_challenge.consume_auth_challenge(challenge_id, "000000", "signup") is None
+    assert auth_challenge.consume_auth_challenge(challenge_id, code, "signup") == {
+        "email": "owner@example.com"
+    }
+    assert auth_challenge.consume_auth_challenge(challenge_id, code, "signup") is None
+    assert rpc_calls[-1]["p_code_hash"] == hashlib.sha256(code.encode()).hexdigest()

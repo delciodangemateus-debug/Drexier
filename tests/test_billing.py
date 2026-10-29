@@ -22,6 +22,7 @@ from backend.services.billing_service import (
     PLAN_NAME,
     PLAN_AMOUNT_CENTS,
 )
+from tests.auth_helpers import signup_and_verify
 
 
 @pytest.fixture(autouse=True)
@@ -38,17 +39,13 @@ def setup_test_db(tmp_path, monkeypatch):
 @pytest.fixture
 def auth_client():
     client = TestClient(app)
-    signup_res = client.post(
-        "/api/auth/signup",
-        json={
-            "name": "Empresa Pagadora",
-            "email": f"empresa_{int(time.time()*1000)}@teste.com",
-            "password": "Password123",
-            "confirm_password": "Password123",
-            "business_type": "Serviços",
-        },
-    )
-    assert signup_res.status_code == 200
+    signup_res = signup_and_verify(client, {
+        "name": "Empresa Pagadora",
+        "email": f"empresa_{int(time.time()*1000)}@teste.com",
+        "password": "Password123",
+        "confirm_password": "Password123",
+        "business_type": "Serviços",
+    })
     token = signup_res.json()["token"]
     user_id = signup_res.json()["user_id"]
     return client, token, user_id

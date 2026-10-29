@@ -13,7 +13,7 @@ load_dotenv()
 
 logger = logging.getLogger("drexier.supabase")
 
-_supabase_client = None
+_supabase_clients = {}
 
 def get_supabase_credentials() -> Dict[str, str]:
     """Obtém as credenciais do Supabase configuradas nas variáveis de ambiente."""
@@ -39,22 +39,24 @@ def get_supabase_client(use_service_role: bool = True) -> Optional[Any]:
     Dá prioridade à Service Role Key para operações administrativas seguras no backend,
     com fallback para a Anon Key se a Service Key não for fornecida.
     """
-    global _supabase_client
-    if _supabase_client is not None:
-        return _supabase_client
-
     creds = get_supabase_credentials()
     url = creds["url"]
-    key = creds["service_role_key"] if (use_service_role and creds["service_role_key"]) else creds["anon_key"]
+    role = "service_role" if use_service_role and creds["service_role_key"] else "anon"
+    key = creds["service_role_key"] if role == "service_role" else creds["anon_key"]
 
     if not url or not key:
         return None
 
+    cache_key = f"{url}:{role}"
+    if cache_key in _supabase_clients:
+        return _supabase_clients[cache_key]
+
     try:
         from supabase import create_client, Client
-        _supabase_client = create_client(url, key)
+        client = create_client(url, key)
+        _supabase_clients[cache_key] = client
         logger.info(f"Cliente Supabase conectado com sucesso ao projeto: {url}")
-        return _supabase_client
+        return client
     except Exception as e:
         logger.error(f"Erro ao inicializar cliente Supabase ({url}): {e}")
         return None

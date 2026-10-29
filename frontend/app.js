@@ -474,9 +474,12 @@ window.addEventListener("keydown", e => {
 
 /* Autenticação */
 let authChallengeId = null;
+let authChallengeReturnTab = "login";
 
-function showAuthCodeChallenge(response) {
+function showAuthCodeChallenge(response, returnTab) {
   authChallengeId = response.challenge_id;
+  authChallengeReturnTab = returnTab;
+  $("#auth-tabs").classList.add("hidden");
   $("login-form").classList.add("hidden");
   $("signup-form").classList.add("hidden");
   $("auth-code-form").classList.remove("hidden");
@@ -486,6 +489,8 @@ function showAuthCodeChallenge(response) {
 }
 
 function setAuthTab(tab) {
+  authChallengeId = null;
+  $("#auth-tabs").classList.remove("hidden");
   $$("[data-auth]").forEach(b => b.classList.toggle("active", b.dataset.auth === tab));
   $("#login-form").classList.toggle("hidden", tab !== "login");
   $("#signup-form").classList.toggle("hidden", tab !== "signup");
@@ -501,11 +506,11 @@ $("#login-form").addEventListener("submit", async e => {
   const submitButton = e.currentTarget.querySelector('button[type="submit"]');
   const originalLabel = submitButton.textContent;
   submitButton.disabled = true;
-  submitButton.textContent = "A entrar...";
+  submitButton.textContent = "A enviar código...";
   try {
     const r = await api("/api/auth/login", { method: "POST", body: JSON.stringify(d) });
     if (r.challenge_required) {
-      showAuthCodeChallenge(r);
+      showAuthCodeChallenge(r, "login");
       return;
     }
     token = r.token;
@@ -530,11 +535,11 @@ $("#signup-form").addEventListener("submit", async e => {
   const submitButton = e.currentTarget.querySelector('button[type="submit"]');
   const originalLabel = submitButton.textContent;
   submitButton.disabled = true;
-  submitButton.textContent = "A criar conta...";
+  submitButton.textContent = "A enviar código...";
   try {
     const r = await api("/api/auth/signup", { method: "POST", body: JSON.stringify(d) });
     if (r.challenge_required) {
-      showAuthCodeChallenge(r);
+      showAuthCodeChallenge(r, "signup");
       return;
     }
     token = r.token;
@@ -574,7 +579,7 @@ $("auth-code-form")?.addEventListener("submit", async e => {
 
 $("auth-code-back")?.addEventListener("click", () => {
   authChallengeId = null;
-  setAuthTab($("login-form").classList.contains("hidden") ? "signup" : "login");
+  setAuthTab(authChallengeReturnTab);
 });
 
 function showLanding() {
@@ -584,10 +589,13 @@ function showLanding() {
 }
 
 function showAuth(mode = "login") {
+  authChallengeId = null;
+  authChallengeReturnTab = mode;
   $("#landing")?.classList.add("hidden");
   $("#auth")?.classList.remove("hidden");
   $("#app")?.classList.add("hidden");
   $$("#auth .tab").forEach(t => t.classList.toggle("active", t.dataset.auth === mode));
+  $("#auth-tabs")?.classList.remove("hidden");
   $("#login-form")?.classList.toggle("hidden", mode !== "login");
   $("#signup-form")?.classList.toggle("hidden", mode !== "signup");
   $("#auth-code-form")?.classList.add("hidden");

@@ -5,6 +5,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parseaddr
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -18,6 +19,12 @@ logger = logging.getLogger("drexier.resend")
 class ResendConfig:
     api_key: str
     from_email: str
+
+
+def is_resend_test_sender(from_email: Optional[str] = None) -> bool:
+    sender = from_email if from_email is not None else get_resend_config().from_email
+    _, address = parseaddr(sender)
+    return address.rsplit("@", 1)[-1].lower() == "resend.dev" if "@" in address else False
 
 
 def get_resend_config() -> ResendConfig:
@@ -69,8 +76,12 @@ def _send_email(to_email: str, subject: str, html_body: str) -> dict:
             "subject": subject,
             "html": html_body,
         })
+        email_id = response.get("id") if isinstance(response, dict) else None
+        if not email_id:
+            logger.error("Resend não confirmou o envio de email para %s.", to_email)
+            return {"status": "failed", "reason": "missing_email_id"}
         logger.info("Email Resend enviado para %s", to_email)
-        return {"status": "sent", "id": response.get("id")}
+        return {"status": "sent", "id": email_id}
     except Exception as exc:
         logger.exception("Falha ao enviar email Resend para %s: %s", to_email, exc)
         return {"status": "failed", "error": str(exc)}
