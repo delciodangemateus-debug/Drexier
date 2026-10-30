@@ -20,7 +20,8 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 def create_token(user_id: int) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(minutes=10)
+    # Sessão permanente dentro do software (o utilizador pode mexer por tempo ilimitado)
+    exp = datetime.now(timezone.utc) + timedelta(days=365)
     return jwt.encode({"sub": str(user_id), "exp": exp}, SECRET_KEY, algorithm=ALGORITHM)
 
 

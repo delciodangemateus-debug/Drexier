@@ -24,58 +24,35 @@ if (initialParams.get("token")) {
   localStorage.setItem("drexier_token", initialParams.get("token"));
 }
 let token = localStorage.getItem("drexier_token") || "";
-let me = null, selectedContact = null, infoCache = [], activePage = "dashboard";
+if (token) {
+  try { document.documentElement.classList.add("is-authenticated"); } catch (_) {}
+}
+let me = null, selectedContact = null, infoCache = [], activePage = localStorage.getItem("drexier_active_page") || "dashboard";
 let currentExpandedCardId = null, currentEditingItemIndex = null;
 let currentBusinessSubtab = "cards"; // "cards" | "training"
 let currentUploadedFile = "";
-let authExpiryTimer = null;
 let authChallengeTimer = null;
 let authLockoutTimer = null;
 let resetToken = null;
-let authSessionExpired = false;
-
-function getTokenExpiration(tokenValue) {
-  try {
-    const encodedPayload = tokenValue.split(".")[1];
-    if (!encodedPayload) return null;
-    const normalizedPayload = encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(normalizedPayload));
-    return Number.isFinite(payload.exp) ? payload.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
-function scheduleAuthExpiration(tokenValue) {
-  clearTimeout(authExpiryTimer);
-  const expiration = getTokenExpiration(tokenValue);
-  if (!expiration) return;
-  authExpiryTimer = setTimeout(
-    expireAuthSession,
-    Math.max(0, expiration - Date.now()),
-  );
-}
 
 function saveAuthToken(tokenValue) {
   token = tokenValue;
-  authSessionExpired = false;
   localStorage.setItem("drexier_token", token);
-  scheduleAuthExpiration(token);
+  document.documentElement.classList.add("is-authenticated");
 }
 
 function expireAuthSession() {
   if (!token) return;
-  clearTimeout(authExpiryTimer);
   stopLivePolling();
   token = "";
   me = null;
   localStorage.removeItem("drexier_token");
-  authSessionExpired = true;
+  localStorage.removeItem("drexier_active_page");
+  document.documentElement.classList.remove("is-authenticated");
   showAuth("login");
-  $("#auth-error").textContent = "A sua sessão expirou após 10 minutos. Entre novamente.";
+  const errEl = $("#auth-error");
+  if (errEl) errEl.textContent = "Sessão inválida. Por favor, entre novamente.";
 }
-
-scheduleAuthExpiration(token);
 
 /* ==============================================================================
    PAYWALL SAAS — CONTROLO DE ACESSO POR ASSINATURA STRIPE
@@ -799,6 +776,7 @@ $("#auth-code-back")?.addEventListener("click", () => {
 });
 
 function showLanding() {
+  document.documentElement.classList.remove("is-authenticated");
   $("#landing")?.classList.remove("hidden");
   $("#auth")?.classList.add("hidden");
   $("#app")?.classList.add("hidden");
@@ -809,6 +787,7 @@ function showAuth(mode = "login") {
   authChallengeReturnTab = mode;
   clearTimeout(authChallengeTimer);
   clearInterval(authLockoutTimer);
+  document.documentElement.classList.remove("is-authenticated");
   $("#landing")?.classList.add("hidden");
   $("#auth")?.classList.remove("hidden");
   $("#app")?.classList.add("hidden");
@@ -824,15 +803,16 @@ function showAuth(mode = "login") {
 }
 
 function openApp() {
+  document.documentElement.classList.add("is-authenticated");
   $("#landing")?.classList.add("hidden");
   $("#auth")?.classList.add("hidden");
   $("#app")?.classList.remove("hidden");
 }
 
 async function boot() {
+  openApp(); // Abre a interface da conta de forma instantânea sem piscar landing
   try {
     me = await api("/api/me");
-    openApp();
     startLivePolling();
     $("#side-user").textContent = me.name;
     fillSettings();
@@ -848,7 +828,6 @@ async function boot() {
       const sessionId = urlParams.get("session_id");
       window.history.replaceState({}, document.title, window.location.pathname);
 
-      // Ativa a subscrição imediatamente via verify-session (elimina a dependência do webhook)
       if (sessionId) {
         try {
           const verified = await api(`/api/billing/verify-session?session_id=${encodeURIComponent(sessionId)}`);
@@ -857,7 +836,6 @@ async function boot() {
               hasActiveSub = true;
               applyPaywallState(true);
             } else {
-              // Forçar revalidação via status para garantir desbloqueio
               try {
                 const st = await api("/api/billing/status");
                 hasActiveSub = !!(st && st.has_active_subscription);
@@ -866,7 +844,6 @@ async function boot() {
             }
           }
         } catch (e) {
-          // Fallback: loadBillingStatus fará auto-reconciliação com a Stripe
           console.warn("verify-session falhou, a recorrer a loadBillingStatus:", e);
           try {
             const st = await api("/api/billing/status");
@@ -906,29 +883,34 @@ async function boot() {
       return;
     }
 
-    await navigate("dashboard");
+    // Restaura a aba exata onde o utilizador estava
+    const savedPage = localStorage.getItem("drexier_active_page") || "dashboard";
+    await navigate(savedPage);
   } catch (err) {
-    if (authSessionExpired) {
-      authSessionExpired = false;
+    if (err.status === 401) {
+      token = "";
+      localStorage.removeItem("drexier_token");
+      localStorage.removeItem("drexier_active_page");
+      document.documentElement.classList.remove("is-authenticated");
       showAuth("login");
       const errEl = $("#auth-error");
-      if (errEl) errEl.textContent = "A sua sessão expirou após 10 minutos. Entre novamente.";
-    } else if (token) {
-      showAuth("login");
-      const errEl = $("#auth-error");
-      if (errEl) errEl.textContent = err.message;
+      if (errEl) errEl.textContent = "Sessão inválida. Entre novamente.";
     } else {
-      showLanding();
+      // Falha temporária de rede / recarregamento: mantém o utilizador autenticado dentro do software
+      console.warn("Aviso na inicialização do perfil:", err);
+      const savedPage = localStorage.getItem("drexier_active_page") || "dashboard";
+      await navigate(savedPage);
     }
   }
 }
 
 function logoutNow() {
-  clearTimeout(authExpiryTimer);
   stopLivePolling();
   token = "";
   me = null;
   localStorage.removeItem("drexier_token");
+  localStorage.removeItem("drexier_active_page");
+  document.documentElement.classList.remove("is-authenticated");
   $("#app").classList.add("hidden");
   $("#confirm-modal").classList.add("hidden");
   closeModal();
@@ -962,6 +944,7 @@ let currentNavSeq = 0;
 async function navigate(page) {
   const seq = ++currentNavSeq;
   activePage = page;
+  localStorage.setItem("drexier_active_page", page);
   $$("[data-page]").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   $$(".page").forEach(s => s.classList.toggle("hidden", s.id !== `page-${page}`));
   const meta = pageMeta[page] || ["", ""];
@@ -3588,6 +3571,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 if (token) {
+  openApp();
   boot();
 } else {
   showLanding();

@@ -389,6 +389,19 @@ async def send_email(
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
+        if in_reply_to:
+            message_id = urllib.parse.quote(in_reply_to, safe="")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                res = await client.post(
+                    f"{MICROSOFT_GRAPH_BASE}/me/messages/{message_id}/reply",
+                    headers=headers,
+                    json={"comment": body_text},
+                )
+                if res.status_code != 202:
+                    logger.error(f"Erro Microsoft reply: {res.text}")
+                    raise ValueError(f"Falha ao responder e-mail via Outlook: {res.text}")
+            return {"status": "sent", "provider": "microsoft"}
+
         mail_payload = {
             "message": {
                 "subject": subject,
@@ -1022,28 +1035,8 @@ async def process_and_reply_email(
         logger.error(f"Erro ao gerar resposta com a IA: {e}")
         reply_text = "Agradecemos o seu e-mail! Recebemos a sua mensagem e daremos retorno brevemente."
 
-    # Salva a resposta da IA no banco de dados
-    with connect() as c:
-        c.execute(
-            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-            (user_id, cid, reply_text)
-        )
-        c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
-
-        # Atualiza a tabela de tópicos (email_threads)
-        reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-        if thread_id:
-            c.execute(
-                """INSERT INTO email_threads (user_id, contact_id, provider, thread_id, last_message_id, subject, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                   ON CONFLICT(user_id, thread_id) DO UPDATE SET
-                       last_message_id = excluded.last_message_id,
-                       subject = excluded.subject,
-                       updated_at = CURRENT_TIMESTAMP""",
-                (user_id, cid, integration["provider"], str(thread_id), message_id_header or "", reply_subject)
-            )
-
     # Envia o e-mail de resposta de volta ao cliente pelo provedor configurado
+    reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
     try:
         await send_email(
             integration=integration,
@@ -1056,7 +1049,27 @@ async def process_and_reply_email(
         )
         logger.info(f"Resposta enviada com sucesso por e-mail para {customer_email}")
     except Exception as e:
-        logger.error(f"Erro ao enviar resposta por e-mail: {e}")
+        logger.exception(f"Erro ao enviar resposta por e-mail para {customer_email}: {e}")
+        raise
+
+    # Só registra a resposta como enviada depois da confirmação do provedor.
+    with connect() as c:
+        c.execute(
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+            (user_id, cid, reply_text)
+        )
+        c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
+
+        if thread_id:
+            c.execute(
+                """INSERT INTO email_threads (user_id, contact_id, provider, thread_id, last_message_id, subject, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(user_id, thread_id) DO UPDATE SET
+                       last_message_id = excluded.last_message_id,
+                       subject = excluded.subject,
+                       updated_at = CURRENT_TIMESTAMP""",
+                (user_id, cid, integration["provider"], str(thread_id), message_id_header or "", reply_subject)
+            )
 
     return reply_text
 
@@ -1121,7 +1134,7 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
                 mail = imaplib.IMAP4(imap_host, imap_port)
             mail.login(user, password)
             mail.select("INBOX")
-            status, search_data = mail.search(None, "(UNSEEN)")
+            status, search_data = mail.uid("search", None, "UNSEEN")
             if status != "OK" or not search_data or not search_data[0]:
                 try:
                     mail.close()
@@ -1132,7 +1145,7 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
 
             msg_ids = search_data[0].split()
             for mid in msg_ids[-15:]:
-                res, data = mail.fetch(mid, "(RFC822)")
+                res, data = mail.uid("fetch", mid, "(BODY.PEEK[])")
                 if res != "OK" or not data or not data[0]:
                     continue
                 raw_bytes = data[0][1]
@@ -1160,7 +1173,7 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
                             received_at = received_at.replace(tzinfo=timezone.utc)
                         received_at = received_at.astimezone(timezone.utc)
                         if received_at < cutoff_at:
-                            mail.store(mid, "+FLAGS", "\\Seen")
+                            mail.uid("store", mid, "+FLAGS", "\\Seen")
                             logger.info(f"E-mail IMAP {message_id or mid} anterior ao início da cobertura paga ignorado.")
                             continue
                     except (TypeError, ValueError):
@@ -1172,9 +1185,6 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
 
                 body_text = clean_email_body(extract_imap_body(msg)) or "(Email sem corpo legível)"
 
-                # Marca como lida para não reprocessar
-                mail.store(mid, "+FLAGS", "\\Seen")
-
                 # Filtro anti-spam / anúncios
                 is_valid, reject_reason = is_genuine_customer_inquiry(
                     sender_email=sender_email,
@@ -1184,10 +1194,11 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
                 )
                 if not is_valid:
                     logger.info(f"[Filtro Anti-Spam] E-mail IMAP de {sender_email} ('{subject}') ignorado: {reject_reason}")
+                    mail.uid("store", mid, "+FLAGS", "\\Seen")
                     continue
 
                 items.append({
-                    "mid": mid,
+                    "uid": mid,
                     "sender_email": sender_email,
                     "customer_name": customer_name,
                     "subject": subject,
@@ -1215,6 +1226,27 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
             thread_id=None,
             message_id_header=item["message_id"],
         )
+
+        def _mark_imap_message_seen():
+            mail = None
+            try:
+                if imap_port == 993:
+                    mail = imaplib.IMAP4_SSL(imap_host, imap_port)
+                else:
+                    mail = imaplib.IMAP4(imap_host, imap_port)
+                mail.login(user, password)
+                mail.select("INBOX")
+                status, _ = mail.uid("store", item["uid"], "+FLAGS", "\\Seen")
+                if status != "OK":
+                    raise RuntimeError(f"Falha ao marcar e-mail IMAP {item['uid']} como lido.")
+            finally:
+                if mail is not None:
+                    try:
+                        mail.close()
+                    finally:
+                        mail.logout()
+
+        await loop.run_in_executor(None, _mark_imap_message_seen)
         processed_items.append({
             "message_id": item["message_id"],
             "from": item["sender_email"],

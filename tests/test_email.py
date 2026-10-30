@@ -12,6 +12,8 @@ from backend.services.email_service import (
     get_email_response_cutoff,
     parse_sender_info,
     create_mime_message,
+    process_and_reply_email,
+    send_email,
     sync_emails_for_user,
 )
 from tests.auth_helpers import signup_and_verify
@@ -71,6 +73,76 @@ def test_create_mime_message():
     assert msg["From"] == "suporte@drexier.com"
     assert msg["To"] == "cliente@exemplo.com"
     assert msg["Subject"] == "Re: Informações"
+
+
+@pytest.mark.anyio
+async def test_microsoft_email_reply_uses_graph_reply_endpoint():
+    response = type("Response", (), {"status_code": 202, "text": ""})()
+
+    with patch(
+        "backend.services.email_service.refresh_microsoft_token_if_needed",
+        new_callable=AsyncMock,
+        return_value="access-token",
+    ), patch(
+        "backend.services.email_service.httpx.AsyncClient.post",
+        new_callable=AsyncMock,
+        return_value=response,
+    ) as mock_post:
+        result = await send_email(
+            integration={
+                "provider": "microsoft",
+                "email_address": "empresa@outlook.com",
+                "access_token": "access-token",
+            },
+            to_email="cliente@example.com",
+            subject="Re: Dúvida",
+            body_text="Olá! Segue a resposta.",
+            in_reply_to="message/id",
+        )
+
+    assert result == {"status": "sent", "provider": "microsoft"}
+    request_url = mock_post.await_args.args[0]
+    request_data = mock_post.await_args.kwargs["json"]
+    assert request_url.endswith("/me/messages/message%2Fid/reply")
+    assert request_data == {"comment": "Olá! Segue a resposta."}
+
+
+@pytest.mark.anyio
+async def test_failed_email_reply_is_not_recorded_as_sent(auth_client):
+    _, _, user_id = auth_client
+    with patch(
+        "backend.services.email_service.draft_reply",
+        new_callable=AsyncMock,
+        return_value="Resposta gerada pela IA",
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("provider unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="provider unavailable"):
+            await process_and_reply_email(
+                user_dict={"id": user_id, "name": "Carlos Atendimento"},
+                integration={
+                    "provider": "google",
+                    "email_address": "empresa@gmail.com",
+                    "auto_reply_enabled": 1,
+                },
+                customer_email="cliente@example.com",
+                customer_name="Cliente",
+                subject="Dúvida",
+                incoming_content="Qual é o preço?",
+                thread_id="gmail-thread",
+                message_id_header="<customer-message@example.com>",
+            )
+
+    with connect() as c:
+        messages = c.execute(
+            "SELECT sender, content FROM messages WHERE user_id = ? ORDER BY id",
+            (user_id,),
+        ).fetchall()
+    assert [(row["sender"], row["content"]) for row in messages] == [
+        ("customer", "Assunto: Dúvida\n\nQual é o preço?")
+    ]
 
 
 def test_email_response_cutoff_starts_after_payment_and_connection():

@@ -1,3 +1,14 @@
+/* Estado autenticado imediato (evita qualquer piscar da landing page ao atualizar) */
+html.is-authenticated #landing {
+  display: none !important;
+}
+html.is-authenticated #auth {
+  display: none !important;
+}
+html.is-authenticated #app {
+  display: flex !important;
+}
+
 /* ============================================================
    DREXIER — DESIGN SYSTEM (LUXURY ENTERPRISE PALETTE)
    Identity: Light off-white base, dark metallic purple, deep

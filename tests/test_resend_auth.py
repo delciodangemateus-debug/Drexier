@@ -366,7 +366,7 @@ def test_password_reset_code_changes_password_and_allows_login():
         assert logged_in.status_code == 200
 
 
-def test_access_and_password_reset_tokens_expire_after_ten_minutes():
+def test_access_token_is_persistent_and_password_reset_expires_after_ten_minutes():
     access_claims = jwt.decode(
         create_token(123),
         SECRET_KEY,
@@ -381,7 +381,7 @@ def test_access_and_password_reset_tokens_expire_after_ten_minutes():
     )
     now = int(time.time())
 
-    assert 0 < access_claims["exp"] - now <= 600
+    assert access_claims["exp"] - now >= 86400 * 30
     assert 0 < reset_claims["exp"] - now <= 600
     assert reset_claims["purpose"] == "password_reset"
     assert decode_password_reset_token(reset_token) == 123
