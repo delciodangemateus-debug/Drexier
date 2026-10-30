@@ -48,9 +48,9 @@ def get_billing_config():
 
 
 @router.get("/status")
-def get_subscription_status(user=Depends(get_current_user)):
+def get_subscription_status(user=Depends(get_current_user), force: bool = False):
     """Retorna o estado detalhado da assinatura e acesso do utilizador autenticado."""
-    return get_user_subscription_status(user["id"])
+    return get_user_subscription_status(user["id"], force_refresh=force)
 
 
 @router.get("/verify-session")

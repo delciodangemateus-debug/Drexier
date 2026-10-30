@@ -152,12 +152,20 @@ class SupabaseCursor:
                 uid = p[0]
                 query = query.eq("user_id", uid).eq("status", "pending")
 
-            reqs = query.order("created_at", desc=True).execute().data
+            reqs = query.order("created_at", desc=True).execute().data or []
+            contact_ids = list({r["contact_id"] for r in reqs if r.get("contact_id")})
+            contacts_map = {}
+            if contact_ids:
+                try:
+                    c_data = self.client.table("contacts").select("id, name, contact_key").in_("id", contact_ids).execute().data or []
+                    for c in c_data:
+                        contacts_map[c["id"]] = c
+                except Exception:
+                    pass
+
             rows = []
             for r in reqs:
-                c_data = self.client.table("contacts").select("name, contact_key").eq("id", r["contact_id"]).execute().data
-                name = c_data[0]["name"] if c_data else ""
-                ckey = c_data[0]["contact_key"] if c_data else ""
+                ct = contacts_map.get(r.get("contact_id")) or {}
                 rows.append(SupabaseRow({
                     "id": r["id"],
                     "request_type": r["request_type"],
@@ -165,23 +173,34 @@ class SupabaseCursor:
                     "created_at": r["created_at"],
                     "status": r.get("status", "pending"),
                     "contact_id": r["contact_id"],
-                    "name": name,
-                    "contact_key": ckey
+                    "name": ct.get("name", ""),
+                    "contact_key": ct.get("contact_key", "")
                 }))
             self._rows = rows
             self.rowcount = len(rows)
             return self
 
-        # 1.2 Contacts list with last_message subquery
+        # 1.2 Contacts list with last_message subquery (Otimizado em 2 queries únicas sem N+1)
         if "FROM contacts ct WHERE ct.user_id" in clean_sql and "last_message" in clean_sql:
             uid = p[0]
-            contacts = self.client.table("contacts").select("*").eq("user_id", uid).execute().data
+            contacts = self.client.table("contacts").select("*").eq("user_id", uid).execute().data or []
             contacts.sort(key=lambda x: x.get("last_message_at") or x.get("created_at") or "", reverse=True)
-            
+
+            contact_ids = [ct["id"] for ct in contacts if ct.get("id")]
+            last_msgs_map = {}
+            if contact_ids:
+                try:
+                    m_data = self.client.table("messages").select("contact_id, content, id").in_("contact_id", contact_ids).order("id", desc=True).limit(len(contact_ids) * 5).execute().data or []
+                    for m in m_data:
+                        cid = m.get("contact_id")
+                        if cid not in last_msgs_map:
+                            last_msgs_map[cid] = m.get("content")
+                except Exception:
+                    pass
+
             rows = []
             for ct in contacts:
-                m_res = self.client.table("messages").select("content").eq("contact_id", ct["id"]).order("id", desc=True).limit(1).execute().data
-                last_msg = m_res[0]["content"] if m_res else None
+                last_msg = last_msgs_map.get(ct["id"])
                 row_dict = _format_row_for_app("contacts", ct)
                 row_dict["last_message"] = last_msg
                 rows.append(SupabaseRow(row_dict))

@@ -208,13 +208,19 @@ def _save_stored_subscription(user_id: int, data: Dict[str, Any]):
             logger.error(f"Erro ao salvar fallback de assinatura em business_info: {ex2}")
 
 
-def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
+# Cache em memória para evitar chamadas bloqueantes repetitivas à API da Stripe
+_stripe_reconcile_cache: Dict[int, Tuple[float, Dict[str, Any]]] = {}
+RECONCILE_CACHE_TTL = 300  # 5 minutos
+
+def get_user_subscription_status(user_id: int, force_refresh: bool = False) -> Dict[str, Any]:
     """
     Retorna o estado detalhado da assinatura do utilizador.
     Verifica se o acesso está liberado, status de pagamento e período de vigência.
     Se o status local estiver inativo mas a Stripe estiver configurada,
-    faz auto-reconciliação direta com a Stripe para desbloquear o acesso na hora.
+    faz auto-reconciliação com cache de 5 minutos para performance ultra-rápida.
     """
+    import time
+
     sub_data = _get_stored_subscription(user_id) or {}
     status = sub_data.get("status", "none")
 
@@ -224,13 +230,11 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
         period_end = sub_data.get("current_period_end")
         if period_end:
             try:
-                # Trata formatos ISO ou timestamps Unix
                 if isinstance(period_end, (int, float)):
                     end_dt = datetime.fromtimestamp(period_end, tz=timezone.utc)
                 else:
                     pe_str = str(period_end).replace("Z", "+00:00")
                     end_dt = datetime.fromisoformat(pe_str)
-                # Dá tolerância de 24h para renovação automática via webhook
                 has_active_access = datetime.now(timezone.utc) <= (end_dt + timedelta(days=1))
             except Exception:
                 has_active_access = True
@@ -239,10 +243,14 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
     elif status in ("past_due", "unpaid", "incomplete"):
         has_active_access = False
 
-    # AUTO-RECONCILIAÇÃO INFALÍVEL COM A STRIPE:
-    # Se o banco local indicar inativo mas a Stripe estiver configurada,
-    # consulta a API da Stripe diretamente para evitar falso-bloqueio se o webhook atrasar
-    if is_stripe_configured():
+    # Se já tem acesso ativo ou se foi checado recentemente na Stripe, não bloqueia com HTTP call externa
+    now = time.time()
+    cached_reconcile = _stripe_reconcile_cache.get(user_id)
+    recently_checked = cached_reconcile and (now - cached_reconcile[0] < RECONCILE_CACHE_TTL)
+
+    # AUTO-RECONCILIAÇÃO COM A STRIPE (apenas se não ativo e não checado recentemente, ou se forçado)
+    if is_stripe_configured() and not has_active_access and (not recently_checked or force_refresh):
+        _stripe_reconcile_cache[user_id] = (now, sub_data)
         try:
             stripe.api_key = get_stripe_secret_key()
             customer_id = sub_data.get("stripe_customer_id")
@@ -253,7 +261,6 @@ def get_user_subscription_status(user_id: int) -> Dict[str, Any]:
                 if u_row:
                     user_email = u_row["email"]
 
-            # Se não temos customer_id salvo, busca na Stripe pelo email do usuário
             if not customer_id and user_email:
                 try:
                     cust_res = stripe.Customer.list(email=user_email, limit=1)

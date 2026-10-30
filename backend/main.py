@@ -424,10 +424,18 @@ def update_account(data: ProfileUpdate, user=Depends(current_user), _sub=Depends
                   (data.name.strip(), data.business_type, data.business_description, data.language, user["id"]))
     return {"ok": True}
 
+_dashboard_cache = {}  # uid -> (timestamp, data)
+DASHBOARD_CACHE_TTL = 10.0
+
 @app.get("/api/dashboard")
 def dashboard(user=Depends(current_user)):
+    import time
+    uid = user["id"]
+    now = time.time()
+    cached = _dashboard_cache.get(uid)
+    if cached and (now - cached[0] < DASHBOARD_CACHE_TTL):
+        return cached[1]
     with connect() as c:
-        uid=user["id"]
         total_messages=c.execute("SELECT COUNT(*) n FROM messages WHERE user_id=? AND sender='agent'",(uid,)).fetchone()["n"]
         total_contacts=c.execute("SELECT COUNT(*) n FROM contacts WHERE user_id=?",(uid,)).fetchone()["n"]
         today_contacts=c.execute("SELECT COUNT(*) n FROM contacts WHERE user_id=? AND date(created_at)=date('now','localtime')",(uid,)).fetchone()["n"]
@@ -436,9 +444,10 @@ def dashboard(user=Depends(current_user)):
         pending_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,ct.name,ct.contact_key
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
           WHERE r.user_id=? AND r.status='pending' ORDER BY r.created_at DESC""",(uid,)).fetchall()
-    return {"messages_answered":total_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
+    res = {"messages_answered":total_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
             "yesterday_contacts":yesterday_contacts,"pending_count":pending,"pending_requests":[dict(x) for x in pending_rows]}
-
+    _dashboard_cache[uid] = (now, res)
+    return res
 @app.get("/api/analytics")
 def analytics(user=Depends(current_user)):
     with connect() as c:

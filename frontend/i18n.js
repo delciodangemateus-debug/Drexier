@@ -1209,13 +1209,16 @@
 
   const originalTexts = new WeakMap();
   const originalAttrs = new WeakMap();
-  const attrNames = ["placeholder", "title", "aria-label", "value"];
+  const attrNames = ["placeholder", "title", "aria-label"];
 
   function shouldSkipNode(node) {
-    if (!node || !node.parentElement) return true;
-    const tag = node.parentElement.tagName;
-    if (["SCRIPT", "STYLE", "CODE", "PRE"].includes(tag)) return true;
-    if (node.parentElement.closest(".no-translate")) return true;
+    if (!node) return true;
+    const parent = node.parentElement;
+    if (!parent) return true;
+    const tag = parent.tagName;
+    if (tag === "SCRIPT" || tag === "STYLE" || tag === "CODE" || tag === "PRE" || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (parent.classList && parent.classList.contains("no-translate")) return true;
+    if (parent.closest && parent.closest(".no-translate")) return true;
     return false;
   }
 
@@ -1232,20 +1235,19 @@
     if (currentLanguage === "en") {
       node.nodeValue = translateText(baseVal, "en");
     } else {
-      node.nodeValue = baseVal;
+      node.nodeValue = translateText(baseVal, "pt") || baseVal;
     }
   }
 
   function translateAttributes(el) {
     if (!el || el.nodeType !== Node.ELEMENT_NODE) return;
-    if (["SCRIPT", "STYLE"].includes(el.tagName)) return;
+    const tag = el.tagName;
+    if (tag === "SCRIPT" || tag === "STYLE" || tag === "CODE" || tag === "PRE") return;
+    if (el.classList && el.classList.contains("no-translate")) return;
 
-    attrNames.forEach((name) => {
-      // Only translate 'value' on button / submit inputs
-      if (name === "value" && (el.tagName !== "INPUT" || !["button", "submit", "reset"].includes(el.type))) {
-        return;
-      }
-      if (!el.hasAttribute(name)) return;
+    for (let i = 0; i < attrNames.length; i++) {
+      const name = attrNames[i];
+      if (!el.hasAttribute(name)) continue;
 
       let stored = originalAttrs.get(el);
       if (!stored) {
@@ -1261,51 +1263,61 @@
       if (currentLanguage === "en") {
         el.setAttribute(name, translateText(original, "en"));
       } else {
-        el.setAttribute(name, original);
+        el.setAttribute(name, translateText(original, "pt") || original);
       }
-    });
+    }
 
     // Handle <select> <option> texts
-    if (el.tagName === "OPTION") {
+    if (tag === "OPTION") {
       if (!originalTexts.has(el)) {
         originalTexts.set(el, el.textContent);
       }
       const original = originalTexts.get(el);
-      el.textContent = currentLanguage === "en" ? translateText(original, "en") : original;
+      el.textContent = currentLanguage === "en" ? translateText(original, "en") : (translateText(original, "pt") || original);
     }
   }
+
+  let isObserving = false;
 
   function translateTree(root = document.body) {
     if (!root) return;
 
-    // Translate elements attributes
-    const elements = root.nodeType === Node.ELEMENT_NODE
-      ? [root, ...root.querySelectorAll("*")]
-      : [...(root.querySelectorAll?.("*") || [])];
+    const wasObserving = isObserving;
+    if (wasObserving) stopObserving();
 
-    elements.forEach(translateAttributes);
-
-    // Translate text nodes via TreeWalker
-    const walker = document.createTreeWalker(
-      root,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode(node) {
-          if (shouldSkipNode(node)) return NodeFilter.FILTER_REJECT;
-          return node.nodeValue && node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    try {
+      if (root.nodeType === Node.ELEMENT_NODE) {
+        translateAttributes(root);
+        const elements = root.querySelectorAll("*");
+        for (let i = 0; i < elements.length; i++) {
+          translateAttributes(elements[i]);
         }
       }
-    );
 
-    const nodes = [];
-    while (walker.nextNode()) {
-      nodes.push(walker.currentNode);
+      const walker = document.createTreeWalker(
+        root,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode(node) {
+            if (shouldSkipNode(node)) return NodeFilter.FILTER_REJECT;
+            return node.nodeValue && node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+          }
+        }
+      );
+
+      const nodes = [];
+      while (walker.nextNode()) {
+        nodes.push(walker.currentNode);
+      }
+      for (let i = 0; i < nodes.length; i++) {
+        translateNode(nodes[i]);
+      }
+    } finally {
+      if (wasObserving) startObserving();
     }
-    nodes.forEach(translateNode);
   }
 
   function updateSwitcherUI(lang) {
-    // Update direct PT / EN buttons
     document.querySelectorAll(".lang-btn").forEach((btn) => {
       const btnLang = btn.dataset.lang;
       const isActive = btnLang === lang;
@@ -1313,7 +1325,6 @@
       btn.setAttribute("aria-pressed", isActive ? "true" : "false");
     });
 
-    // Update toggles
     document.querySelectorAll(".language-toggle").forEach((toggle) => {
       const isEn = lang === "en";
       toggle.classList.toggle("is-en", isEn);
@@ -1332,6 +1343,7 @@
     translate: (str) => translateText(str, currentLanguage),
     setLanguage(lang) {
       if (!["pt", "en"].includes(lang)) return;
+      if (currentLanguage === lang) return;
       currentLanguage = lang;
       localStorage.setItem(STORAGE_KEY, lang);
       document.documentElement.lang = lang;
@@ -1342,9 +1354,8 @@
       updateSwitcherUI(lang);
       translateTree(document.body);
 
-      // Notify external scripts
+      // Notificação global instantânea
       window.dispatchEvent(new CustomEvent("drexier:languagechange", { detail: { language: lang } }));
-      document.dispatchEvent(new CustomEvent("drexier:languagechange", { detail: { language: lang } }));
     }
   };
 
@@ -1368,27 +1379,66 @@
     });
   }
 
-  let isTranslating = false;
-  const observer = new MutationObserver((mutations) => {
-    if (isTranslating || currentLanguage !== "en") return;
-    isTranslating = true;
+  let translateTimer = null;
+  const pendingNodes = new Set();
+
+  function processPendingNodes() {
+    translateTimer = null;
+    if (!pendingNodes.size || currentLanguage !== "en") {
+      pendingNodes.clear();
+      return;
+    }
+    const nodes = Array.from(pendingNodes);
+    pendingNodes.clear();
+
+    stopObserving();
     try {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === Node.TEXT_NODE) {
-            translateNode(node);
-          } else if (node.nodeType === Node.ELEMENT_NODE) {
-            translateTree(node);
-          }
-        });
-        if (mutation.type === "characterData") {
-          translateNode(mutation.target);
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        if (!node.isConnected) continue;
+        if (node.nodeType === Node.TEXT_NODE) {
+          translateNode(node);
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          translateTree(node);
         }
-      });
+      }
     } finally {
-      isTranslating = false;
+      startObserving();
+    }
+  }
+
+  const observer = new MutationObserver((mutations) => {
+    if (currentLanguage !== "en") return;
+    for (let i = 0; i < mutations.length; i++) {
+      const mutation = mutations[i];
+      if (mutation.type === "childList") {
+        for (let j = 0; j < mutation.addedNodes.length; j++) {
+          const node = mutation.addedNodes[j];
+          if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE) {
+            pendingNodes.add(node);
+          }
+        }
+      }
+    }
+    if (pendingNodes.size && !translateTimer) {
+      translateTimer = requestAnimationFrame(processPendingNodes);
     }
   });
+
+  function startObserving() {
+    if (isObserving || !document.body) return;
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    isObserving = true;
+  }
+
+  function stopObserving() {
+    if (!isObserving) return;
+    observer.disconnect();
+    isObserving = false;
+  }
 
   function init() {
     bindEvents();
@@ -1396,13 +1446,7 @@
     if (currentLanguage === "en") {
       translateTree(document.body);
     }
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ["placeholder", "title", "aria-label", "value"]
-    });
+    startObserving();
   }
 
   if (document.readyState === "loading") {

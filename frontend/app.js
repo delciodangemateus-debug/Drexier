@@ -112,20 +112,6 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#paywall-modal")?.addEventListener("click", (e) => {
     if (e.target === e.currentTarget) closePaywallModal();
   });
-  const paywallSubscribeHandler = async () => {
-    try {
-      closePaywallModal();
-      // Navega para a aba de faturação e inicia checkout
-      await navigate("settings");
-      $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
-      $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
-      await loadBillingStatus();
-      await startStripeCheckout();
-    } catch (e) {
-      showNotice(e.message, true);
-    }
-  };
-  $("#paywall-btn-subscribe")?.addEventListener("click", paywallSubscribeHandler);
 });
 
 // Delegação global para garantir funcionamento dos botões de subscrição
@@ -394,63 +380,94 @@ function authHeaders(json = true) {
   };
 }
 
-// Cache simples para evitar chamadas repetidas
+// Cache inteligente e deduplicação de requisições em voo
 const apiCache = new Map();
-const CACHE_TTL = 15000; // 15 segundos
+const inFlightRequests = new Map();
+const CACHE_TTL = 30000; // 30 segundos
 
 async function api(url, options = {}) {
   const method = (options.method || "GET").toUpperCase();
-  // Cache apenas para GET sem body customizado
+
   if (method === "GET") {
     const cached = apiCache.get(url);
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
       return cached.data;
     }
-  }
-  try {
-    const res = await fetch(url, {
-      ...options,
-      headers: { ...authHeaders(options.body !== undefined), ...(options.headers || {}) }
-    });
-    let data = {};
-    try { data = await res.json(); } catch {}
-    if (!res.ok) {
-      if (res.status === 401 && token) { expireAuthSession(); }
-      if (res.status === 402) {
-        hasActiveSub = false;
-        applyPaywallState(false);
-        openPaywallModal();
-        const msg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Subscrição do Plano Business (59€/mês) necessária.");
-        throw new Error(msg);
-      }
-      const errMsg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Ocorreu um erro.");
-      const error = new Error(errMsg);
-      error.status = res.status;
-      error.retryAfter = Number(data.detail?.retry_after || res.headers.get("Retry-After") || 0);
-      throw error;
+    if (inFlightRequests.has(url)) {
+      return inFlightRequests.get(url);
     }
-    if (method === "GET") {
-      apiCache.set(url, { data, ts: Date.now() });
-    } else {
-      // Invalidar cache em mutações
-      for (const key of apiCache.keys()) {
-        if (key.startsWith("/api/")) {
-          apiCache.delete(key);
+  }
+
+  const runRequest = async () => {
+    let controller = null;
+    let signal = options.signal;
+    if (!signal && typeof AbortController !== "undefined") {
+      controller = new AbortController();
+      signal = controller.signal;
+      setTimeout(() => controller.abort(), 12000);
+    }
+
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal,
+        headers: { ...authHeaders(options.body !== undefined), ...(options.headers || {}) }
+      });
+      let data = {};
+      try { data = await res.json(); } catch {}
+      if (!res.ok) {
+        if (res.status === 401 && token) { expireAuthSession(); }
+        if (res.status === 402) {
+          hasActiveSub = false;
+          applyPaywallState(false);
+          openPaywallModal();
+          const msg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Subscrição do Plano Business (59€/mês) necessária.");
+          throw new Error(msg);
+        }
+        const errMsg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Ocorreu um erro.");
+        const error = new Error(errMsg);
+        error.status = res.status;
+        error.retryAfter = Number(data.detail?.retry_after || res.headers.get("Retry-After") || 0);
+        throw error;
+      }
+
+      if (method === "GET") {
+        apiCache.set(url, { data, ts: Date.now() });
+      } else {
+        // Invalidação seletiva de rotas afetadas
+        const base = url.split("?")[0];
+        for (const key of apiCache.keys()) {
+          if (key === base || key.startsWith(base) || (base.startsWith("/api/business-info") && key.startsWith("/api/business-info")) || (base.startsWith("/api/contacts") && key.startsWith("/api/contacts"))) {
+            apiCache.delete(key);
+          }
         }
       }
+      return data;
+    } catch (e) {
+      if (method === "GET") {
+        const cached = apiCache.get(url);
+        if (cached) return cached.data;
+      }
+      if (e.name === "AbortError") {
+        throw new Error("O pedido demorou demasiado tempo a responder. Tente novamente.");
+      }
+      if (e instanceof TypeError) {
+        throw new Error("Não foi possível contactar o servidor. Verifique se a API está em execução e tente novamente.");
+      }
+      throw e;
+    } finally {
+      if (method === "GET") {
+        inFlightRequests.delete(url);
+      }
     }
-    return data;
-  } catch (e) {
-    // Em caso de erro de rede, tentar usar cache se existir
-    if (method === "GET") {
-      const cached = apiCache.get(url);
-      if (cached) return cached.data;
-    }
-    if (e instanceof TypeError) {
-      throw new Error("Não foi possível contactar o servidor. Verifique se a API está em execução e tente novamente.");
-    }
-    throw e;
+  };
+
+  if (method === "GET") {
+    const promise = runRequest();
+    inFlightRequests.set(url, promise);
+    return promise;
   }
+  return runRequest();
 }
 
 function showNotice(msg, error = false) {
@@ -940,7 +957,10 @@ const pageMeta = {
   settings: ["Configurações", "Personalize a sua conta e o agente"]
 };
 
+let currentNavSeq = 0;
+
 async function navigate(page) {
+  const seq = ++currentNavSeq;
   activePage = page;
   $$("[data-page]").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   $$(".page").forEach(s => s.classList.toggle("hidden", s.id !== `page-${page}`));
@@ -949,21 +969,26 @@ async function navigate(page) {
   $("#page-title").textContent = t(meta[0]);
   $("#page-subtitle").textContent = t(meta[1]);
   $(".sidebar").classList.remove("open");
-  // Executa carregamentos de forma não bloqueante onde possível
+
+  // Renderização instantânea imediata a partir de caches em memória
   try {
     if (page === "dashboard") {
+      if (dashboardCacheData) renderDashboardData(dashboardCacheData);
       Promise.allSettled([loadDashboard(), loadBillingStatus()]).catch(() => {});
     } else if (page === "messages") {
       if (!selectedContact) {
         $("#messages-chat-view")?.classList.add("hidden");
         $("#messages-inbox-view")?.classList.remove("hidden");
       }
+      if (contactsCache && contactsCache.length) renderContactsList(contactsCache);
       Promise.allSettled([loadContacts(), loadEmailStatus()]).catch(() => {});
     } else if (page === "reports") {
       loadReports().catch((e) => showNotice(e.message, true));
     } else if (page === "business") {
+      if (infoCache && infoCache.length) renderCardsFromCache();
       loadInfo().catch((e) => showNotice(e.message, true));
     } else if (page === "settings") {
+      fillSettings();
       Promise.allSettled([loadMe(), loadEmailStatus(), loadBillingStatus()]).catch(() => {});
     }
   } catch (e) {
@@ -1027,13 +1052,16 @@ function expandMetricCard(title, value, description) {
   $("#modal-done-btn").onclick = closeModal;
 }
 
-async function loadDashboard() {
-  const d = await api("/api/dashboard");
-  $("#metric-messages").textContent = d.messages_answered;
-  $("#metric-contacts").textContent = d.total_contacts;
-  $("#metric-today").textContent = d.today_contacts;
-  $("#metric-pending").textContent = d.pending_count;
-  $("#compare-yesterday").textContent = `Dia anterior: ${d.yesterday_contacts}`;
+let dashboardCacheData = null;
+
+function renderDashboardData(d) {
+  if (!d) return;
+  dashboardCacheData = d;
+  $("#metric-messages").textContent = d.messages_answered ?? 0;
+  $("#metric-contacts").textContent = d.total_contacts ?? 0;
+  $("#metric-today").textContent = d.today_contacts ?? 0;
+  $("#metric-pending").textContent = d.pending_count ?? 0;
+  $("#compare-yesterday").textContent = `Dia anterior: ${d.yesterday_contacts ?? 0}`;
   if (d.pending_count > 0 && activePage !== "messages") {
     $("#nav-messages-dot")?.classList.remove("hidden");
   }
@@ -1064,63 +1092,68 @@ async function loadDashboard() {
     }
   });
 
-  renderBars("#dashboard-chart", [{ date: "Ontem", count: d.yesterday_contacts }, { date: "Hoje", count: d.today_contacts }]);
+  renderBars("#dashboard-chart", [{ date: "Ontem", count: d.yesterday_contacts ?? 0 }, { date: "Hoje", count: d.today_contacts ?? 0 }]);
 
   const list = $("#pending-list");
-  list.innerHTML = "";
-  if (!d.pending_requests.length) {
-    list.className = "empty";
-    list.textContent = "Nenhum pedido pendente.";
-    return;
+  if (list) {
+    if (!d.pending_requests || !d.pending_requests.length) {
+      list.className = "empty";
+      list.textContent = "Nenhum pedido pendente.";
+    } else {
+      list.className = "pending-list";
+      const fragment = document.createDocumentFragment();
+      d.pending_requests.forEach(r => {
+        const card = document.createElement("div");
+        card.className = "pending-card clickable-card";
+        const info = document.createElement("div");
+        const h = document.createElement("strong");
+        h.textContent = `${r.name || r.contact_key} · ${r.request_type}`;
+        const p = document.createElement("p");
+        p.textContent = r.details || "Sem detalhes adicionais";
+        info.append(h, p);
+
+        const btnGroup = document.createElement("div");
+        btnGroup.style.display = "flex";
+        btnGroup.style.gap = "8px";
+
+        const btnManage = document.createElement("button");
+        btnManage.className = "btn primary small";
+        btnManage.textContent = "Validar com IA";
+        btnManage.onclick = e => {
+          e.stopPropagation();
+          openPendingConfirmationsModal();
+        };
+
+        const btnResolve = document.createElement("button");
+        btnResolve.className = "btn outline small";
+        btnResolve.textContent = "Tratado";
+        btnResolve.onclick = async e => {
+          e.stopPropagation();
+          try {
+            await api(`/api/conversions/${r.id}/resolve`, { method: "POST" });
+            showNotice("Pedido atualizado.");
+            loadDashboard();
+          } catch (err) {
+            showNotice(err.message, true);
+          }
+        };
+
+        btnGroup.append(btnManage, btnResolve);
+        card.onclick = () => openPendingConfirmationsModal();
+        card.append(info, btnGroup);
+        fragment.append(card);
+      });
+      list.innerHTML = "";
+      list.append(fragment);
+    }
   }
-  list.className = "pending-list";
-  d.pending_requests.forEach(r => {
-    const card = document.createElement("div");
-    card.className = "pending-card clickable-card";
-    const info = document.createElement("div");
-    const h = document.createElement("strong");
-    h.textContent = `${r.name || r.contact_key} · ${r.request_type}`;
-    const p = document.createElement("p");
-    p.textContent = r.details || "Sem detalhes adicionais";
-    info.append(h, p);
 
-    const btnGroup = document.createElement("div");
-    btnGroup.style.display = "flex";
-    btnGroup.style.gap = "8px";
+  updateDashboardKnowledgeBanner();
+}
 
-    const btnManage = document.createElement("button");
-    btnManage.className = "btn primary small";
-    btnManage.textContent = "Validar com IA";
-    btnManage.onclick = e => {
-      e.stopPropagation();
-      openPendingConfirmationsModal();
-    };
-
-    const btnResolve = document.createElement("button");
-    btnResolve.className = "btn outline small";
-    btnResolve.textContent = "Tratado";
-    btnResolve.onclick = async e => {
-      e.stopPropagation();
-      try {
-        await api(`/api/conversions/${r.id}/resolve`, { method: "POST" });
-        showNotice("Pedido atualizado.");
-        loadDashboard();
-      } catch (err) {
-        showNotice(err.message, true);
-      }
-    };
-
-    btnGroup.append(btnManage, btnResolve);
-
-    // Expandir modal de validação ao clicar no card
-    card.onclick = () => openPendingConfirmationsModal();
-
-    card.append(info, btnGroup);
-    list.append(card);
-  });
-
-  // Atualiza o indicador de preenchimento da base de conhecimento
-  await updateDashboardKnowledgeBanner();
+async function loadDashboard() {
+  const d = await api("/api/dashboard");
+  renderDashboardData(d);
 }
 
 $("#btn-open-pending-modal")?.addEventListener("click", () => openPendingConfirmationsModal());
@@ -1292,23 +1325,23 @@ function renderPendingModalList(requests) {
 /* Mensagens */
 let contactsCache = [];
 
-async function loadContacts(keepChatOpen = true) {
-  contactsCache = await api("/api/contacts");
+function renderContactsList(contacts) {
   const list = $("#contacts-list");
   if (!list) return;
 
-  list.innerHTML = "";
-  if (!contactsCache.length) {
+  if (!contacts || !contacts.length) {
+    list.innerHTML = "";
     list.className = "contact-card-grid empty";
     list.textContent = "Ainda não existem conversas. Quando um cliente enviar um e-mail, ele aparecerá aqui.";
     return;
   }
   list.className = "contact-card-grid";
-  if (contactsCache.length && activePage !== "messages" && contactsCache.some(c => c.last_message)) {
+  if (contacts.length && activePage !== "messages" && contacts.some(c => c.last_message)) {
     $("#nav-messages-dot")?.classList.remove("hidden");
   }
 
-  contactsCache.forEach(c => {
+  const fragment = document.createDocumentFragment();
+  contacts.forEach(c => {
     const card = document.createElement("article");
     card.className = "contact-card-item";
 
@@ -1342,18 +1375,28 @@ async function loadContacts(keepChatOpen = true) {
 
     const arrow = document.createElement("div");
     arrow.className = "contact-card-arrow";
-    arrow.textContent = "→";
+    arrow.textContent = "›";
 
     card.append(avatar, info, arrow);
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
     card.onclick = () => openConversation(c.id);
-    list.append(card);
+    card.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openConversation(c.id);
+      }
+    };
+    fragment.append(card);
   });
 
-  if (keepChatOpen && selectedContact && contactsCache.some(c => c.id === selectedContact)) {
-    if (!$("#messages-chat-view")?.classList.contains("hidden")) {
-      await renderConversationMessages(selectedContact, false);
-    }
-  }
+  list.innerHTML = "";
+  list.append(fragment);
+}
+
+async function loadContacts(keepChatOpen = true) {
+  contactsCache = await api("/api/contacts");
+  renderContactsList(contactsCache);
 }
 
 $("#refresh-contacts")?.addEventListener("click", () => loadContacts(true).catch(e => showNotice(e.message, true)));
@@ -2090,7 +2133,8 @@ async function openPresetCardDirectly(preset) {
           metadata: { items: [], generalNote: "" }
         })
       });
-      await loadInfo();
+      infoCache.push(existing);
+      renderCardsFromCache();
     } catch (err) {
       showNotice(err.message, true);
       return;
@@ -2116,16 +2160,29 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
     closeModal();
   };
 
-  // Botão Adicionar / Atualizar item
+  // Botão Adicionar / Atualizar item (Atualização Instantânea na UI)
   $("#builder-save-btn").onclick = async () => {
     if (!paywallCheck()) return;
-    const name = $("#builder-name").value.trim();
-    const price = $("#builder-price").value.trim();
-    const details = $("#builder-details").value.trim();
+    const nameEl = $("#builder-name");
+    const priceEl = $("#builder-price");
+    const detailsEl = $("#builder-details");
+    const notesEl = $("#card-general-notes");
+    const titleEl = $("#card-title-field");
+
+    const name = nameEl?.value.trim() || "";
+    const price = priceEl?.value.trim() || "";
+    const details = detailsEl?.value.trim() || "";
 
     if (!name) {
       alert("Por favor, preencha o nome do item.");
+      nameEl?.focus();
       return;
+    }
+
+    const saveBtn = $("#builder-save-btn");
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "A guardar...";
     }
 
     const meta = it.metadata || {};
@@ -2138,11 +2195,16 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
     }
 
     meta.items = items;
-    meta.generalNote = $("#card-general-notes").value.trim();
+    if (notesEl) meta.generalNote = notesEl.value.trim();
     it.metadata = meta;
-    it.title = $("#card-title-field").value.trim() || it.title;
-    it.content = compileItemsToContent(items, meta.generalNote);
+    if (titleEl && titleEl.value.trim()) it.title = titleEl.value.trim();
+    it.content = compileItemsToContent(items, meta.generalNote || "");
 
+    // 1. Atualização Instantânea no Modal e nos Cards em 0ms
+    openExpandBusinessCard(cardId, null);
+    renderCardsFromCache();
+
+    // 2. Persistência assíncrona em segundo plano sem travar a interface
     try {
       await api(`/api/business-info/${cardId}`, {
         method: "PUT",
@@ -2153,8 +2215,6 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
           metadata: it.metadata
         })
       });
-      await loadInfo();
-      openExpandBusinessCard(cardId, null);
     } catch (err) {
       showNotice(err.message, true);
     }
@@ -2181,7 +2241,11 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
       items.splice(idx, 1);
       meta.items = items;
       it.metadata = meta;
-      it.content = compileItemsToContent(items, $("#card-general-notes").value.trim());
+      it.content = compileItemsToContent(items, $("#card-general-notes")?.value.trim() || meta.generalNote || "");
+
+      // Atualização imediata em 0ms
+      openExpandBusinessCard(cardId, null);
+      renderCardsFromCache();
 
       try {
         await api(`/api/business-info/${cardId}`, {
@@ -2193,8 +2257,6 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
             metadata: it.metadata
           })
         });
-        await loadInfo();
-        openExpandBusinessCard(cardId, null);
       } catch (err) {
         showNotice(err.message, true);
       }
@@ -2207,9 +2269,11 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
     if (!confirm(`Tem a certeza de que deseja eliminar o card "${it.title}" e todos os seus itens?`)) return;
     try {
       await api(`/api/business-info/${cardId}`, { method: "DELETE" });
+      const idx = infoCache.findIndex(x => x.id === cardId);
+      if (idx !== -1) infoCache.splice(idx, 1);
       showNotice("Card eliminado.");
       closeModal();
-      await loadInfo();
+      renderCardsFromCache();
     } catch (err) {
       showNotice(err.message, true);
     }
@@ -2223,10 +2287,18 @@ async function saveCardGeneralData(cardId) {
   const newTitle = $("#card-title-field")?.value.trim() || it.title;
   const newNotes = $("#card-general-notes")?.value.trim() || "";
   const meta = it.metadata || {};
+  const oldNotes = meta.generalNote || "";
+  const oldTitle = it.title || "";
+
+  if (newTitle === oldTitle && newNotes === oldNotes) {
+    return; // Nada mudou, evita chamada de rede inútil!
+  }
+
   meta.generalNote = newNotes;
   it.title = newTitle;
   it.metadata = meta;
   it.content = compileItemsToContent(meta.items || [], newNotes);
+  renderCardsFromCache();
 
   try {
     await api(`/api/business-info/${cardId}`, {
@@ -2238,209 +2310,206 @@ async function saveCardGeneralData(cardId) {
         metadata: it.metadata
       })
     });
-    await loadInfo();
   } catch (err) {
     showNotice(err.message, true);
   }
 }
 
-async function loadInfo() {
-  infoCache = await api("/api/business-info");
-
-  // Atualiza o indicador de preenchimento e os medidores de conteúdo
+function renderCardsFromCache() {
   updateBusinessPageKnowledgeUI();
   updateDashboardKnowledgeBanner();
 
-  // Renderizar Grid de Cards (Sub-aba 1)
   const list = $("#info-list");
-  if (list) {
-    list.innerHTML = "";
-    list.className = "card-grid";
+  if (!list) return;
 
-    // 1. Renderiza os 12 cards pré-elaborados
-    PRESET_BUSINESS_CARDS.forEach(preset => {
-      const savedCard = infoCache.find(x => x.kind === preset.kind);
-      const meta = savedCard?.metadata || {};
-      const items = Array.isArray(meta.items) ? meta.items : [];
-      const hasContent = items.length > 0 || (meta.generalNote && meta.generalNote.trim()) || (savedCard?.content && !savedCard.content.startsWith("Lista de") && savedCard.content.trim().length > 0);
+  const fragment = document.createDocumentFragment();
 
-      const card = document.createElement("article");
-      card.className = hasContent ? "info-card is-preset-configured clickable-card" : "info-card is-preset-empty clickable-card";
-      card.tabIndex = 0;
-      card.setAttribute("role", "button");
-      card.setAttribute("aria-label", `${hasContent ? "Gerir" : "Preencher"} ${savedCard ? savedCard.title : preset.title}`);
+  // 1. Renderiza os 12 cards pré-elaborados
+  PRESET_BUSINESS_CARDS.forEach(preset => {
+    const savedCard = infoCache.find(x => x.kind === preset.kind);
+    const meta = savedCard?.metadata || {};
+    const items = Array.isArray(meta.items) ? meta.items : [];
+    const hasContent = items.length > 0 || (meta.generalNote && meta.generalNote.trim()) || (savedCard?.content && !savedCard.content.startsWith("Lista de") && savedCard.content.trim().length > 0);
 
-      // Faixa no topo
-      const stripe = document.createElement("div");
-      stripe.className = "info-card-stripe";
+    const card = document.createElement("article");
+    card.className = hasContent ? "info-card is-preset-configured clickable-card" : "info-card is-preset-empty clickable-card";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `${hasContent ? "Gerir" : "Preencher"} ${savedCard ? savedCard.title : preset.title}`);
 
-      // Corpo
-      const body = document.createElement("div");
-      body.className = "info-card-body";
+    const stripe = document.createElement("div");
+    stripe.className = "info-card-stripe";
 
-      // Top row
-      const top = document.createElement("div");
-      top.className = "info-card-top";
+    const body = document.createElement("div");
+    body.className = "info-card-body";
 
-      const kindBadge = document.createElement("div");
-      kindBadge.className = "card-kind-badge";
-      const icon = document.createElement("span");
-      icon.className = "card-kind-icon";
-      icon.innerHTML = kindIcons[preset.kind] || kindIcons.personalizado;
-      kindBadge.append(icon, document.createTextNode(preset.category));
+    const top = document.createElement("div");
+    top.className = "info-card-top";
 
-      const chevron = document.createElement("span");
-      chevron.className = "card-chevron";
-      chevron.textContent = "›";
+    const kindBadge = document.createElement("div");
+    kindBadge.className = "card-kind-badge";
+    const icon = document.createElement("span");
+    icon.className = "card-kind-icon";
+    icon.innerHTML = kindIcons[preset.kind] || kindIcons.personalizado;
+    kindBadge.append(icon, document.createTextNode(preset.category));
 
-      top.append(kindBadge, chevron);
+    const chevron = document.createElement("span");
+    chevron.className = "card-chevron";
+    chevron.textContent = "›";
 
-      // Título
-      const h = document.createElement("h3");
-      h.className = "info-card-title";
-      h.textContent = savedCard ? savedCard.title : preset.title;
+    top.append(kindBadge, chevron);
 
-      // Preview / Status
-      const preview = document.createElement("div");
-      preview.className = "info-card-preview";
+    const h = document.createElement("h3");
+    h.className = "info-card-title";
+    h.textContent = savedCard ? savedCard.title : preset.title;
 
-      if (hasContent) {
-        const count = document.createElement("div");
-        count.className = "info-card-count";
-        count.textContent = `${items.length} ${items.length === 1 ? "item cadastrado" : "itens cadastrados"}`;
+    const preview = document.createElement("div");
+    preview.className = "info-card-preview";
 
-        const chips = document.createElement("div");
-        chips.className = "preview-chips";
-        items.slice(0, 3).forEach(item => {
-          const chip = document.createElement("span");
-          chip.className = "preview-chip";
-          const name = document.createElement("span");
-          name.className = "preview-chip-name";
-          name.textContent = item.name || "Item";
-          chip.append(name);
-          if (item.price) {
-            const price = document.createElement("span");
-            price.className = "preview-chip-price";
-            price.textContent = item.price;
-            chip.append(price);
-          }
-          chips.append(chip);
-        });
-        if (items.length > 3) {
-          const more = document.createElement("span");
-          more.className = "preview-chip-more";
-          more.textContent = `+${items.length - 3} mais`;
-          chips.append(more);
-        }
-        preview.append(count, chips);
-      } else {
-        const tag = document.createElement("span");
-        tag.className = "preset-empty-tag";
-        tag.textContent = "Ainda não preenchido";
-
-        const desc = document.createElement("p");
-        desc.className = "preset-guide-text";
-        desc.textContent = preset.description;
-
-        preview.append(tag, desc);
-      }
-
-      body.append(top, h, preview);
-      card.onkeydown = (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          openPresetCardDirectly(preset);
-        }
-      };
-
-      // Rodapé
-      const footer = document.createElement("div");
-      footer.className = "info-card-footer";
-      const cta = document.createElement("span");
-      cta.className = hasContent ? "info-card-cta" : "info-card-cta preset-cta-empty";
-      cta.textContent = hasContent ? "Gerir itens" : "+ Preencher card";
-      const arrow = document.createElement("span");
-      arrow.className = "info-card-arrow";
-      arrow.textContent = "→";
-      footer.append(cta, arrow);
-
-      card.append(stripe, body, footer);
-      card.onclick = () => openPresetCardDirectly(preset);
-      list.append(card);
-    });
-
-    // 2. Renderiza cards personalizados adicionais criados pelo utilizador
-    const customCards = infoCache.filter(x => 
-      x.kind !== "treinamento" && !PRESET_BUSINESS_CARDS.some(p => p.kind === x.kind)
-    );
-    customCards.forEach(it => {
-      const meta = it.metadata || {};
-      const items = Array.isArray(meta.items) ? meta.items : [];
-
-      const card = document.createElement("article");
-      card.className = "info-card clickable-card";
-      card.tabIndex = 0;
-      card.setAttribute("role", "button");
-      card.setAttribute("aria-label", `Gerir ${it.title}`);
-
-      const stripe = document.createElement("div");
-      stripe.className = "info-card-stripe";
-
-      const body = document.createElement("div");
-      body.className = "info-card-body";
-
-      const top = document.createElement("div");
-      top.className = "info-card-top";
-
-      const kindBadge = document.createElement("div");
-      kindBadge.className = "card-kind-badge";
-      const icon = document.createElement("span");
-      icon.className = "card-kind-icon";
-      icon.innerHTML = kindIcons[it.kind] || kindIcons[it.icon] || kindIcons.personalizado;
-      kindBadge.append(icon, document.createTextNode(kindNames[it.kind] || it.kind));
-
-      const chevron = document.createElement("span");
-      chevron.className = "card-chevron";
-      chevron.textContent = "›";
-      top.append(kindBadge, chevron);
-
-      const h = document.createElement("h3");
-      h.className = "info-card-title";
-      h.textContent = it.title;
-
-      const preview = document.createElement("div");
-      preview.className = "info-card-preview";
+    if (hasContent) {
       const count = document.createElement("div");
       count.className = "info-card-count";
       count.textContent = `${items.length} ${items.length === 1 ? "item cadastrado" : "itens cadastrados"}`;
-      preview.append(count);
 
-      body.append(top, h, preview);
-      card.onkeydown = (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          openExpandBusinessCard(it.id);
+      const chips = document.createElement("div");
+      chips.className = "preview-chips";
+      items.slice(0, 3).forEach(item => {
+        const chip = document.createElement("span");
+        chip.className = "preview-chip";
+        const name = document.createElement("span");
+        name.className = "preview-chip-name";
+        name.textContent = item.name || "Item";
+        chip.append(name);
+        if (item.price) {
+          const price = document.createElement("span");
+          price.className = "preview-chip-price";
+          price.textContent = item.price;
+          chip.append(price);
         }
-      };
+        chips.append(chip);
+      });
+      if (items.length > 3) {
+        const more = document.createElement("span");
+        more.className = "preview-chip-more";
+        more.textContent = `+${items.length - 3} mais`;
+        chips.append(more);
+      }
+      preview.append(count, chips);
+    } else {
+      const tag = document.createElement("span");
+      tag.className = "preset-empty-tag";
+      tag.textContent = "Ainda não preenchido";
 
-      const footer = document.createElement("div");
-      footer.className = "info-card-footer";
-      const cta = document.createElement("span");
-      cta.className = "info-card-cta";
-      cta.textContent = "Gerir card";
-      const arrow = document.createElement("span");
-      arrow.className = "info-card-arrow";
-      arrow.textContent = "→";
-      footer.append(cta, arrow);
+      const desc = document.createElement("p");
+      desc.className = "preset-guide-text";
+      desc.textContent = preset.description;
 
-      card.append(stripe, body, footer);
-      card.onclick = () => openExpandBusinessCard(it.id);
-      list.append(card);
-    });
-  }
+      preview.append(tag, desc);
+    }
+
+    body.append(top, h, preview);
+    card.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openPresetCardDirectly(preset);
+      }
+    };
+
+    const footer = document.createElement("div");
+    footer.className = "info-card-footer";
+    const cta = document.createElement("span");
+    cta.className = hasContent ? "info-card-cta" : "info-card-cta preset-cta-empty";
+    cta.textContent = hasContent ? "Gerir itens" : "+ Preencher card";
+    const arrow = document.createElement("span");
+    arrow.className = "info-card-arrow";
+    arrow.textContent = "→";
+    footer.append(cta, arrow);
+
+    card.append(stripe, body, footer);
+    card.onclick = () => openPresetCardDirectly(preset);
+    fragment.append(card);
+  });
+
+  // 2. Renderiza cards personalizados adicionais criados pelo utilizador
+  const customCards = infoCache.filter(x =>
+    x.kind !== "treinamento" && !PRESET_BUSINESS_CARDS.some(p => p.kind === x.kind)
+  );
+  customCards.forEach(it => {
+    const meta = it.metadata || {};
+    const items = Array.isArray(meta.items) ? meta.items : [];
+
+    const card = document.createElement("article");
+    card.className = "info-card clickable-card";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `Gerir ${it.title}`);
+
+    const stripe = document.createElement("div");
+    stripe.className = "info-card-stripe";
+
+    const body = document.createElement("div");
+    body.className = "info-card-body";
+
+    const top = document.createElement("div");
+    top.className = "info-card-top";
+
+    const kindBadge = document.createElement("div");
+    kindBadge.className = "card-kind-badge";
+    const icon = document.createElement("span");
+    icon.className = "card-kind-icon";
+    icon.innerHTML = kindIcons[it.kind] || kindIcons[it.icon] || kindIcons.personalizado;
+    kindBadge.append(icon, document.createTextNode(kindNames[it.kind] || it.kind));
+
+    const chevron = document.createElement("span");
+    chevron.className = "card-chevron";
+    chevron.textContent = "›";
+    top.append(kindBadge, chevron);
+
+    const h = document.createElement("h3");
+    h.className = "info-card-title";
+    h.textContent = it.title;
+
+    const preview = document.createElement("div");
+    preview.className = "info-card-preview";
+    const count = document.createElement("div");
+    count.className = "info-card-count";
+    count.textContent = `${items.length} ${items.length === 1 ? "item cadastrado" : "itens cadastrados"}`;
+    preview.append(count);
+
+    body.append(top, h, preview);
+    card.onkeydown = (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openExpandBusinessCard(it.id);
+      }
+    };
+
+    const footer = document.createElement("div");
+    footer.className = "info-card-footer";
+    const cta = document.createElement("span");
+    cta.className = "info-card-cta";
+    cta.textContent = "Gerir card";
+    const arrow = document.createElement("span");
+    arrow.className = "info-card-arrow";
+    arrow.textContent = "→";
+    footer.append(cta, arrow);
+
+    card.append(stripe, body, footer);
+    card.onclick = () => openExpandBusinessCard(it.id);
+    fragment.append(card);
+  });
+
+  list.innerHTML = "";
+  list.className = "card-grid";
+  list.append(fragment);
 
   // Renderizar Sub-aba de Treinamento
   renderTrainingTopics();
+}
+
+async function loadInfo() {
+  infoCache = await api("/api/business-info");
+  renderCardsFromCache();
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -3471,31 +3540,52 @@ if (agentGlobalBtn2) {
   };
 }
 
-// Monitorização e atualização contínua em segundo plano (tempo real)
-let livePollTimer = null;
+// Monitorização resiliente em segundo plano (tempo real inteligente)
+let livePollTimeoutId = null;
+let isPollingActive = false;
 
-function startLivePolling() {
-  if (livePollTimer) clearInterval(livePollTimer);
-  livePollTimer = setInterval(async () => {
-    if (!token) return;
+function scheduleNextPoll(delayMs = 15000) {
+  if (livePollTimeoutId) clearTimeout(livePollTimeoutId);
+  livePollTimeoutId = setTimeout(async () => {
+    if (!token || document.hidden) {
+      scheduleNextPoll(10000);
+      return;
+    }
+    if (isPollingActive) {
+      scheduleNextPoll(5000);
+      return;
+    }
+    isPollingActive = true;
     try {
       if (activePage === "messages") {
         await loadContacts();
       } else if (activePage === "dashboard") {
         await loadDashboard();
       }
-    } catch (e) {
-      // Ignora falhas temporárias na atualização automática
+    } catch (_) {
+    } finally {
+      isPollingActive = false;
+      scheduleNextPoll(15000);
     }
-  }, 15000);
+  }, delayMs);
+}
+
+function startLivePolling() {
+  scheduleNextPoll(15000);
 }
 
 function stopLivePolling() {
-  if (livePollTimer) {
-    clearInterval(livePollTimer);
-    livePollTimer = null;
+  if (livePollTimeoutId) {
+    clearTimeout(livePollTimeoutId);
+    livePollTimeoutId = null;
   }
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && token) {
+    scheduleNextPoll(1000);
+  }
+});
 
 if (token) {
   boot();
@@ -3560,20 +3650,23 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-// Listener para atualização dinâmica quando o idioma é alterado pelo utilizador
+// Listener para atualização dinâmica ultra-responsiva quando o idioma é alterado pelo utilizador
 window.addEventListener("drexier:languagechange", () => {
+  if (!token) return; // Não faz nada com áreas internas se não autenticado
+
   if (typeof activePage !== "undefined" && activePage && pageMeta[activePage]) {
     const meta = pageMeta[activePage];
     const t = window.t || ((x) => x);
     $("#page-title").textContent = t(meta[0]);
     $("#page-subtitle").textContent = t(meta[1]);
   }
-  if (typeof activePage !== "undefined" && activePage === "dashboard") {
-    loadDashboard().catch(() => {});
-    loadBillingStatus().catch(() => {});
-  } else if (typeof activePage !== "undefined" && activePage === "business") {
-    loadInfo().catch(() => {});
-  } else if (typeof activePage !== "undefined" && activePage === "reports") {
-    loadReports().catch(() => {});
+
+  // Atualização instantânea em memória (0ms de latência)
+  if (activePage === "dashboard" && dashboardCacheData) {
+    renderDashboardData(dashboardCacheData);
+  } else if (activePage === "business" && infoCache.length) {
+    renderCardsFromCache();
+  } else if (activePage === "settings") {
+    fillSettings();
   }
 });
