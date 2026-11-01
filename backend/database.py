@@ -5,6 +5,7 @@ Supabase (PostgreSQL) como banco de dados principal e único na nuvem.
 
 import os
 import sqlite3
+import sys
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
@@ -161,7 +162,25 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 
 def is_test_environment() -> bool:
     """Detecta se a execução atual é um teste unitário temporário isolado."""
+    if "pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST"):
+        return True
     return bool(DB_PATH and ("tmp" in DB_PATH.lower() or "pytest" in DB_PATH.lower() or "test_" in DB_PATH.lower()))
+
+
+def _local_sqlite_path() -> str:
+    if DB_PATH:
+        return DB_PATH
+    if is_test_environment():
+        return str(ROOT / "data" / "pytest_drexier.db")
+    return str(ROOT / "data" / "drexier.db")
+
+
+def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
+    has_users = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    if not has_users:
+        conn.executescript(SQL_SCHEMA_FOR_TESTS)
 
 
 def connect():
@@ -171,9 +190,12 @@ def connect():
     Ambientes de testes unitários isolados utilizam banco temporário em memória/tmp.
     """
     if is_test_environment():
-        conn = sqlite3.connect(DB_PATH)
+        local_path = _local_sqlite_path()
+        Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(local_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        _ensure_sqlite_schema(conn)
         return conn
 
     # Supabase como banco de dados principal e único
@@ -181,11 +203,12 @@ def connect():
         return SupabaseConnection()
 
     # Fallback exclusivo se credenciais não existirem
-    local_path = DB_PATH or str(ROOT / "data" / "drexier.db")
+    local_path = _local_sqlite_path()
     Path(local_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(local_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    _ensure_sqlite_schema(conn)
     return conn
 
 
@@ -227,6 +250,8 @@ def init_db():
         return
 
     # Fallback para ambiente local sem Supabase
-    if DB_PATH:
-        with connect() as c:
-            c.executescript(SQL_SCHEMA_FOR_TESTS)
+    local_path = _local_sqlite_path()
+    Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(local_path) as c:
+        c.execute("PRAGMA foreign_keys = ON")
+        _ensure_sqlite_schema(c)

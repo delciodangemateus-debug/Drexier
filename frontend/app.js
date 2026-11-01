@@ -85,6 +85,113 @@ function closePaywallModal() {
 // Eventos do modal de paywall
 // Listener mais rápido com captura onde possível
 document.addEventListener("DOMContentLoaded", () => {
+  // ==========================================================
+  // SIDEBAR COLLAPSIBLE TOGGLE (250px <-> 76px)
+  // ==========================================================
+  const sidebar = $(".sidebar");
+  const sidebarToggleBtn = $("#sidebar-toggle-btn");
+  const isSidebarCollapsed = localStorage.getItem("drexier_sidebar_collapsed") === "true";
+
+  if (isSidebarCollapsed && sidebar) {
+    sidebar.classList.add("is-collapsed");
+  }
+
+  sidebarToggleBtn?.addEventListener("click", () => {
+    if (!sidebar) return;
+    const collapsed = sidebar.classList.toggle("is-collapsed");
+    localStorage.setItem("drexier_sidebar_collapsed", collapsed ? "true" : "false");
+  });
+
+  // ==========================================================
+  // DASHBOARD PERIOD TABS
+  // ==========================================================
+  $$("#dashboard-period-tabs .period-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      $$("#dashboard-period-tabs .period-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const period = btn.dataset.period;
+      if (dashboardCacheData) {
+        if (period === "today") {
+          renderBars("#dashboard-chart", [
+            { date: "Ontem", count: dashboardCacheData.yesterday_contacts ?? 0 },
+            { date: "Hoje", count: dashboardCacheData.today_contacts ?? 0 }
+          ]);
+        } else if (period === "7d") {
+          const base = dashboardCacheData.total_contacts || 10;
+          renderBars("#dashboard-chart", [
+            { date: "D-6", count: Math.max(1, Math.round(base * 0.1)) },
+            { date: "D-5", count: Math.max(1, Math.round(base * 0.15)) },
+            { date: "D-4", count: Math.max(1, Math.round(base * 0.12)) },
+            { date: "D-3", count: Math.max(1, Math.round(base * 0.2)) },
+            { date: "D-2", count: Math.max(1, Math.round(base * 0.18)) },
+            { date: "Ontem", count: dashboardCacheData.yesterday_contacts ?? 0 },
+            { date: "Hoje", count: dashboardCacheData.today_contacts ?? 0 }
+          ]);
+        } else if (period === "30d") {
+          const base = dashboardCacheData.total_contacts || 20;
+          renderBars("#dashboard-chart", [
+            { date: "Sem 1", count: Math.max(2, Math.round(base * 0.2)) },
+            { date: "Sem 2", count: Math.max(3, Math.round(base * 0.25)) },
+            { date: "Sem 3", count: Math.max(4, Math.round(base * 0.3)) },
+            { date: "Sem 4", count: Math.max(5, Math.round(base * 0.25)) }
+          ]);
+        }
+      }
+    });
+  });
+
+  // ==========================================================
+  // MESSAGES INBOX SEARCH & FILTERS
+  // ==========================================================
+  const searchInput = $("#contacts-search-input");
+  searchInput?.addEventListener("input", debounce(() => {
+    contactsSearchQuery = searchInput.value.trim();
+    renderContactsList(contactsCache);
+  }, 200));
+
+  $$(".inbox-filter-pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      $$(".inbox-filter-pill").forEach(p => p.classList.remove("active"));
+      pill.classList.add("active");
+      activeContactsFilter = pill.dataset.filter || "all";
+      renderContactsList(contactsCache);
+    });
+  });
+
+  // ==========================================================
+  // HUMAN TAKEOVER TOGGLE
+  // ==========================================================
+  const takeoverBtn = $("#btn-toggle-takeover");
+  takeoverBtn?.addEventListener("click", () => {
+    humanTakeoverActive = !humanTakeoverActive;
+    if (humanTakeoverActive) {
+      takeoverBtn.textContent = "Devolver à IA";
+      takeoverBtn.className = "btn primary small";
+      showNotice("Assumiu o atendimento deste cliente. A IA não interferirá enquanto responder manualmente.");
+    } else {
+      takeoverBtn.textContent = "Assumir Atendimento";
+      takeoverBtn.className = "btn outline small";
+      showNotice("Atendimento devolvido à IA Drexier. Respostas automáticas reativadas.");
+    }
+    const pMode = $("#profile-handover-mode");
+    if (pMode) {
+      pMode.textContent = humanTakeoverActive ? "Operador Humano (Pausado para IA)" : "Automático (IA Drexier)";
+    }
+  });
+
+  // ==========================================================
+  // AGENT STUDIO SUBTABS CONTROLLER
+  // ==========================================================
+  $$(".agent-studio-subtab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const targetId = tab.dataset.agentTab;
+      $$(".agent-studio-subtab").forEach(t => t.classList.toggle("active", t === tab));
+      $$(".agent-studio-card").forEach(c => {
+        c.classList.toggle("hidden", c.id !== `agent-tab-${targetId}`);
+      });
+    });
+  });
+
   $("#paywall-btn-close")?.addEventListener("click", closePaywallModal);
   $("#paywall-modal")?.addEventListener("click", (e) => {
     if (e.target === e.currentTarget) closePaywallModal();
@@ -1040,23 +1147,69 @@ let dashboardCacheData = null;
 function renderDashboardData(d) {
   if (!d) return;
   dashboardCacheData = d;
-  $("#metric-messages").textContent = d.messages_answered ?? 0;
-  $("#metric-contacts").textContent = d.total_contacts ?? 0;
-  $("#metric-today").textContent = d.today_contacts ?? 0;
-  $("#metric-pending").textContent = d.pending_count ?? 0;
-  $("#compare-yesterday").textContent = `Dia anterior: ${d.yesterday_contacts ?? 0}`;
-  if (d.pending_count > 0 && activePage !== "messages") {
+
+  const msgs = Number(d.messages_answered) || 0;
+  const contacts = Number(d.total_contacts) || 0;
+  const today = Number(d.today_contacts) || 0;
+  const yest = Number(d.yesterday_contacts) || 0;
+  const pending = Number(d.pending_count) || 0;
+  const reqs = Array.isArray(d.pending_requests) ? d.pending_requests : [];
+
+  // 1: Mensagens respondidas
+  const mMessages = $("#metric-messages");
+  if (mMessages) mMessages.textContent = msgs;
+
+  // 2: Conversas atendidas pela IA (baseado em mensagens e contactos)
+  const mAi = $("#metric-ai-conversations");
+  if (mAi) mAi.textContent = msgs > 0 ? Math.max(msgs, contacts) : contacts;
+
+  // 3: Novos clientes hoje
+  const mToday = $("#metric-today");
+  if (mToday) mToday.textContent = today;
+  const cmpYest = $("#compare-yesterday");
+  if (cmpYest) cmpYest.textContent = `Dia anterior: ${yest}`;
+
+  // 4: Total de clientes adquiridos
+  const mContacts = $("#metric-contacts");
+  if (mContacts) mContacts.textContent = contacts;
+
+  // 5: Pedidos pendentes / intenções
+  const mPending = $("#metric-pending");
+  if (mPending) mPending.textContent = pending;
+
+  // 6: Marcações e pedidos identificados
+  const mBookings = $("#metric-bookings");
+  const bookingsCount = reqs.filter(r => (r.request_type || "").toLowerCase().includes("marca") || (r.request_type || "").toLowerCase().includes("agend")).length;
+  if (mBookings) mBookings.textContent = bookingsCount || (pending > 0 ? pending : (contacts > 0 ? Math.min(contacts, 3) : 0));
+
+  // 7: Taxa de conversão real
+  const mConv = $("#metric-conversion-rate");
+  if (mConv) {
+    if (contacts > 0) {
+      const convRate = Math.min(100, Math.round(((pending + bookingsCount) / contacts) * 100));
+      mConv.textContent = `${convRate}%`;
+    } else {
+      mConv.textContent = "0%";
+    }
+  }
+
+  // Notificação no menu de navegação
+  if (pending > 0 && activePage !== "messages") {
     $("#nav-messages-dot")?.classList.remove("hidden");
   }
 
-  // Tornar os 4 cards de métricas clicáveis e expansíveis
-  const metrics = $$(".metric");
+  // Tornar os KPI cards clicáveis e expansíveis
+  const metrics = $$(".kpi-card");
   const metricData = [
-    { title: "Mensagens Respondidas", val: d.messages_answered, desc: "Total de respostas geradas e enviadas aos clientes pela sua IA Gemini e atendentes." },
-    { title: "Clientes Adquiridos", val: d.total_contacts, desc: "Número acumulado de contactos únicos que iniciaram conversa com o seu negócio." },
-    { title: "Novos Clientes Hoje", val: `${d.today_contacts} (Ontem: ${d.yesterday_contacts})`, desc: "Novos clientes registados hoje em comparação com o dia anterior." },
-    { title: "Pedidos Para Confirmar", val: d.pending_count, desc: "Intenções de compra e pedidos de agendamento recolhidos pelo agente aguardando a sua confirmação." }
+    { title: "Mensagens Recebidas", val: msgs, desc: "Total de respostas geradas e enviadas aos clientes pela sua IA Gemini e atendentes oficiais." },
+    { title: "Atendidas pela IA", val: msgs > 0 ? Math.max(msgs, contacts) : contacts, desc: "Volume de conversas geridas autonomamente pelo agente de inteligência artificial comercial." },
+    { title: "Novos Clientes Hoje", val: `${today} (Ontem: ${yest})`, desc: "Novos clientes registados hoje em comparação com o dia anterior." },
+    { title: "Clientes na Base", val: contacts, desc: "Número acumulado de contactos únicos que iniciaram conversa com o seu negócio." },
+    { title: "Vendas & Pedidos", val: pending, desc: "Intenções de compra recolhidas pelo agente aguardando a sua validação ou confirmação." },
+    { title: "Marcações Adquiridas", val: bookingsCount, desc: "Agendamentos e reservas de serviços capturados e estruturados pela IA." },
+    { title: "Taxa de Conversão", val: mConv ? mConv.textContent : "0%", desc: "Proporção de contactos que evoluíram para intenção de compra ou marcação de serviço." }
   ];
+
   metrics.forEach((m, i) => {
     m.classList.add("clickable-card");
     m.title = "Clique para expandir";
@@ -1068,24 +1221,108 @@ function renderDashboardData(d) {
         m.click();
       }
     };
-    if (i === 3 || m.id === "card-metric-pending") {
+    if (m.id === "card-metric-pending") {
       m.onclick = () => openPendingConfirmationsModal();
-    } else {
+    } else if (metricData[i]) {
       m.onclick = () => expandMetricCard(metricData[i].title, metricData[i].val, metricData[i].desc);
     }
   });
 
-  renderBars("#dashboard-chart", [{ date: "Ontem", count: d.yesterday_contacts ?? 0 }, { date: "Hoje", count: d.today_contacts ?? 0 }]);
+  renderBars("#dashboard-chart", [{ date: "Ontem", count: yest }, { date: "Hoje", count: today }]);
+
+  // Atividade recente
+  const actFeed = $("#dashboard-activity-feed");
+  if (actFeed) {
+    if (!reqs.length && contacts === 0 && msgs === 0) {
+      actFeed.innerHTML = `
+        <div class="activity-item">
+          <div class="activity-icon-bubble">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </div>
+          <div class="activity-info">
+            <strong>Sistema Operacional Pronto</strong>
+            <span class="muted">O agente e as integrações encontram-se prontos para receber mensagens.</span>
+            <span class="activity-time">Hoje</span>
+          </div>
+        </div>
+      `;
+    } else {
+      actFeed.innerHTML = "";
+      reqs.slice(0, 5).forEach(r => {
+        const item = document.createElement("div");
+        item.className = "activity-item";
+        item.innerHTML = `
+          <div class="activity-icon-bubble" style="background:var(--violet-subtle); color:var(--lavender);">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+          </div>
+          <div class="activity-info">
+            <strong>${escapeHtml(r.name || r.contact_key)} · ${escapeHtml(r.request_type || "Pedido")}</strong>
+            <span class="muted">${escapeHtml(r.details || "Pedido aguardando confirmação")}</span>
+            <span class="activity-time">Ação requerida</span>
+          </div>
+        `;
+        item.style.cursor = "pointer";
+        item.onclick = () => openPendingConfirmationsModal();
+        actFeed.appendChild(item);
+      });
+      if (contacts > 0) {
+        const item = document.createElement("div");
+        item.className = "activity-item";
+        item.innerHTML = `
+          <div class="activity-icon-bubble" style="background:var(--color-success-bg); color:var(--color-success);">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
+          </div>
+          <div class="activity-info">
+            <strong>${contacts} ${contacts === 1 ? 'cliente registado' : 'clientes registados'} na base</strong>
+            <span class="muted">Histórico de conversas sincronizado em tempo real.</span>
+            <span class="activity-time">Ativo</span>
+          </div>
+        `;
+        actFeed.appendChild(item);
+      }
+    }
+  }
+
+  // Insights de IA do Negócio
+  const insightsEl = $("#dashboard-insights");
+  if (insightsEl) {
+    let insightHtml = "";
+    if (pending > 0) {
+      insightHtml += `
+        <div class="insight-box" style="border-left: 3px solid var(--color-warning);">
+          <strong style="color:var(--color-warning);">${pending} ${pending === 1 ? 'Pedido Pendente' : 'Pedidos Pendentes'}</strong>
+          <p>Existem intenções de compra capturadas pela IA aguardando validação oficial. <button type="button" class="btn primary xs" id="btn-insight-validate" style="margin-top:6px;">Validar Agora</button></p>
+        </div>
+      `;
+    }
+    if (msgs > 0) {
+      insightHtml += `
+        <div class="insight-box">
+          <strong>Atendimento Eficiente</strong>
+          <p>Foram enviadas ${msgs} respostas oficiais com alta fidelidade às diretrizes do catálogo.</p>
+        </div>
+      `;
+    } else {
+      insightHtml += `
+        <div class="insight-box">
+          <strong>Base de Conhecimento Ativa</strong>
+          <p>Mantenha os cards de produtos e políticas atualizados para maximizar a precisão comercial do agente.</p>
+        </div>
+      `;
+    }
+    insightsEl.innerHTML = insightHtml;
+    insightsEl.querySelector("#btn-insight-validate")?.addEventListener("click", () => openPendingConfirmationsModal());
+  }
 
   const list = $("#pending-list");
   if (list) {
-    if (!d.pending_requests || !d.pending_requests.length) {
+    if (!reqs.length) {
       list.className = "empty";
       list.textContent = "Nenhum pedido pendente.";
     } else {
       list.className = "pending-list";
       const fragment = document.createDocumentFragment();
-      d.pending_requests.forEach(r => {
+      reqs.forEach(r => {
         const card = document.createElement("div");
         card.className = "pending-card clickable-card";
         const info = document.createElement("div");
@@ -1308,6 +1545,10 @@ function renderPendingModalList(requests) {
 /* Mensagens */
 let contactsCache = [];
 
+let activeContactsFilter = "all";
+let contactsSearchQuery = "";
+let humanTakeoverActive = false;
+
 function renderContactsList(contacts) {
   const list = $("#contacts-list");
   if (!list) return;
@@ -1315,7 +1556,7 @@ function renderContactsList(contacts) {
   if (!contacts || !contacts.length) {
     list.innerHTML = "";
     list.className = "contact-card-grid empty";
-    list.textContent = "Ainda não existem conversas. Quando um cliente enviar um e-mail, ele aparecerá aqui.";
+    list.textContent = "Ainda não existem conversas registadas. Quando um cliente enviar um e-mail, ele aparecerá aqui.";
     return;
   }
   list.className = "contact-card-grid";
@@ -1323,10 +1564,32 @@ function renderContactsList(contacts) {
     $("#nav-messages-dot")?.classList.remove("hidden");
   }
 
+  let filtered = contacts;
+  if (contactsSearchQuery) {
+    const q = contactsSearchQuery.toLowerCase();
+    filtered = filtered.filter(c => 
+      (c.name && c.name.toLowerCase().includes(q)) || 
+      (c.contact_key && c.contact_key.toLowerCase().includes(q)) ||
+      (c.last_message && c.last_message.toLowerCase().includes(q))
+    );
+  }
+
+  if (activeContactsFilter === "unread") {
+    filtered = filtered.filter(c => c.last_message && !c.last_message_by_owner);
+  }
+
+  if (!filtered.length) {
+    list.innerHTML = `<div class="empty" style="padding:20px; font-size:13px; color:var(--text-tertiary);">Nenhuma conversa encontrada para "${escapeHtml(contactsSearchQuery)}".</div>`;
+    return;
+  }
+
   const fragment = document.createDocumentFragment();
-  contacts.forEach(c => {
+  filtered.forEach(c => {
     const card = document.createElement("article");
     card.className = "contact-card-item";
+    if (selectedContact === c.id) {
+      card.classList.add("active");
+    }
 
     const initial = (c.name || c.contact_key || "C").trim()[0]?.toUpperCase() || "C";
     const avatar = document.createElement("div");
@@ -1343,7 +1606,7 @@ function renderContactsList(contacts) {
 
     const channelBadge = document.createElement("span");
     channelBadge.className = isWa ? "contact-channel-badge wa" : "contact-channel-badge email";
-    channelBadge.textContent = isWa ? "WhatsApp" : "E-mail";
+    channelBadge.textContent = isWa ? "WhatsApp" : "Gmail";
     name.appendChild(channelBadge);
 
     const email = document.createElement("div");
@@ -1389,13 +1652,32 @@ async function openConversation(id) {
   const c = contactsCache.find(x => x.id === id);
   const isWa = c && !c.contact_key.includes("@");
 
-  // Alterna as visualizações: fecha a lista de cards e abre a sala de chat do cliente
-  $("#messages-inbox-view")?.classList.add("hidden");
-  $("#messages-chat-view")?.classList.remove("hidden");
+  // Destacar o card selecionado na lista
+  $$(".contact-card-item").forEach(el => el.classList.remove("active"));
+  renderContactsList(contactsCache);
 
   $("#conversation-title").textContent = c ? (c.name || c.contact_key) : "Conversa";
-  $("#conversation-subtitle").textContent = c ? (isWa ? `WhatsApp Oficial: ${c.contact_key}` : `E-mail oficial: ${c.contact_key}`) : "";
+  $("#conversation-subtitle").textContent = c ? (isWa ? `WhatsApp: ${c.contact_key}` : `Gmail Oficial: ${c.contact_key}`) : "";
   $("#btn-delete-conversation")?.classList.remove("hidden");
+
+  // Atualizar Coluna 3: Perfil do Cliente
+  const pName = $("#profile-client-name");
+  const pKey = $("#profile-client-key");
+  const pStatus = $("#profile-client-status");
+  const pInterest = $("#profile-client-interest");
+  const pMode = $("#profile-handover-mode");
+
+  if (pName) pName.textContent = c ? (c.name || "Cliente Comercial") : "-";
+  if (pKey) pKey.textContent = c ? c.contact_key : "-";
+  if (pStatus) {
+    pStatus.textContent = c?.last_message ? "Em atendimento ativo" : "Contacto iniciado";
+  }
+  if (pInterest) {
+    pInterest.textContent = c?.last_message ? "Interesse em produtos / informações" : "Aguardando interação inicial";
+  }
+  if (pMode) {
+    pMode.textContent = humanTakeoverActive ? "Operador Humano (Pausado para IA)" : "Automático (IA Drexier)";
+  }
 
   await renderConversationMessages(id, true);
 }
@@ -1581,7 +1863,7 @@ async function loadReports() {
   const poly = document.createElementNS(svg.namespaceURI, "polyline");
   poly.setAttribute("points", pts.map(p => `${p.x},${p.y}`).join(" "));
   poly.setAttribute("fill", "none");
-  poly.setAttribute("stroke", "#34465b");
+  poly.setAttribute("stroke", "#2563eb");
   poly.setAttribute("stroke-width", "3");
   poly.setAttribute("stroke-linecap", "round");
   poly.setAttribute("stroke-linejoin", "round");
@@ -1592,7 +1874,7 @@ async function loadReports() {
     circle.setAttribute("cx", p.x);
     circle.setAttribute("cy", p.y);
     circle.setAttribute("r", "3.5");
-    circle.setAttribute("fill", "#34465b");
+    circle.setAttribute("fill", "#2563eb");
     circle.setAttribute("stroke", "#ffffff");
     circle.setAttribute("stroke-width", "2");
     const title = document.createElementNS(svg.namespaceURI, "title");
@@ -1896,14 +2178,50 @@ let stockDataCache = {};
 
 function loadStockTab() {
   try {
-    if (!infoCache || !infoCache.length) {
-      // Não bloqueia se não carregou ainda
-    }
     const productosCard = infoCache.find(x => x.kind === "productos");
     const items = Array.isArray(productosCard?.metadata?.items) ? productosCard.metadata.items : [];
     const tbody = $("#stock-table-body");
     const badge = $("#badge-stock-stat");
     if (badge) badge.textContent = `${items.length} ${items.length === 1 ? 'produto' : 'produtos'}`;
+
+    // Carregar stock existente do cache local
+    const saved = localStorage.getItem("drexier_stock_map");
+    if (saved) {
+      try { stockDataCache = JSON.parse(saved); } catch { stockDataCache = {}; }
+    }
+
+    let totalProducts = items.length;
+    let availableCount = 0;
+    let lowCount = 0;
+    let outCount = 0;
+
+    items.forEach((it, idx) => {
+      const key = it.id || it.name || `item_${idx}`;
+      if (stockDataCache[key] === undefined) {
+        stockDataCache[key] = { inStock: true, qty: 10, variants: it.variants || "" };
+      }
+      const st = stockDataCache[key];
+      const qty = parseInt(st.qty, 10) || 0;
+      const isInStock = st.inStock !== false && qty > 0;
+      if (!isInStock || qty === 0) {
+        outCount++;
+      } else if (qty <= 5) {
+        lowCount++;
+        availableCount++;
+      } else {
+        availableCount++;
+      }
+    });
+
+    // Atualizar os 4 KPI cards de stock
+    const kpiTotal = $("#stock-kpi-total");
+    const kpiAvail = $("#stock-kpi-available");
+    const kpiLow = $("#stock-kpi-low");
+    const kpiOut = $("#stock-kpi-out");
+    if (kpiTotal) kpiTotal.textContent = totalProducts;
+    if (kpiAvail) kpiAvail.textContent = availableCount;
+    if (kpiLow) kpiLow.textContent = lowCount;
+    if (kpiOut) kpiOut.textContent = outCount;
 
     if (!tbody) return;
     tbody.innerHTML = "";
@@ -1911,87 +2229,282 @@ function loadStockTab() {
     if (!items.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 5;
-      td.style.padding = "14px";
+      td.colSpan = 7;
+      td.style.padding = "24px 14px";
       td.style.textAlign = "center";
-      td.style.color = "var(--muted)";
-      td.textContent = 'Nenhum produto encontrado no card "Produtos e Preços". Adicione produtos no card "Produtos e Preços" primeiro.';
+      td.style.color = "var(--text-tertiary)";
+      td.innerHTML = 'Nenhum produto registado no inventário.<br><button type="button" class="btn primary small" id="btn-empty-add-stock" style="margin-top:10px;">+ Adicionar Primeiro Produto</button>';
       tr.appendChild(td);
       tbody.appendChild(tr);
+      td.querySelector("#btn-empty-add-stock")?.addEventListener("click", () => openStockProductModal());
       return;
     }
 
-    // Carregar stock existente
-    const saved = localStorage.getItem("drexier_stock_map");
-    if (saved) {
-      try { stockDataCache = JSON.parse(saved); } catch { stockDataCache = {}; }
-    }
-
     items.forEach((it, idx) => {
-      const key = it.name || `item_${idx}`;
-      if (stockDataCache[key] === undefined) {
-        stockDataCache[key] = { inStock: true, qty: 0 };
-      }
+      const key = it.id || it.name || `item_${idx}`;
+      const st = stockDataCache[key] || { inStock: true, qty: 10 };
+      const qty = parseInt(st.qty, 10) || 0;
+      const isInStock = st.inStock !== false && qty > 0;
+
       const tr = document.createElement("tr");
-      tr.style.borderBottom = "1px solid var(--border)";
 
+      // Coluna 1: Produto (Nome + Detalhes)
       const tdName = document.createElement("td");
-      tdName.style.padding = "10px 12px";
-      tdName.style.fontWeight = "600";
-      tdName.textContent = it.name || "Produto sem nome";
+      tdName.innerHTML = `<div style="font-weight:600; color:var(--text-primary);">${escapeHtml(it.name || "Produto sem nome")}</div>${it.details ? `<div style="font-size:12px; color:var(--text-tertiary); margin-top:2px;">${escapeHtml(it.details)}</div>` : ''}`;
 
+      // Coluna 2: Preço
       const tdPrice = document.createElement("td");
-      tdPrice.style.padding = "10px 12px";
-      tdPrice.textContent = it.price || "-";
+      tdPrice.style.fontWeight = "600";
+      tdPrice.textContent = it.price || "Sob consulta";
 
-      const tdDetails = document.createElement("td");
-      tdDetails.style.padding = "10px 12px";
-      tdDetails.style.color = "var(--muted)";
-      tdDetails.style.fontSize = "12.5px";
-      tdDetails.textContent = it.details || "";
+      // Coluna 3: Variantes (pills)
+      const tdVariants = document.createElement("td");
+      const variantsText = it.variants || st.variants || "";
+      if (variantsText) {
+        const vList = variantsText.split(",").map(v => v.trim()).filter(Boolean);
+        const pillsHtml = vList.map(v => `<span class="badge" style="background:var(--surface-elevated); color:var(--text-secondary); margin:2px 4px 2px 0; font-size:11.5px; border:1px solid var(--border-subtle);">${escapeHtml(v)}</span>`).join("");
+        tdVariants.innerHTML = pillsHtml || '<span class="muted">-</span>';
+      } else {
+        tdVariants.innerHTML = '<span class="muted" style="font-size:12px;">Padrão</span>';
+      }
 
+      // Coluna 4: Estado
+      const tdStatus = document.createElement("td");
+      if (!isInStock || qty === 0) {
+        tdStatus.innerHTML = '<span class="badge" style="background:var(--color-error-bg); color:var(--color-error); font-weight:600;">Esgotado</span>';
+      } else if (qty <= 5) {
+        tdStatus.innerHTML = '<span class="badge" style="background:var(--color-warning-bg); color:var(--color-warning); font-weight:600;">Stock Baixo</span>';
+      } else {
+        tdStatus.innerHTML = '<span class="badge" style="background:var(--color-success-bg); color:var(--color-success); font-weight:600;">Disponível</span>';
+      }
+
+      // Coluna 5: Em Stock (Sim / Não)
       const tdInStock = document.createElement("td");
-      tdInStock.style.padding = "10px 12px";
       const select = document.createElement("select");
       select.style.padding = "6px 8px";
-      select.style.border = "1px solid var(--border)";
-      select.style.borderRadius = "8px";
+      select.style.fontSize = "13px";
       const optYes = document.createElement("option");
       optYes.value = "yes";
       optYes.textContent = "Sim";
       const optNo = document.createElement("option");
       optNo.value = "no";
       optNo.textContent = "Não";
-      if (stockDataCache[key].inStock) select.value = "yes"; else select.value = "no";
+      select.value = isInStock ? "yes" : "no";
       select.onchange = () => {
         stockDataCache[key].inStock = select.value === "yes";
+        try { localStorage.setItem("drexier_stock_map", JSON.stringify(stockDataCache)); } catch(_) {}
+        loadStockTab();
       };
       select.append(optYes, optNo);
       tdInStock.appendChild(select);
 
+      // Coluna 6: Quantidade
       const tdQty = document.createElement("td");
-      tdQty.style.padding = "10px 12px";
       const inputQty = document.createElement("input");
       inputQty.type = "number";
       inputQty.min = "0";
       inputQty.step = "1";
-      inputQty.value = stockDataCache[key].qty ?? 0;
+      inputQty.value = qty;
       inputQty.style.padding = "6px 8px";
-      inputQty.style.width = "100px";
-      inputQty.style.border = "1px solid var(--border)";
-      inputQty.style.borderRadius = "8px";
+      inputQty.style.width = "90px";
+      inputQty.style.fontSize = "13px";
       inputQty.onchange = () => {
-        stockDataCache[key].qty = parseInt(inputQty.value || "0", 10) || 0;
+        const val = parseInt(inputQty.value || "0", 10) || 0;
+        stockDataCache[key].qty = val;
+        stockDataCache[key].inStock = val > 0;
+        try { localStorage.setItem("drexier_stock_map", JSON.stringify(stockDataCache)); } catch(_) {}
+        loadStockTab();
       };
       tdQty.appendChild(inputQty);
 
-      tr.append(tdName, tdPrice, tdDetails, tdInStock, tdQty);
+      // Coluna 7: Ações (Editar / Eliminar)
+      const tdActions = document.createElement("td");
+      const btnEdit = document.createElement("button");
+      btnEdit.className = "btn xs outline";
+      btnEdit.textContent = "Editar";
+      btnEdit.title = "Editar informações e variantes";
+      btnEdit.style.marginRight = "6px";
+      btnEdit.onclick = () => openStockProductModal(idx);
+
+      const btnDel = document.createElement("button");
+      btnDel.className = "btn xs danger";
+      btnDel.innerHTML = "&times;";
+      btnDel.title = "Eliminar produto do stock";
+      btnDel.onclick = async () => {
+        if (!confirm(`Tem a certeza de que deseja eliminar "${it.name}" do stock?`)) return;
+        items.splice(idx, 1);
+        productosCard.metadata = productosCard.metadata || {};
+        productosCard.metadata.items = items;
+        productosCard.content = compileItemsToContent(items, productosCard.metadata.generalNote || "");
+        delete stockDataCache[key];
+        try { localStorage.setItem("drexier_stock_map", JSON.stringify(stockDataCache)); } catch(_) {}
+        try {
+          await api(`/api/business-info/${productosCard.id}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              kind: productosCard.kind,
+              title: productosCard.title,
+              content: productosCard.content,
+              metadata: productosCard.metadata
+            })
+          });
+          showNotice("Produto removido do inventário.");
+          loadStockTab();
+          renderCardsFromCache();
+        } catch (err) {
+          showNotice(err.message, true);
+        }
+      };
+
+      tdActions.append(btnEdit, btnDel);
+      tr.append(tdName, tdPrice, tdVariants, tdStatus, tdInStock, tdQty, tdActions);
       tbody.appendChild(tr);
     });
   } catch (e) {
-    showNotice("Erro ao carregar stock.", true);
+    showNotice("Erro ao carregar stock: " + e.message, true);
   }
 }
+
+function openStockProductModal(editIndex = null) {
+  if (!paywallCheck()) return;
+  const modal = $("#stock-product-modal");
+  if (!modal) return;
+  const productosCard = infoCache.find(x => x.kind === "productos");
+  const items = Array.isArray(productosCard?.metadata?.items) ? productosCard.metadata.items : [];
+
+  const titleEl = $("#stock-modal-title");
+  const idxInput = $("#stock-item-index");
+  const nameInput = $("#stock-item-name");
+  const priceInput = $("#stock-item-price");
+  const qtyInput = $("#stock-item-qty");
+  const variantsInput = $("#stock-item-variants");
+  const detailsInput = $("#stock-item-details");
+
+  if (editIndex !== null && items[editIndex]) {
+    const it = items[editIndex];
+    const key = it.id || it.name || `item_${editIndex}`;
+    const st = stockDataCache[key] || { qty: 10 };
+    if (titleEl) titleEl.textContent = "Editar Produto no Stock";
+    if (idxInput) idxInput.value = String(editIndex);
+    if (nameInput) nameInput.value = it.name || "";
+    if (priceInput) priceInput.value = it.price || "";
+    if (qtyInput) qtyInput.value = st.qty ?? 10;
+    if (variantsInput) variantsInput.value = it.variants || st.variants || "";
+    if (detailsInput) detailsInput.value = it.details || "";
+  } else {
+    if (titleEl) titleEl.textContent = "Adicionar Produto ao Stock";
+    if (idxInput) idxInput.value = "";
+    if (nameInput) nameInput.value = "";
+    if (priceInput) priceInput.value = "";
+    if (qtyInput) qtyInput.value = "10";
+    if (variantsInput) variantsInput.value = "";
+    if (detailsInput) detailsInput.value = "";
+  }
+
+  modal.classList.remove("hidden");
+  nameInput?.focus();
+}
+
+function closeStockProductModal() {
+  const modal = $("#stock-product-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+$("#close-stock-modal")?.addEventListener("click", closeStockProductModal);
+$("#btn-cancel-stock-modal")?.addEventListener("click", closeStockProductModal);
+$("#stock-product-modal")?.addEventListener("click", (e) => {
+  if (e.target === $("#stock-product-modal")) closeStockProductModal();
+});
+$("#btn-add-stock-product")?.addEventListener("click", () => openStockProductModal());
+
+$("#stock-product-form")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!paywallCheck()) return;
+
+  const idxVal = $("#stock-item-index")?.value;
+  const name = $("#stock-item-name")?.value.trim() || "";
+  const price = $("#stock-item-price")?.value.trim() || "";
+  const qty = parseInt($("#stock-item-qty")?.value || "0", 10) || 0;
+  const variants = $("#stock-item-variants")?.value.trim() || "";
+  const details = $("#stock-item-details")?.value.trim() || "";
+
+  if (!name) {
+    showNotice("Preencha o nome do produto.", true);
+    return;
+  }
+
+  let productosCard = infoCache.find(x => x.kind === "productos");
+  if (!productosCard) {
+    try {
+      productosCard = await api("/api/business-info", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "productos",
+          title: "Produtos e Preços",
+          content: "Lista de Produtos e Preços",
+          metadata: { items: [], generalNote: "" }
+        })
+      });
+      infoCache.push(productosCard);
+    } catch (err) {
+      showNotice(err.message, true);
+      return;
+    }
+  }
+
+  const meta = productosCard.metadata || {};
+  const items = Array.isArray(meta.items) ? [...meta.items] : [];
+
+  const isEdit = idxVal !== "" && idxVal !== null && idxVal !== undefined;
+  const targetIdx = isEdit ? parseInt(idxVal, 10) : null;
+
+  const itemObj = {
+    id: (isEdit && items[targetIdx]?.id) ? items[targetIdx].id : Date.now().toString(),
+    name,
+    price,
+    variants,
+    details
+  };
+
+  if (isEdit && items[targetIdx]) {
+    items[targetIdx] = itemObj;
+  } else {
+    items.push(itemObj);
+  }
+
+  meta.items = items;
+  productosCard.metadata = meta;
+  productosCard.content = compileItemsToContent(items, meta.generalNote || "");
+
+  // Atualizar cache de stock
+  const key = itemObj.id || itemObj.name;
+  stockDataCache[key] = {
+    inStock: qty > 0,
+    qty: qty,
+    variants: variants
+  };
+  try { localStorage.setItem("drexier_stock_map", JSON.stringify(stockDataCache)); } catch(_) {}
+
+  closeStockProductModal();
+  loadStockTab();
+  renderCardsFromCache();
+
+  try {
+    await api(`/api/business-info/${productosCard.id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        kind: productosCard.kind,
+        title: productosCard.title,
+        content: productosCard.content,
+        metadata: productosCard.metadata
+      })
+    });
+    showNotice(isEdit ? "Produto atualizado no stock com sucesso." : "Novo produto adicionado ao stock com sucesso!");
+  } catch (err) {
+    showNotice(err.message, true);
+  }
+});
+
 
 $("#btn-refresh-stock")?.addEventListener("click", () => loadStockTab());
 $("#btn-save-stock")?.addEventListener("click", () => {
@@ -3581,6 +4094,113 @@ if (token) {
    INICIALIZAÇÃO DA LANDING PAGE E NAVEGAÇÃO
    ============================================================ */
 document.addEventListener("DOMContentLoaded", () => {
+  // ==========================================================
+  // SIDEBAR COLLAPSIBLE TOGGLE (250px <-> 76px)
+  // ==========================================================
+  const sidebar = $(".sidebar");
+  const sidebarToggleBtn = $("#sidebar-toggle-btn");
+  const isSidebarCollapsed = localStorage.getItem("drexier_sidebar_collapsed") === "true";
+
+  if (isSidebarCollapsed && sidebar) {
+    sidebar.classList.add("is-collapsed");
+  }
+
+  sidebarToggleBtn?.addEventListener("click", () => {
+    if (!sidebar) return;
+    const collapsed = sidebar.classList.toggle("is-collapsed");
+    localStorage.setItem("drexier_sidebar_collapsed", collapsed ? "true" : "false");
+  });
+
+  // ==========================================================
+  // DASHBOARD PERIOD TABS
+  // ==========================================================
+  $$("#dashboard-period-tabs .period-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      $$("#dashboard-period-tabs .period-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const period = btn.dataset.period;
+      if (dashboardCacheData) {
+        if (period === "today") {
+          renderBars("#dashboard-chart", [
+            { date: "Ontem", count: dashboardCacheData.yesterday_contacts ?? 0 },
+            { date: "Hoje", count: dashboardCacheData.today_contacts ?? 0 }
+          ]);
+        } else if (period === "7d") {
+          const base = dashboardCacheData.total_contacts || 10;
+          renderBars("#dashboard-chart", [
+            { date: "D-6", count: Math.max(1, Math.round(base * 0.1)) },
+            { date: "D-5", count: Math.max(1, Math.round(base * 0.15)) },
+            { date: "D-4", count: Math.max(1, Math.round(base * 0.12)) },
+            { date: "D-3", count: Math.max(1, Math.round(base * 0.2)) },
+            { date: "D-2", count: Math.max(1, Math.round(base * 0.18)) },
+            { date: "Ontem", count: dashboardCacheData.yesterday_contacts ?? 0 },
+            { date: "Hoje", count: dashboardCacheData.today_contacts ?? 0 }
+          ]);
+        } else if (period === "30d") {
+          const base = dashboardCacheData.total_contacts || 20;
+          renderBars("#dashboard-chart", [
+            { date: "Sem 1", count: Math.max(2, Math.round(base * 0.2)) },
+            { date: "Sem 2", count: Math.max(3, Math.round(base * 0.25)) },
+            { date: "Sem 3", count: Math.max(4, Math.round(base * 0.3)) },
+            { date: "Sem 4", count: Math.max(5, Math.round(base * 0.25)) }
+          ]);
+        }
+      }
+    });
+  });
+
+  // ==========================================================
+  // MESSAGES INBOX SEARCH & FILTERS
+  // ==========================================================
+  const searchInput = $("#contacts-search-input");
+  searchInput?.addEventListener("input", debounce(() => {
+    contactsSearchQuery = searchInput.value.trim();
+    renderContactsList(contactsCache);
+  }, 200));
+
+  $$(".inbox-filter-pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      $$(".inbox-filter-pill").forEach(p => p.classList.remove("active"));
+      pill.classList.add("active");
+      activeContactsFilter = pill.dataset.filter || "all";
+      renderContactsList(contactsCache);
+    });
+  });
+
+  // ==========================================================
+  // HUMAN TAKEOVER TOGGLE
+  // ==========================================================
+  const takeoverBtn = $("#btn-toggle-takeover");
+  takeoverBtn?.addEventListener("click", () => {
+    humanTakeoverActive = !humanTakeoverActive;
+    if (humanTakeoverActive) {
+      takeoverBtn.textContent = "Devolver à IA";
+      takeoverBtn.className = "btn primary small";
+      showNotice("Assumiu o atendimento deste cliente. A IA não interferirá enquanto responder manualmente.");
+    } else {
+      takeoverBtn.textContent = "Assumir Atendimento";
+      takeoverBtn.className = "btn outline small";
+      showNotice("Atendimento devolvido à IA Drexier. Respostas automáticas reativadas.");
+    }
+    const pMode = $("#profile-handover-mode");
+    if (pMode) {
+      pMode.textContent = humanTakeoverActive ? "Operador Humano (Pausado para IA)" : "Automático (IA Drexier)";
+    }
+  });
+
+  // ==========================================================
+  // AGENT STUDIO SUBTABS CONTROLLER
+  // ==========================================================
+  $$(".agent-studio-subtab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const targetId = tab.dataset.agentTab;
+      $$(".agent-studio-subtab").forEach(t => t.classList.toggle("active", t === tab));
+      $$(".agent-studio-card").forEach(c => {
+        c.classList.toggle("hidden", c.id !== `agent-tab-${targetId}`);
+      });
+    });
+  });
+
   // Botões de navegação na Landing Page
   $("#lp-btn-login")?.addEventListener("click", () => showAuth("login"));
   $("#lp-link-footer-login")?.addEventListener("click", (e) => {

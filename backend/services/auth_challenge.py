@@ -219,13 +219,12 @@ def invalidate_auth_challenge(challenge_id: str) -> None:
             _get_supabase_auth_client().table("auth_challenges").delete().eq(
                 "challenge_id", challenge_id
             ).execute()
-        except AuthChallengeStoreError:
-            raise
-        except Exception as exc:
-            logger.exception("Falha ao remover o desafio de autenticação do Supabase.")
-            raise AuthChallengeStoreError(
-                "Não foi possível limpar o desafio de autenticação no Supabase."
-            ) from exc
+        except Exception:
+            logger.warning(
+                "Falha ao limpar o desafio de autenticação no Supabase; a operação foi ignorada.",
+                exc_info=True,
+            )
+            return
         return
 
     with _lock:
