@@ -25,6 +25,15 @@ from backend.services.agent import draft_reply
 load_dotenv()
 
 logger = logging.getLogger("drexier.email_service")
+# Cache em memória e deduplicação de mensagens recebidas (Anti-Loop & Anti-Ping-Pong)
+_PROCESSED_MESSAGE_IDS = set()
+_LAST_PROCESSED_AT: Dict[str, float] = {}
+
+LOOP_ACKNOWLEDGMENT_PATTERNS = [
+    r"^(obrigad[oa]|obrigad[oa]!|muito obrigad[oa]|valeu|ok|ok!|de acordo|perfeito|combinado|agradecido|obg|obg!|muito obrigado!)$",
+    r"^(thanks|thank you|thank you!|great thanks|ok thanks|understood|noted)$",
+    r"(resposta autom[aá]tica|auto-?reply|automatic reply|out of office|aus[eê]ncia tempor[aá]ria|agradecemos o seu contacto)"
+]
 
 # Constantes de OAuth para Google e Microsoft
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -731,6 +740,29 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
             msg_id = m.get("id")
             thread_id = m.get("threadId")
 
+            # Deduplicação imediata contra repetição por eventual lag do índice Gmail
+            if msg_id in _PROCESSED_MESSAGE_IDS:
+                try:
+                    await client.post(
+                        f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
+                        headers=headers,
+                        json={"removeLabelIds": ["UNREAD"]}
+                    )
+                except Exception:
+                    pass
+                continue
+            _PROCESSED_MESSAGE_IDS.add(msg_id)
+
+            # Marca UNREAD como removido imediatamente na chegada para não reprocessar na varredura seguinte
+            try:
+                await client.post(
+                    f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
+                    headers=headers,
+                    json={"removeLabelIds": ["UNREAD"]}
+                )
+            except Exception:
+                pass
+
             msg_res = await client.get(f"{GMAIL_API_BASE}/messages/{msg_id}?format=full", headers=headers)
             if msg_res.status_code != 200:
                 continue
@@ -765,8 +797,9 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
 
             sender_email, customer_name = parse_sender_info(raw_from)
 
-            # Ignora se for enviado pelo próprio utilizador
-            if not sender_email or sender_email == my_email:
+            # Ignora se for enviado pelo próprio utilizador ou pela conta Drexier
+            user_account_email = (user_dict.get("email") or "").lower().strip()
+            if not sender_email or sender_email == my_email or sender_email == user_account_email:
                 continue
 
             extracted_body = extract_gmail_body(payload)
@@ -970,13 +1003,43 @@ async def process_and_reply_email(
             )
             cid = cur.lastrowid
 
+        # Verifica se é uma mensagem repetida idêntica à última recebida deste contacto
+        last_customer_msg = c.execute(
+            "SELECT content FROM messages WHERE contact_id = ? AND user_id = ? AND sender = 'customer' ORDER BY id DESC LIMIT 1",
+            (cid, user_id)
+        ).fetchone()
+        full_current_content = f"Assunto: {subject}\n\n{incoming_content}"
+        if last_customer_msg and last_customer_msg["content"].strip() == full_current_content.strip():
+            logger.info(f"[Anti-Loop] Mensagem idêntica ignorada para {customer_email} para evitar ciclo repetitivo.")
+            return "(Mensagem duplicada já processada)"
+
         # Salva mensagem recebida do cliente
         c.execute(
             "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'customer', ?)",
-            (user_id, cid, f"Assunto: {subject}\n\n{incoming_content}")
+            (user_id, cid, full_current_content)
         )
 
-        # Detecção automática de marcação ou compra para o painel de pedidos a confirmar do proprietário
+        # Loop guard: Se for apenas confirmação breve ("obrigado", "ok") e a IA já respondeu antes
+        last_agent_msg = c.execute(
+            "SELECT id FROM messages WHERE contact_id = ? AND user_id = ? AND sender = 'agent' ORDER BY id DESC LIMIT 1",
+            (cid, user_id)
+        ).fetchone()
+        clean_stripped = incoming_content.strip().lower()
+        if last_agent_msg and any(re.search(pat, clean_stripped, re.IGNORECASE) for pat in LOOP_ACKNOWLEDGMENT_PATTERNS):
+            logger.info(f"[Anti-Loop] Agradecimento ou confirmação breve de {customer_email} recebido após resposta da IA. Não requer nova resposta automática.")
+            return "(Agradecimento registado - ciclo de atendimento concluído)"
+
+        # Cooldown de segurança por contacto (evita ping-pong rápido)
+        now_ts = time.time()
+        last_time = _LAST_PROCESSED_AT.get(customer_email, 0)
+        if (now_ts - last_time) < 10.0:
+            logger.info(f"[Anti-Loop] Cooldown ativo para {customer_email} ({now_ts - last_time:.1f}s). Ignorando resposta repetida.")
+            return "(Cooldown de segurança ativo)"
+        _LAST_PROCESSED_AT[customer_email] = now_ts
+
+        # Detecção automática de marcação ou compra:
+        # REGRA MANDATÓRIA: Se o cliente quiser marcação ou compra, a IA NÃO responde automaticamente!
+        # Notifica na dashboard e aguarda a validação do proprietário.
         intent = detect_booking_or_purchase_intent(incoming_content, subject)
         if intent:
             has_pending = c.execute(
@@ -987,9 +1050,11 @@ async def process_and_reply_email(
                 c.execute(
                     """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status)
                        VALUES (?, ?, ?, ?, 'pending')""",
-                    (user_id, cid, intent["type"], intent["details"])
+                    (user_id, cid, intent["type"], f"Assunto: {subject}\n{incoming_content[:400]}", )
                 )
-                logger.info(f"[Conversão Automática] Pedido de {intent['type']} detectado e registrado para {customer_email}.")
+                logger.info(f"[Validação Pendente] Intenção de {intent['type']} de {customer_email} registada na Dashboard para validação.")
+            # NÃO responde automaticamente! Aguarda a escolha do proprietário na Dashboard
+            return f"(Pedido de {intent['type']} registrado. Aguardando validação do proprietário na Dashboard)"
 
         # Histórico recente de mensagens desse cliente
         history_rows = c.execute(
@@ -1351,16 +1416,52 @@ async def process_confirmation_action(
     customer_email = req["contact_key"]
 
     channel_name = "WhatsApp" if is_whatsapp else "e-mail"
+    sender_role = "agent"
+
     if action == "confirm":
+        # Validação Automática com IA
         instruction = (
             f"Você é o atendente oficial de {business_name}. "
             f"O proprietário analisou e acaba de CONFIRMAR a solicitação de {req['request_type']} do cliente ({customer_name}). "
             f"Detalhes do agendamento/pedido: {req['details']}. "
-            f"Nota adicional do proprietário: {custom_note or 'Tudo confirmado.'}. "
+            f"Nota adicional do proprietário: {custom_note or 'Tudo confirmado com sucesso.'}. "
             f"Escreva uma mensagem acolhedora, profissional e clara confirmando a realização do pedido/marcação para enviar via {channel_name}."
         )
         new_status = "confirmed"
         subject = f"Confirmação de Agendamento - {business_name}"
+        reply_text = await draft_reply(
+            message=instruction,
+            info_rows=info,
+            instructions=user_dict.get("agent_instructions") or "",
+            language=user_dict.get("language") or "Português",
+            history=history,
+            business_name=business_name,
+            business_type=user_dict.get("business_type") or "Serviços",
+            business_description=user_dict.get("business_description") or "",
+        )
+    elif action == "confirm_manual":
+        # Validação Manual: proprietário escreveu a sua própria mensagem de validação
+        reply_text = (custom_note or "").strip()
+        if not reply_text:
+            raise ValueError("Por favor, escreva a mensagem de validação antes de enviar.")
+        new_status = "confirmed"
+        subject = f"Confirmação de Agendamento - {business_name}"
+        sender_role = "owner"
+    elif action in ("treated", "resolve"):
+        # Tratado sem marcação (produto ou vaga indisponível)
+        new_status = "treated"
+        with connect() as c:
+            c.execute(
+                "UPDATE conversion_requests SET status = 'treated', resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+                (request_id, user_id)
+            )
+        return {
+            "ok": True,
+            "action": action,
+            "status": "treated",
+            "customer_email": customer_email,
+            "detail": "Pedido marcado como tratado (sem marcação realizada por indisponibilidade)."
+        }
     else:
         instruction = (
             f"Você é o atendente oficial de {business_name}. "
@@ -1370,26 +1471,24 @@ async def process_confirmation_action(
             f"Motivo ou alternativa sugerida pelo proprietário: {custom_note or 'Sem vaga neste dia; consultar outras datas disponíveis.'}. "
             f"Escreva uma mensagem extremamente educada, empática e atenciosa explicando a indisponibilidade e sugerindo alternativa para enviar via {channel_name}."
         )
-        new_status = "rejected"
+        new_status = "treated"
         subject = f"Atualização sobre a sua solicitação - {business_name}"
-
-    # Redige a resposta com IA
-    reply_text = await draft_reply(
-        message=instruction,
-        info_rows=info,
-        instructions=user_dict.get("agent_instructions") or "",
-        language=user_dict.get("language") or "Português",
-        history=history,
-        business_name=business_name,
-        business_type=user_dict.get("business_type") or "Serviços",
-        business_description=user_dict.get("business_description") or "",
-    )
+        reply_text = await draft_reply(
+            message=instruction,
+            info_rows=info,
+            instructions=user_dict.get("agent_instructions") or "",
+            language=user_dict.get("language") or "Português",
+            history=history,
+            business_name=business_name,
+            business_type=user_dict.get("business_type") or "Serviços",
+            business_description=user_dict.get("business_description") or "",
+        )
 
     # Salva na base de dados
     with connect() as c:
         c.execute(
-            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-            (user_id, req["contact_id"], reply_text)
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, ?, ?)",
+            (user_id, req["contact_id"], sender_role, reply_text)
         )
         c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (req["contact_id"],))
         c.execute(

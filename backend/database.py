@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   status TEXT NOT NULL DEFAULT 'inactive',
   current_period_end TEXT DEFAULT '',
   cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+  last_successful_payment_at TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -181,6 +182,11 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
     ).fetchone()
     if not has_users:
         conn.executescript(SQL_SCHEMA_FOR_TESTS)
+    else:
+        try:
+            conn.execute("ALTER TABLE subscriptions ADD COLUMN last_successful_payment_at TEXT DEFAULT ''")
+        except Exception:
+            pass
 
 
 def connect():

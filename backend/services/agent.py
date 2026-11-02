@@ -148,6 +148,11 @@ DIRETRIZ MANDATÓRIA E SUPREMA DE IDIOMA (ORDEM ABSOLUTA):
 - Toda e qualquer mensagem do atendimento (acolhimento, esclarecimento de dúvidas, agendamentos, verificação de stock e despedida) deve acompanhar fielmente o idioma do cliente.
 - Caso precise informar que não possui uma informação cadastrada no momento, faça-o sempre no mesmo idioma do cliente (exemplo em inglês: "At the moment, I do not have this information registered. Is there anything else I can help you with?").
 
+DIRETRIZ MANDATÓRIA DE FORMATAÇÃO E CITAÇÕES (SEM ASTERISCOS):
+- NUNCA utilize asteriscos (*) ou símbolos de destaque Markdown (**negrito**, *itálico* ou marcadores com asterisco) para citar preços, valores, orçamentos, produtos, horários ou regras.
+- Todas as citações e valores devem aparecer estritamente em TEXTO NORMAL e contínuo, exatamente como o resto da mensagem. Exemplo correto: "O valor da consulta é 50€" e NUNCA "**50€**" ou "*50€*".
+- Escreva respostas em texto limpo e natural sem formatação markdown de negrito.
+
 MISSÃO E POSTURA:
 1. Você responde às mensagens dos clientes e é responsável por DIRIGIR a conversa ativamente com foco no objetivo do negócio (esclarecer dúvidas, agendamentos, atendimento e vendas).
 2. ADAPTAÇÃO AO CONTEXTO DA MENSAGEM (NUNCA ATIRAR PRODUTOS NA CARA DO CLIENTE):
@@ -215,6 +220,17 @@ def format_gemini_contents(history: List[Dict[str, str]], current_message: str) 
         contents.append({"role": "user", "parts": [{"text": current_message.strip()}]})
 
     return contents
+
+def strip_markdown_highlights(text: str) -> str:
+    """
+    Remove asteriscos (* e **) de citações, preços e termos destacados,
+    garantindo que citações e valores apareçam em texto normal e limpo.
+    """
+    if not text:
+        return ""
+    cleaned = re.sub(r"\*{1,3}([^*\n]+)\*{1,3}", r"\1", text)
+    cleaned = cleaned.replace("*", "")
+    return cleaned
 
 def ensure_complete_sentence(text: str) -> str:
     r"""
@@ -469,7 +485,7 @@ async def draft_reply(
                 base_url=config["base_url"]
             )
             if reply:
-                return reply
+                return strip_markdown_highlights(reply)
         elif config["provider"] == "openai":
             base_url = os.getenv("AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
             reply = await call_openai_compatible_api(
@@ -481,7 +497,7 @@ async def draft_reply(
                 base_url=base_url
             )
             if reply:
-                return reply
+                return strip_markdown_highlights(reply)
 
     # 2. Se a API do Gemini não estiver configurada ou falhar, ativa o fallback local
-    return local_fallback(message, info_rows, business_name)
+    return strip_markdown_highlights(local_fallback(message, info_rows, business_name))

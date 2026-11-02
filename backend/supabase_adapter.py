@@ -151,6 +151,12 @@ class SupabaseCursor:
             elif "status='pending'" in where_part.replace(" ", ""):
                 uid = p[0]
                 query = query.eq("user_id", uid).eq("status", "pending")
+            elif "statusIN" in where_part.replace(" ", "") or "status in" in where_part.lower():
+                uid = p[0]
+                query = query.eq("user_id", uid).neq("status", "pending")
+            else:
+                uid = p[0]
+                query = query.eq("user_id", uid)
 
             reqs = query.order("created_at", desc=True).execute().data or []
             contact_ids = list({r["contact_id"] for r in reqs if r.get("contact_id")})
@@ -172,6 +178,7 @@ class SupabaseCursor:
                     "details": r["details"],
                     "created_at": r["created_at"],
                     "status": r.get("status", "pending"),
+                    "resolved_at": r.get("resolved_at"),
                     "contact_id": r["contact_id"],
                     "name": ct.get("name", ""),
                     "contact_key": ct.get("contact_key", "")

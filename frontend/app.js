@@ -1086,27 +1086,98 @@ async function navigate(page) {
   }
 }
 
+
+/* ============================================================
+   FLOATING ARCADE CHART TOOLTIPS (HOVER ETAPAS)
+   ============================================================ */
+let globalChartTooltip = null;
+function getChartTooltip() {
+  if (!globalChartTooltip) {
+    globalChartTooltip = document.createElement("div");
+    globalChartTooltip.className = "arcade-chart-tooltip";
+    document.body.appendChild(globalChartTooltip);
+  }
+  return globalChartTooltip;
+}
+
+function showChartTooltip(e, text, badge) {
+  const tip = getChartTooltip();
+  tip.innerHTML = `${escapeHtml(text)}${badge ? `<span class="arcade-chart-tooltip-badge">${escapeHtml(badge)}</span>` : ""}`;
+  tip.style.left = `${e.clientX}px`;
+  tip.style.top = `${e.clientY - 12}px`;
+  tip.classList.add("visible");
+}
+
+function hideChartTooltip() {
+  const tip = getChartTooltip();
+  tip.classList.remove("visible");
+}
+
+/* ============================================================
+   DYNAMIC AGENT TOPBAR STATUS HELPER
+   ============================================================ */
+let currentAgentState = "ready";
+function setAgentStatus(state) {
+  currentAgentState = state;
+  const topbar = $("#topbar-agent-status");
+  const side = $("#side-agent-status");
+
+  if (topbar) {
+    topbar.className = `topbar-agent-pill ${state === "ready" ? "active" : state}`;
+    const txt = topbar.querySelector("span:last-child");
+    if (txt) {
+      if (state === "ready") txt.textContent = "IA Pronta";
+      else if (state === "responding") txt.textContent = "A responder...";
+      else if (state === "paused") txt.textContent = "Agente Desativado";
+      else if (state === "disconnected") txt.textContent = "Desconectado";
+    }
+  }
+
+  if (side) {
+    side.className = `sidebar-agent-status ${state === "ready" ? "active" : state}`;
+    const txt = side.querySelector("span:last-child");
+    if (txt) {
+      if (state === "ready") txt.textContent = "Agente Ativo";
+      else if (state === "responding") txt.textContent = "A responder...";
+      else if (state === "paused") txt.textContent = "Agente Desativado";
+      else if (state === "disconnected") txt.textContent = "Desconectado";
+    }
+  }
+}
+
 /* Gráfico de Barras */
 function renderBars(target, values) {
   const el = $(target);
   if (!el) return;
   el.innerHTML = "";
   el.setAttribute("role", "img");
-  el.setAttribute("aria-label", "Comparação de novos clientes entre hoje e ontem");
+  el.setAttribute("aria-label", "Comparação de novos clientes no período selecionado");
   const max = Math.max(1, ...values.map(x => Number(x.count) || 0));
   values.forEach(v => {
+    const count = Number(v.count) || 0;
     const column = document.createElement("div");
     column.className = "bar-col";
+    column.style.cursor = "pointer";
+
+    // Tooltip interativo ao passar o mouse sobre a barra
+    column.addEventListener("mouseenter", e => {
+      showChartTooltip(e, `Etapa: ${v.date}`, `${count} ${count === 1 ? 'cliente' : 'clientes'}`);
+    });
+    column.addEventListener("mousemove", e => {
+      const tip = getChartTooltip();
+      tip.style.left = `${e.clientX}px`;
+      tip.style.top = `${e.clientY - 12}px`;
+    });
+    column.addEventListener("mouseleave", hideChartTooltip);
+
     const val = document.createElement("span");
     val.className = "bar-val";
-    val.textContent = String(v.count);
+    val.textContent = String(count);
     const track = document.createElement("div");
     track.className = "bar-fill-track";
     const fill = document.createElement("div");
     fill.className = "bar-fill";
-    const count = Number(v.count) || 0;
     fill.style.height = `${count === 0 ? 3 : Math.max(8, (count / max) * 138)}px`;
-    fill.title = `${v.date}: ${count}`;
     track.append(fill);
     const label = document.createElement("span");
     label.className = "bar-label";
@@ -1177,10 +1248,11 @@ function renderDashboardData(d) {
   const mPending = $("#metric-pending");
   if (mPending) mPending.textContent = pending;
 
-  // 6: Marcações e pedidos identificados
+  // 5: Marcações Adquiridas
   const mBookings = $("#metric-bookings");
-  const bookingsCount = reqs.filter(r => (r.request_type || "").toLowerCase().includes("marca") || (r.request_type || "").toLowerCase().includes("agend")).length;
-  if (mBookings) mBookings.textContent = bookingsCount || (pending > 0 ? pending : (contacts > 0 ? Math.min(contacts, 3) : 0));
+  const confirmedList = d.confirmed_bookings || [];
+  const bookingsCount = d.bookings_count ?? confirmedList.filter(b => b.status !== "treated").length;
+  if (mBookings) mBookings.textContent = bookingsCount;
 
   // 7: Taxa de conversão real
   const mConv = $("#metric-conversion-rate");
@@ -1221,7 +1293,9 @@ function renderDashboardData(d) {
         m.click();
       }
     };
-    if (m.id === "card-metric-pending") {
+    if (m.id === "card-metric-bookings") {
+      m.onclick = () => openBookingsModal(d.confirmed_bookings || []);
+    } else if (m.id === "card-metric-pending") {
       m.onclick = () => openPendingConfirmationsModal();
     } else if (metricData[i]) {
       m.onclick = () => expandMetricCard(metricData[i].title, metricData[i].val, metricData[i].desc);
@@ -1378,6 +1452,91 @@ async function loadDashboard() {
 
 $("#btn-open-pending-modal")?.addEventListener("click", () => openPendingConfirmationsModal());
 
+
+/* ============================================================
+   MODAL DE MARCAÇÕES ADQUIRIDAS E HISTÓRICO TRATADO
+   ============================================================ */
+function openBookingsModal(confirmedList) {
+  const modal = $("#bookings-expand-modal");
+  const modalBody = $("#bookings-modal-body");
+  if (!modal || !modalBody) return;
+
+  modal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  modalBody.innerHTML = "";
+
+  const list = Array.isArray(confirmedList) ? confirmedList : [];
+  if (!list.length) {
+    modalBody.innerHTML = '<div class="empty">Ainda não existem marcações ou pedidos confirmados. Quando validar solicitações de clientes, elas aparecerão aqui.</div>';
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  list.forEach(r => {
+    const card = document.createElement("div");
+    card.className = "pending-action-card";
+
+    const header = document.createElement("div");
+    header.className = "pending-action-card-header";
+
+    const clientInfo = document.createElement("div");
+    clientInfo.innerHTML = `<strong>${escapeHtml(r.name || r.contact_key)}</strong> <span class="muted" style="font-size:12px;">(${escapeHtml(r.contact_key)})</span>`;
+
+    const statusBadge = document.createElement("span");
+    statusBadge.className = "badge";
+    if (r.status === "confirmed_manual") {
+      statusBadge.style.background = "#EBE5FF";
+      statusBadge.style.color = "#7657E8";
+      statusBadge.textContent = "Confirmado Manualmente";
+    } else if (r.status === "treated") {
+      statusBadge.style.background = "#FEE2E2";
+      statusBadge.style.color = "#DC2626";
+      statusBadge.textContent = "Tratado (Sem disponibilidade)";
+    } else {
+      statusBadge.style.background = "#DCFCE7";
+      statusBadge.style.color = "#15803D";
+      statusBadge.textContent = "Confirmado com IA";
+    }
+
+    header.append(clientInfo, statusBadge);
+
+    const detailsBox = document.createElement("div");
+    detailsBox.className = "modal-text-block";
+    detailsBox.style.background = "#FFFDF7";
+    detailsBox.style.padding = "10px 14px";
+    detailsBox.style.border = "2px solid var(--border-arcade)";
+    detailsBox.style.borderRadius = "var(--radius-sm)";
+    detailsBox.style.fontSize = "13px";
+    detailsBox.style.lineHeight = "1.5";
+    detailsBox.textContent = r.details || "Detalhes do agendamento ou pedido confirmado.";
+
+    const metaLine = document.createElement("div");
+    metaLine.style.fontSize = "11.5px";
+    metaLine.style.color = "var(--text-secondary)";
+    metaLine.style.fontFamily = "var(--font-mono)";
+    const dateStr = r.resolved_at || r.created_at;
+    metaLine.textContent = `Registado em: ${dateStr ? new Date(dateStr).toLocaleString("pt-PT") : "Data recente"}`;
+
+    card.append(header, detailsBox, metaLine);
+    fragment.append(card);
+  });
+
+  modalBody.append(fragment);
+}
+
+function closeBookingsModal() {
+  const modal = $("#bookings-expand-modal");
+  if (modal) modal.classList.add("hidden");
+  if ($("#card-expand-modal").classList.contains("hidden") && $("#pending-expand-modal").classList.contains("hidden")) {
+    document.body.style.overflow = "";
+  }
+}
+
+$("#close-bookings-modal")?.addEventListener("click", closeBookingsModal);
+$("#bookings-expand-modal")?.addEventListener("click", e => {
+  if (e.target === $("#bookings-expand-modal")) closeBookingsModal();
+});
+
 /* Modal Centralizado de Confirmação Automática / Alternativa com IA */
 let pendingModalReturnFocus = null;
 
@@ -1444,8 +1603,10 @@ function renderPendingModalList(requests) {
     clientInfo.innerHTML = `<strong>${escapeHtml(r.name || r.contact_key)}</strong> <span class="muted" style="font-size:12px;">(${escapeHtml(r.contact_key)})</span>`;
 
     const typeBadge = document.createElement("span");
-    typeBadge.className = "pending-action-type";
-    typeBadge.textContent = r.request_type || "Pedido";
+    typeBadge.className = "badge";
+    typeBadge.style.background = "var(--violet-subtle)";
+    typeBadge.style.color = "var(--color-primary)";
+    typeBadge.textContent = r.request_type || "Marcação/Pedido";
 
     header.append(clientInfo, typeBadge);
 
@@ -1453,80 +1614,111 @@ function renderPendingModalList(requests) {
     detailsBox.className = "modal-text-block";
     detailsBox.style.background = "#ffffff";
     detailsBox.style.padding = "10px 14px";
-    detailsBox.style.border = "1px solid var(--border)";
+    detailsBox.style.border = "2px solid var(--border-arcade)";
     detailsBox.style.borderRadius = "var(--radius-sm)";
     detailsBox.style.fontSize = "13px";
     detailsBox.style.lineHeight = "1.5";
-    detailsBox.textContent = r.details || "Pedido aguardando confirmação do proprietário.";
+    detailsBox.textContent = r.details || "Pedido aguardando validação do proprietário.";
 
-    const noteBox = document.createElement("div");
-    noteBox.className = "pending-note-box";
-    const noteLabel = document.createElement("label");
-    noteLabel.style.fontSize = "12px";
-    noteLabel.style.fontWeight = "600";
-    noteLabel.style.color = "var(--gray-600)";
-    noteLabel.textContent = "Observação ou instrução para a resposta da IA (opcional):";
-    const noteInput = document.createElement("textarea");
-    noteInput.rows = 2;
-    noteInput.placeholder = "Ex: 'Confirmar para as 15h', 'Informar que temos vaga às 16h', ou 'Sugerir modelo alternativo'...";
-    noteBox.append(noteLabel, noteInput);
+    // Caixa de mensagem manual (expansível quando o utilizador quer escrever a própria resposta)
+    const manualBox = document.createElement("div");
+    manualBox.className = "manual-reply-box hidden";
+    manualBox.style.marginTop = "8px";
+    manualBox.style.display = "none";
+    manualBox.style.flexDirection = "column";
+    manualBox.style.gap = "6px";
+
+    const manualLabel = document.createElement("label");
+    manualLabel.style.fontSize = "12px";
+    manualLabel.style.fontWeight = "700";
+    manualLabel.style.color = "var(--text-primary)";
+    manualLabel.textContent = "Escreva a sua mensagem oficial de validação:";
+
+    const manualInput = document.createElement("textarea");
+    manualInput.rows = 3;
+    manualInput.placeholder = "Ex: 'A sua marcação está confirmada para amanhã às 15h. Esperamos por si!'...";
+    manualInput.style.width = "100%";
+    manualInput.style.padding = "8px 12px";
+    manualInput.style.border = "2px solid var(--border-arcade)";
+    manualInput.style.borderRadius = "var(--radius-md)";
+
+    const btnSendManual = document.createElement("button");
+    btnSendManual.className = "btn primary small";
+    btnSendManual.textContent = "Enviar Validação Manual";
+    btnSendManual.onclick = async () => {
+      const text = manualInput.value.trim();
+      if (!text) {
+        alert("Por favor, escreva a sua mensagem antes de enviar.");
+        manualInput.focus();
+        return;
+      }
+      btnSendManual.disabled = true;
+      btnSendManual.textContent = "A enviar validação...";
+      try {
+        await api(`/api/conversions/${r.id}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: "confirm_manual", custom_note: text })
+        });
+        showNotice("Marcação validada manualmente e mensagem enviada com sucesso!");
+        await openPendingConfirmationsModal();
+        await loadDashboard();
+      } catch (err) {
+        showNotice(err.message, true);
+        btnSendManual.disabled = false;
+        btnSendManual.textContent = "Enviar Validação Manual";
+      }
+    };
+
+    manualBox.append(manualLabel, manualInput, btnSendManual);
 
     const actions = document.createElement("div");
     actions.className = "pending-action-buttons";
 
-    const btnConfirm = document.createElement("button");
-    btnConfirm.className = "btn-confirm-action";
-    btnConfirm.innerHTML = "Confirmar (Enviar E-mail via IA)";
-    btnConfirm.onclick = async () => {
-      btnConfirm.disabled = true;
-      btnReject.disabled = true;
-      btnConfirm.textContent = "A gerar e enviar e-mail oficial...";
+    // Opção 1: Validar Automaticamente com IA
+    const btnConfirmAI = document.createElement("button");
+    btnConfirmAI.className = "btn-confirm-action";
+    btnConfirmAI.innerHTML = "Validar Automaticamente (IA)";
+    btnConfirmAI.title = "A IA gera e envia uma resposta formal validando o pedido imediatamente";
+    btnConfirmAI.onclick = async () => {
+      btnConfirmAI.disabled = true;
+      btnConfirmAI.textContent = "A validar com IA...";
       try {
         const res = await api(`/api/conversions/${r.id}/action`, {
           method: "POST",
-          body: JSON.stringify({ action: "confirm", note: noteInput.value.trim() })
+          body: JSON.stringify({ action: "confirm", custom_note: "" })
         });
-        showNotice(res.detail || "Confirmação enviada por e-mail ao cliente com sucesso!");
+        showNotice(res.detail || "Marcação validada e confirmada via IA com sucesso!");
         await openPendingConfirmationsModal();
         await loadDashboard();
       } catch (err) {
         showNotice(err.message, true);
-        btnConfirm.disabled = false;
-        btnReject.disabled = false;
-        btnConfirm.innerHTML = "Confirmar (Enviar E-mail via IA)";
+        btnConfirmAI.disabled = false;
+        btnConfirmAI.innerHTML = "Validar Automaticamente (IA)";
       }
     };
 
-    const btnReject = document.createElement("button");
-    btnReject.className = "btn-reject-action";
-    btnReject.innerHTML = "Não Disponível / Sugerir Outro (IA)";
-    btnReject.onclick = async () => {
-      btnConfirm.disabled = true;
-      btnReject.disabled = true;
-      btnReject.textContent = "A gerar e enviar e-mail oficial...";
+    // Opção 2: Escrever a própria mensagem de validação
+    const btnToggleManual = document.createElement("button");
+    btnToggleManual.className = "btn outline small";
+    btnToggleManual.textContent = "Escrever Mensagem";
+    btnToggleManual.onclick = () => {
+      const isHidden = manualBox.style.display === "none";
+      manualBox.style.display = isHidden ? "flex" : "none";
+      if (isHidden) manualInput.focus();
+    };
+
+    // Opção 3: Marcar como Tratado (em caso de não haver disponibilidade ou vaga)
+    const btnTreated = document.createElement("button");
+    btnTreated.className = "btn outline small";
+    btnTreated.textContent = "Tratado (Sem disponibilidade)";
+    btnTreated.title = "Marcar como tratado caso não haja vaga ou produto disponível";
+    btnTreated.style.marginLeft = "auto";
+    btnTreated.onclick = async () => {
       try {
-        const res = await api(`/api/conversions/${r.id}/action`, {
+        await api(`/api/conversions/${r.id}/action`, {
           method: "POST",
-          body: JSON.stringify({ action: "reject", note: noteInput.value.trim() })
+          body: JSON.stringify({ action: "treated", custom_note: "" })
         });
-        showNotice(res.detail || "Resposta alternativa enviada por e-mail ao cliente com sucesso!");
-        await openPendingConfirmationsModal();
-        await loadDashboard();
-      } catch (err) {
-        showNotice(err.message, true);
-        btnConfirm.disabled = false;
-        btnReject.disabled = false;
-        btnReject.innerHTML = "Não Disponível / Sugerir Outro (IA)";
-      }
-    };
-
-    const btnResolveDirect = document.createElement("button");
-    btnResolveDirect.className = "btn outline small";
-    btnResolveDirect.textContent = "Apenas Marcar Tratado";
-    btnResolveDirect.style.marginLeft = "auto";
-    btnResolveDirect.onclick = async () => {
-      try {
-        await api(`/api/conversions/${r.id}/resolve`, { method: "POST" });
         showNotice("Pedido marcado como tratado.");
         await openPendingConfirmationsModal();
         await loadDashboard();
@@ -1535,9 +1727,8 @@ function renderPendingModalList(requests) {
       }
     };
 
-    actions.append(btnConfirm, btnReject, btnResolveDirect);
-
-    card.append(header, detailsBox, noteBox, actions);
+    actions.append(btnConfirmAI, btnToggleManual, btnTreated);
+    card.append(header, detailsBox, manualBox, actions);
     modalBody.append(card);
   });
 }
@@ -1745,11 +1936,23 @@ async function renderConversationMessages(id, autoScroll = true) {
   }
 }
 
-// Botão para voltar à lista de clientes (Cards)
+// Botão para voltar da conversa actual e regressar à lista de clientes
 $("#btn-back-to-inbox")?.addEventListener("click", () => {
   selectedContact = null;
-  $("#messages-chat-view")?.classList.add("hidden");
-  $("#messages-inbox-view")?.classList.remove("hidden");
+  const conv = $("#conversation");
+  if (conv) {
+    conv.className = "conversation empty";
+    conv.textContent = "Selecione uma conversa ao lado para visualizar o histórico de mensagens.";
+  }
+  const title = $("#conversation-title");
+  if (title) title.textContent = "Selecione um cliente";
+  const sub = $("#conversation-subtitle");
+  if (sub) sub.textContent = "Gmail Oficial";
+  $$(".contact-card.active").forEach(c => c.classList.remove("active"));
+
+  // Em ecrãs móveis/responsivos, esconde a coluna de chat e mostra a lista de contactos
+  $("#messages-canvas-col")?.classList.remove("active");
+  $("#messages-inbox-col")?.classList.remove("hidden");
   loadContacts(false);
 });
 
@@ -1873,13 +2076,29 @@ async function loadReports() {
     const circle = document.createElementNS(svg.namespaceURI, "circle");
     circle.setAttribute("cx", p.x);
     circle.setAttribute("cy", p.y);
-    circle.setAttribute("r", "3.5");
-    circle.setAttribute("fill", "#2563eb");
-    circle.setAttribute("stroke", "#ffffff");
+    circle.setAttribute("r", "4.5");
+    circle.setAttribute("fill", "#7657E8");
+    circle.setAttribute("stroke", "#171923");
     circle.setAttribute("stroke-width", "2");
-    const title = document.createElementNS(svg.namespaceURI, "title");
-    title.textContent = `${p.date}: ${p.count} clientes`;
-    circle.append(title);
+    circle.style.cursor = "pointer";
+    circle.style.transition = "transform 0.15s ease, r 0.15s ease";
+
+    // Tooltip dinâmico de alta precisão ao passar o mouse nas etapas da linha
+    circle.addEventListener("mouseenter", e => {
+      circle.setAttribute("r", "7");
+      circle.setAttribute("fill", "#C9F36A");
+      showChartTooltip(e, `Etapa: ${p.date}`, `${p.count} ${p.count === 1 ? 'cliente' : 'clientes'}`);
+    });
+    circle.addEventListener("mousemove", e => {
+      const tip = getChartTooltip();
+      tip.style.left = `${e.clientX}px`;
+      tip.style.top = `${e.clientY - 14}px`;
+    });
+    circle.addEventListener("mouseleave", () => {
+      circle.setAttribute("r", "4.5");
+      circle.setAttribute("fill", "#7657E8");
+      hideChartTooltip();
+    });
     svg.append(circle);
   });
   el.append(svg);
@@ -2064,7 +2283,7 @@ function calculateKnowledgeReadiness() {
 async function updateDashboardKnowledgeBanner() {
   if (!infoCache || !infoCache.length) {
     try {
-      infoCache = await api("/api/business-info");
+      infoCache = (await api("/api/business-info") || []).filter(x => x.kind !== "subscription" && x.kind !== "assinatura" && !x.title.toLowerCase().startsWith("assinatura"));
     } catch (e) {
       infoCache = [];
     }
@@ -3004,7 +3223,7 @@ function renderCardsFromCache() {
 }
 
 async function loadInfo() {
-  infoCache = await api("/api/business-info");
+  infoCache = (await api("/api/business-info") || []).filter(x => x.kind !== "subscription" && x.kind !== "assinatura" && !x.title.toLowerCase().startsWith("assinatura"));
   renderCardsFromCache();
 }
 
@@ -3878,6 +4097,7 @@ async function handleEmailSync(triggerBtn) {
     triggerBtn.disabled = true;
     triggerBtn.textContent = "A sincronizar...";
   }
+  setAgentStatus("responding");
   try {
     const res = await api("/api/email/sync", { method: "POST" });
     showNotice(res.message || "Sincronização concluída com sucesso!");
@@ -3900,6 +4120,13 @@ $("#btn-sync-emails-messages")?.addEventListener("click", (e) => handleEmailSync
 
 // Controlo de Respostas Automáticas do Agente
 function updateAutoReplyUI(enabled, connected = true) {
+  if (!connected) {
+    setAgentStatus("disconnected");
+  } else if (enabled) {
+    setAgentStatus("ready");
+  } else {
+    setAgentStatus("paused");
+  }
   const autoReplyText = $("#email-info-auto-reply");
   const autoReplyBtn = $("#btn-toggle-auto-reply");
   const msgToggleBtn = $("#btn-toggle-auto-reply-messages");

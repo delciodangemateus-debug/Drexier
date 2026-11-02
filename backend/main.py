@@ -208,7 +208,7 @@ class OwnerReplyIn(BaseModel):
     message: str = Field(min_length=1, max_length=10000)
 
 class ConversionActionIn(BaseModel):
-    action: str = Field(pattern="^(confirm|reject)$")
+    action: str = Field(pattern="^(confirm|confirm_manual|reject|treated)$")
     custom_note: Optional[str] = ""
 
 def _start_auth_challenge(email: str, name: str, purpose: str, payload: dict):
@@ -444,8 +444,14 @@ def dashboard(user=Depends(current_user)):
         pending_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,ct.name,ct.contact_key
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
           WHERE r.user_id=? AND r.status='pending' ORDER BY r.created_at DESC""",(uid,)).fetchall()
+        bookings_count=c.execute("SELECT COUNT(*) n FROM conversion_requests WHERE user_id=? AND status IN ('confirmed', 'confirmed_manual', 'resolved')", (uid,)).fetchone()["n"]
+        bookings_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,r.resolved_at,r.status,ct.name,ct.contact_key
+          FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
+          WHERE r.user_id=? AND r.status IN ('confirmed', 'confirmed_manual', 'resolved', 'treated')
+          ORDER BY COALESCE(r.resolved_at, r.created_at) DESC""",(uid,)).fetchall()
     res = {"messages_answered":total_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
-            "yesterday_contacts":yesterday_contacts,"pending_count":pending,"pending_requests":[dict(x) for x in pending_rows]}
+            "yesterday_contacts":yesterday_contacts,"pending_count":pending,"pending_requests":[dict(x) for x in pending_rows],
+            "bookings_count":bookings_count,"confirmed_bookings":[dict(x) for x in bookings_rows]}
     _dashboard_cache[uid] = (now, res)
     return res
 @app.get("/api/analytics")
@@ -498,7 +504,7 @@ def delete_contact(contact_id: int, user=Depends(current_user)):
 @app.get("/api/business-info")
 def get_business_info(user=Depends(current_user)):
     with connect() as c:
-        rows=c.execute("SELECT * FROM business_info WHERE user_id=? ORDER BY updated_at DESC",(user["id"],)).fetchall()
+        rows=c.execute("SELECT * FROM business_info WHERE user_id=? AND kind NOT IN ('subscription', 'assinatura') ORDER BY updated_at DESC",(user["id"],)).fetchall()
     return [dict(x) | {"metadata":json.loads(x["metadata"] or "{}")} for x in rows]
 
 @app.post("/api/business-info")

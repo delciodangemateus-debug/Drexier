@@ -149,7 +149,7 @@ def _save_stored_subscription(user_id: int, data: Dict[str, Any]):
                     """UPDATE subscriptions SET
                        stripe_customer_id = ?, stripe_subscription_id = ?, stripe_price_id = ?,
                        plan_name = ?, amount = ?, currency = ?, status = ?,
-                       current_period_end = ?, cancel_at_period_end = ?, updated_at = CURRENT_TIMESTAMP
+                       current_period_end = ?, cancel_at_period_end = ?, last_successful_payment_at = ?, updated_at = CURRENT_TIMESTAMP
                        WHERE user_id = ?""",
                     (
                         str(data.get("stripe_customer_id") or ""),
@@ -161,6 +161,7 @@ def _save_stored_subscription(user_id: int, data: Dict[str, Any]):
                         str(data.get("status") or "inactive"),
                         str(data.get("current_period_end") or ""),
                         1 if data.get("cancel_at_period_end") else 0,
+                        str(data.get("last_successful_payment_at") or ""),
                         user_id,
                     )
                 )
@@ -168,8 +169,8 @@ def _save_stored_subscription(user_id: int, data: Dict[str, Any]):
                 c.execute(
                     """INSERT INTO subscriptions (
                        user_id, stripe_customer_id, stripe_subscription_id, stripe_price_id,
-                       plan_name, amount, currency, status, current_period_end, cancel_at_period_end
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       plan_name, amount, currency, status, current_period_end, cancel_at_period_end, last_successful_payment_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         user_id,
                         str(data.get("stripe_customer_id") or ""),
@@ -181,31 +182,18 @@ def _save_stored_subscription(user_id: int, data: Dict[str, Any]):
                         str(data.get("status") or "inactive"),
                         str(data.get("current_period_end") or ""),
                         1 if data.get("cancel_at_period_end") else 0,
+                        str(data.get("last_successful_payment_at") or ""),
                     )
                 )
             saved_in_table = True
         except Exception as ex:
             logger.debug(f"Tabela subscriptions não disponível, utilizando fallback business_info: {ex}")
 
-        # Fallback de segurança: salva ou atualiza em business_info com kind='subscription'
+        # Limpeza preventiva: garante que a tabela business_info não seja poluída com cards de assinatura
         try:
-            existing_rec = c.execute(
-                "SELECT id FROM business_info WHERE user_id = ? AND kind = 'subscription'",
-                (user_id,)
-            ).fetchone()
-            json_meta = json.dumps(data, default=str, ensure_ascii=False)
-            if existing_rec:
-                c.execute(
-                    "UPDATE business_info SET title = ?, content = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (f"Assinatura: {data.get('status', 'inactive')}", json_meta, json_meta, existing_rec["id"])
-                )
-            else:
-                c.execute(
-                    "INSERT INTO business_info (user_id, kind, title, content, metadata) VALUES (?, 'subscription', ?, ?, ?)",
-                    (user_id, f"Assinatura: {data.get('status', 'inactive')}", json_meta, json_meta)
-                )
-        except Exception as ex2:
-            logger.error(f"Erro ao salvar fallback de assinatura em business_info: {ex2}")
+            c.execute("DELETE FROM business_info WHERE user_id = ? AND kind IN ('subscription', 'assinatura')", (user_id,))
+        except Exception:
+            pass
 
 
 # Cache em memória para evitar chamadas bloqueantes repetitivas à API da Stripe

@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="./styles.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script type="module" src="./i18n.js"></script>
 <script>
   try {
@@ -790,45 +790,17 @@
           </div>
         </article>
 
-        <!-- 5: Vendas Geradas / Pedidos Pendentes -->
-        <article class="kpi-card clickable" id="card-metric-pending" title="Clique para gerir pedidos">
-          <div class="kpi-card-top">
-            <span class="kpi-card-label">Vendas &amp; Pedidos</span>
-            <div class="kpi-card-icon" style="color:var(--color-warning);">
-              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
-            </div>
-          </div>
-          <div class="kpi-card-value" id="metric-pending">0</div>
-          <div class="kpi-card-sub">
-            <span class="kpi-trend-pill" style="background:var(--color-warning-bg); color:var(--color-warning);">Aguardando confirmação</span>
-          </div>
-        </article>
-
-        <!-- 6: Marcações Adquiridas -->
-        <article class="kpi-card" id="card-metric-bookings">
+        <!-- 5: Marcações Adquiridas (Clicável para ver lista de pessoas confirmadas) -->
+        <article class="kpi-card clickable" id="card-metric-bookings" title="Clique para ver lista de marcações confirmadas">
           <div class="kpi-card-top">
             <span class="kpi-card-label">Marcações Adquiridas</span>
-            <div class="kpi-card-icon">
+            <div class="kpi-card-icon" style="color:var(--color-primary);">
               <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
             </div>
           </div>
           <div class="kpi-card-value" id="metric-bookings">0</div>
           <div class="kpi-card-sub">
-            <span>Agendamentos detetados</span>
-          </div>
-        </article>
-
-        <!-- 7: Taxa de Conversão -->
-        <article class="kpi-card" id="card-metric-conversion">
-          <div class="kpi-card-top">
-            <span class="kpi-card-label">Taxa de Conversão</span>
-            <div class="kpi-card-icon">
-              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
-            </div>
-          </div>
-          <div class="kpi-card-value" id="metric-conversion-rate">0%</div>
-          <div class="kpi-card-sub">
-            <span>Conversão de oportunidades</span>
+            <span class="kpi-trend-pill up">Confirmadas &bull; Ver lista</span>
           </div>
         </article>
       </div>
@@ -982,38 +954,7 @@
             </form>
           </div>
 
-          <!-- COLUNA 3: PERFIL DO CLIENTE -->
-          <div class="messages-profile-panel" id="messages-profile-panel">
-            <span class="profile-section-heading">Perfil do Cliente</span>
-            <div class="profile-field-item">
-              <span class="profile-field-label">Nome</span>
-              <span class="profile-field-value" id="profile-client-name">-</span>
-            </div>
-            <div class="profile-field-item">
-              <span class="profile-field-label">Email / Contacto</span>
-              <span class="profile-field-value" id="profile-client-key">-</span>
-            </div>
-            <div class="profile-field-item">
-              <span class="profile-field-label">Origem</span>
-              <span class="profile-field-value">Google Gmail</span>
-            </div>
-            <div class="profile-field-item">
-              <span class="profile-field-label">Estado Comercial</span>
-              <span class="badge" id="profile-client-status" style="background:var(--surface-interaction); color:var(--lavender); align-self:flex-start;">Em atendimento</span>
-            </div>
 
-            <hr style="margin: 16px 0;">
-
-            <span class="profile-section-heading">Inteligência Contextual</span>
-            <div class="profile-field-item">
-              <span class="profile-field-label">Interesse Identificado</span>
-              <span class="profile-field-value" id="profile-client-interest" style="font-size:12.5px; font-weight:normal; color:var(--text-secondary);">Análise de diálogo em tempo real</span>
-            </div>
-            <div class="profile-field-item">
-              <span class="profile-field-label">Modo de Atendimento</span>
-              <span class="profile-field-value" id="profile-handover-mode">Automático (IA Drexier)</span>
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -1747,6 +1688,22 @@
 </div>
 
 <!-- Modal para Validação de Pedidos / Marcações -->
+<!-- Modal de Marcações Adquiridas / Clientes Confirmados -->
+<div id="bookings-expand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="bookings-modal-title" tabindex="-1">
+  <div class="modal-card modal-card-large">
+    <div class="modal-header">
+      <div>
+        <h2 id="bookings-modal-title" style="margin:0;">Marcações Adquiridas &amp; Confirmadas</h2>
+        <p class="muted" style="margin:3px 0 0; font-size:13px;">Lista de clientes confirmados (automaticamente com IA ou manualmente) e histórico de pedidos tratados.</p>
+      </div>
+      <button class="modal-close-btn" id="close-bookings-modal" aria-label="Fechar">&times;</button>
+    </div>
+    <div id="bookings-modal-body" class="variant-list">
+      <div class="empty">A carregar marcações adquiridas...</div>
+    </div>
+  </div>
+</div>
+
 <div id="pending-expand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="pending-modal-title" tabindex="-1">
   <div class="modal-card modal-card-large">
     <div class="modal-header">
