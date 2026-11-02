@@ -1214,10 +1214,17 @@ function expandMetricCard(title, value, description) {
 }
 
 let dashboardCacheData = null;
+try {
+  const _storedDash = localStorage.getItem("drexier_dashboard_cache");
+  if (_storedDash) dashboardCacheData = JSON.parse(_storedDash);
+} catch (_) {}
 
 function renderDashboardData(d) {
   if (!d) return;
   dashboardCacheData = d;
+  try {
+    localStorage.setItem("drexier_dashboard_cache", JSON.stringify(d));
+  } catch (_) {}
 
   const msgs = Number(d.messages_answered) || 0;
   const contacts = Number(d.total_contacts) || 0;
@@ -4267,15 +4274,15 @@ if (agentGlobalBtn2) {
 let livePollTimeoutId = null;
 let isPollingActive = false;
 
-function scheduleNextPoll(delayMs = 15000) {
+function scheduleNextPoll(delayMs = 5000) {
   if (livePollTimeoutId) clearTimeout(livePollTimeoutId);
   livePollTimeoutId = setTimeout(async () => {
     if (!token || document.hidden) {
-      scheduleNextPoll(10000);
+      scheduleNextPoll(8000);
       return;
     }
     if (isPollingActive) {
-      scheduleNextPoll(5000);
+      scheduleNextPoll(3000);
       return;
     }
     isPollingActive = true;
@@ -4288,13 +4295,14 @@ function scheduleNextPoll(delayMs = 15000) {
     } catch (_) {
     } finally {
       isPollingActive = false;
-      scheduleNextPoll(15000);
+      const nextDelay = activePage === "dashboard" ? 5000 : 8000;
+      scheduleNextPoll(nextDelay);
     }
   }, delayMs);
 }
 
 function startLivePolling() {
-  scheduleNextPoll(15000);
+  scheduleNextPoll(3000);
 }
 
 function stopLivePolling() {

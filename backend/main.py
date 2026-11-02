@@ -425,7 +425,11 @@ def update_account(data: ProfileUpdate, user=Depends(current_user), _sub=Depends
     return {"ok": True}
 
 _dashboard_cache = {}  # uid -> (timestamp, data)
-DASHBOARD_CACHE_TTL = 10.0
+DASHBOARD_CACHE_TTL = 3.0
+
+def invalidate_dashboard_cache(user_id: int):
+    """Invalida o cache do dashboard imediatamente quando há nova interação/ação."""
+    _dashboard_cache.pop(user_id, None)
 
 @app.get("/api/dashboard")
 def dashboard(user=Depends(current_user)):
@@ -677,6 +681,7 @@ def create_conversion(contact_id:int,data:ConversionIn,user=Depends(current_user
 
 @app.post("/api/conversions/{request_id}/action")
 async def conversion_action(request_id: int, data: ConversionActionIn, user=Depends(current_user)):
+    invalidate_dashboard_cache(user["id"])
     try:
         res = await process_confirmation_action(
             user_id=user["id"],
@@ -693,6 +698,7 @@ async def conversion_action(request_id: int, data: ConversionActionIn, user=Depe
 
 @app.post("/api/conversions/{request_id}/resolve")
 def resolve_conversion(request_id:int,user=Depends(current_user)):
+    invalidate_dashboard_cache(user["id"])
     with connect() as c:
         cur=c.execute("UPDATE conversion_requests SET status='resolved',resolved_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND status='pending'",
           (request_id,user["id"]))

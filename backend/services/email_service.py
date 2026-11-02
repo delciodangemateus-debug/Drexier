@@ -742,26 +742,8 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
 
             # Deduplicação imediata contra repetição por eventual lag do índice Gmail
             if msg_id in _PROCESSED_MESSAGE_IDS:
-                try:
-                    await client.post(
-                        f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
-                        headers=headers,
-                        json={"removeLabelIds": ["UNREAD"]}
-                    )
-                except Exception:
-                    pass
                 continue
             _PROCESSED_MESSAGE_IDS.add(msg_id)
-
-            # Marca UNREAD como removido imediatamente na chegada para não reprocessar na varredura seguinte
-            try:
-                await client.post(
-                    f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
-                    headers=headers,
-                    json={"removeLabelIds": ["UNREAD"]}
-                )
-            except Exception:
-                pass
 
             msg_res = await client.get(f"{GMAIL_API_BASE}/messages/{msg_id}?format=full", headers=headers)
             if msg_res.status_code != 200:
@@ -1337,9 +1319,41 @@ async def sync_emails_for_user(user_id: int) -> List[Dict[str, Any]]:
     user_dict = dict(user)
     integration_dict = dict(integration)
     payment_at = get_last_successful_payment_at(user_id)
+    if not payment_at:
+        # Fallback: tenta reconciliar com a Stripe para utilizadores com assinatura ativa mas sem
+        # data de pagamento persistida localmente. Apenas quando a Stripe esta configurada.
+        # A reconciliacao em get_user_subscription_status() persiste os dados automaticamente.
+        try:
+            from backend.services.billing_service import (
+                get_user_subscription_status as _get_sub_status,
+                is_stripe_configured as _stripe_ok,
+            )
+            if _stripe_ok():
+                # A reconciliacao Stripe e feita internamente e persiste last_successful_payment_at
+                _get_sub_status(user_id)
+                # Tentar novamente depois da reconciliacao Stripe
+                payment_at = get_last_successful_payment_at(user_id)
+                if payment_at:
+                    logger.info(
+                        f"[Sync Fallback] Pagamento recuperado via reconciliacao Stripe para user {user_id}: {payment_at}"
+                    )
+                else:
+                    # Assinatura ativa na Stripe mas sem data de fatura disponivel.
+                    # Usa created_at como cutoff APENAS se existir um stripe_subscription_id real
+                    # (garante que e uma assinatura confirmada pela API da Stripe, nao apenas local).
+                    sub_check = _get_sub_status(user_id)
+                    stripe_sub_id = sub_check.get("stripe_subscription_id") or ""
+                    if sub_check.get("has_active_subscription") and stripe_sub_id.startswith("sub_"):
+                        payment_at = integration_dict.get("created_at") or "2020-01-01T00:00:00+00:00"
+                        logger.info(
+                            f"[Sync Fallback] Assinatura Stripe {stripe_sub_id} ativa sem data de fatura. "
+                            f"Usando created_at como cutoff para user {user_id}: {payment_at}"
+                        )
+        except Exception as _fe:
+            logger.warning(f"[Sync Fallback] Erro ao reconciliar com Stripe para user {user_id}: {_fe}")
     integration_dict["last_successful_payment_at"] = payment_at
     if get_email_response_cutoff(integration_dict) is None:
-        logger.info(f"[SaaS Paywall] Sincronização de e-mail bloqueada para user {user_id}: aguarda pagamento confirmado.")
+        logger.info(f"[SaaS Paywall] Sincronizacao de e-mail bloqueada para user {user_id}: aguarda pagamento confirmado.")
         return []
     provider = integration_dict.get("provider")
 
