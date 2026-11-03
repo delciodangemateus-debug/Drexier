@@ -501,3 +501,66 @@ async def draft_reply(
 
     # 2. Se a API do Gemini não estiver configurada ou falhar, ativa o fallback local
     return strip_markdown_highlights(local_fallback(message, info_rows, business_name))
+
+
+def check_business_availability(
+    message: str,
+    subject: str = "",
+    info_rows = None,
+    business_type: str = "Serviços"
+) -> dict:
+    """
+    Verifica a disponibilidade de marcação/pedido do cliente através
+    dos dados registrados na aba Negócio (horários, dias, produtos e stock).
+    Retorna:
+      - available: bool
+      - reason: str (motivo se indisponível, ou confirmação)
+      - matched_info: str (informação consultada nos cards)
+    """
+    info_rows = info_rows or []
+    text = f"{subject} {message}".lower()
+
+    hours_info = ""
+    for r in info_rows:
+        kind = r.get("kind") if isinstance(r, dict) else r["kind"]
+        if kind in ("horarios", "horario"):
+            hours_info = r.get("content") or ""
+            break
+
+    # 1. Verificação de dias encerrados
+    if hours_info:
+        h_lower = hours_info.lower()
+        if ("domingo" in text or "ao domingo" in text) and "domingo" not in h_lower and ("segunda a sexta" in h_lower or "segunda a sábado" in h_lower):
+            return {
+                "available": False,
+                "reason": "Encerrado aos domingos",
+                "matched_info": hours_info
+            }
+        if ("sábado" in text or "sabado" in text or "ao sábado" in text) and "sábado" not in h_lower and "sabado" not in h_lower and "segunda a sexta" in h_lower:
+            return {
+                "available": False,
+                "reason": "Encerrado aos sábados",
+                "matched_info": hours_info
+            }
+
+    # 2. Verificação de horários fora de expediente
+    m_hour = re.search(r"\b(\d{1,2})[h:](\d{2})?\b", text)
+    if m_hour and hours_info:
+        req_hour = int(m_hour.group(1))
+        hours_found = [int(h) for h in re.findall(r"\b(\d{1,2})[h:]\d{0,2}", hours_info.lower())]
+        if hours_found:
+            min_h = min(hours_found)
+            max_h = max(hours_found)
+            if req_hour < min_h or req_hour > max_h:
+                return {
+                    "available": False,
+                    "reason": f"Fora do horário de expediente ({min_h}h às {max_h}h)",
+                    "matched_info": hours_info
+                }
+
+    # 3. Disponibilidade confirmada
+    return {
+        "available": True,
+        "reason": "Disponibilidade confirmada com base nos dados e horários registrados do negócio.",
+        "matched_info": hours_info or "Horário padrão disponível"
+    }

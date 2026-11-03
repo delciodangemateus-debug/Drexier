@@ -16,7 +16,7 @@ from backend.auth import (
     decode_token,
 )
 from backend.services.agent import draft_reply
-from backend.services.analytics import daily_acquisitions
+from backend.services.analytics import daily_acquisitions, get_top_products_data, get_best_approaches_data, generate_strategic_ai_report
 from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
 from backend.services.resend_email import (
     get_resend_config,
@@ -190,6 +190,9 @@ class ProfileUpdate(BaseModel):
     business_type: str
     business_description: str = ""
     language: str = "Português"
+
+class AutomationLevelIn(BaseModel):
+    level: str = Field(pattern="^(full|semi|disabled)$")
 
 class AgentSettings(BaseModel):
     instructions: str = ""
@@ -461,9 +464,57 @@ def dashboard(user=Depends(current_user)):
 @app.get("/api/analytics")
 def analytics(user=Depends(current_user)):
     with connect() as c:
-        series=daily_acquisitions(c,user["id"],14)
-        variants=[dict(x) for x in c.execute("SELECT id,label,response_text,sent_count,conversions FROM response_variants WHERE user_id=? ORDER BY id",(user["id"],)).fetchall()]
-    return {"acquisitions":series,"variants":variants}
+        series = daily_acquisitions(c, user["id"], 14)
+        variants = [dict(x) for x in c.execute("SELECT id,label,response_text,sent_count,conversions FROM response_variants WHERE user_id=? ORDER BY id", (user["id"],)).fetchall()]
+        top_products = get_top_products_data(c, user["id"])
+        best_approaches = get_best_approaches_data(c, user["id"])
+    return {
+        "acquisitions": series,
+        "variants": variants,
+        "top_products": top_products,
+        "best_approaches": best_approaches
+    }
+
+@app.post("/api/reports/generate-ai-report")
+async def generate_ai_report(user=Depends(current_user)):
+    with connect() as c:
+        report = await generate_strategic_ai_report(c, user["id"])
+    return report
+
+@app.get("/api/agent/automation-level")
+def get_automation_level(user=Depends(current_user)):
+    with connect() as c:
+        row = c.execute("SELECT mandatory_responses FROM users WHERE id=?", (user["id"],)).fetchone()
+        mandatory = {}
+        if row and row["mandatory_responses"]:
+            try:
+                mandatory = json.loads(row["mandatory_responses"])
+            except Exception:
+                mandatory = {}
+        level = mandatory.get("automation_level", "semi")
+        return {"level": level}
+
+@app.post("/api/agent/automation-level")
+def set_automation_level(data: AutomationLevelIn, user=Depends(current_user)):
+    with connect() as c:
+        row = c.execute("SELECT mandatory_responses FROM users WHERE id=?", (user["id"],)).fetchone()
+        mandatory = {}
+        if row and row["mandatory_responses"]:
+            try:
+                mandatory = json.loads(row["mandatory_responses"])
+            except Exception:
+                mandatory = {}
+        mandatory["automation_level"] = data.level
+        c.execute(
+            "UPDATE users SET mandatory_responses=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (json.dumps(mandatory, ensure_ascii=False), user["id"])
+        )
+        auto_reply = 0 if data.level == "disabled" else 1
+        try:
+            c.execute("UPDATE email_integrations SET auto_reply_enabled=? WHERE user_id=?", (auto_reply, user["id"]))
+        except Exception:
+            pass
+    return {"ok": True, "level": data.level}
 
 @app.get("/api/contacts")
 def contacts(user=Depends(current_user)):

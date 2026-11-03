@@ -20,7 +20,7 @@ import httpx
 
 from backend.database import connect
 from backend.services.billing_service import get_last_successful_payment_at
-from backend.services.agent import draft_reply
+from backend.services.agent import draft_reply, check_business_availability
 
 load_dotenv()
 
@@ -1019,25 +1019,6 @@ async def process_and_reply_email(
             return "(Cooldown de segurança ativo)"
         _LAST_PROCESSED_AT[customer_email] = now_ts
 
-        # Detecção automática de marcação ou compra:
-        # REGRA MANDATÓRIA: Se o cliente quiser marcação ou compra, a IA NÃO responde automaticamente!
-        # Notifica na dashboard e aguarda a validação do proprietário.
-        intent = detect_booking_or_purchase_intent(incoming_content, subject)
-        if intent:
-            has_pending = c.execute(
-                "SELECT id FROM conversion_requests WHERE user_id = ? AND contact_id = ? AND status = 'pending'",
-                (user_id, cid)
-            ).fetchone()
-            if not has_pending:
-                c.execute(
-                    """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status)
-                       VALUES (?, ?, ?, ?, 'pending')""",
-                    (user_id, cid, intent["type"], f"Assunto: {subject}\n{incoming_content[:400]}", )
-                )
-                logger.info(f"[Validação Pendente] Intenção de {intent['type']} de {customer_email} registada na Dashboard para validação.")
-            # NÃO responde automaticamente! Aguarda a escolha do proprietário na Dashboard
-            return f"(Pedido de {intent['type']} registrado. Aguardando validação do proprietário na Dashboard)"
-
         # Histórico recente de mensagens desse cliente
         history_rows = c.execute(
             "SELECT sender, content FROM messages WHERE contact_id = ? AND user_id = ? AND id != last_insert_rowid() ORDER BY id DESC LIMIT 10",
@@ -1057,13 +1038,122 @@ async def process_and_reply_email(
         except Exception:
             pass
 
-    # Verifica se as respostas automáticas estão ativadas para o agente
-    auto_reply = bool(integration.get("auto_reply_enabled", 1))
-    if not auto_reply:
-        logger.info(
-            f"[Auto-Reply Desativado] Mensagem de {customer_email} registada com sucesso. Resposta automática pausada pelo utilizador."
-        )
-        return "(Resposta automática desativada pelo utilizador)"
+        # Nível de Automação do Agente ('full', 'semi', 'disabled')
+        automation_level = mandatory.get("automation_level", "semi")
+        auto_reply = bool(integration.get("auto_reply_enabled", 1)) and automation_level != "disabled"
+
+        if not auto_reply or automation_level == "disabled":
+            logger.info(
+                f"[Auto-Reply Desativado] Mensagem de {customer_email} registada com sucesso. Nível de automação desativado."
+            )
+            return "(Resposta automática desativada pelo utilizador - Nível Desativado)"
+
+        # Detecção de intenção de marcação ou compra
+        intent = detect_booking_or_purchase_intent(incoming_content, subject)
+        if intent:
+            if automation_level == "full":
+                # Nível Totalmente Automático: verifica disponibilidade nos dados registrados na aba Negócio
+                avail = check_business_availability(incoming_content, subject, info, user_dict.get("business_type") or "Serviços")
+                if avail["available"]:
+                    # Validação automática da marcação através dos dados do negócio
+                    c.execute(
+                        """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status, resolved_at)
+                           VALUES (?, ?, ?, ?, 'confirmed', CURRENT_TIMESTAMP)""",
+                        (user_id, cid, intent["type"], f"Assunto: {subject}\n{incoming_content[:400]}")
+                    )
+                    confirm_instruction = (
+                        f"Você é o atendente oficial de {user_dict.get('name') or 'nosso negócio'}. "
+                        f"O cliente ({customer_name}) solicitou {intent['type']}: '{incoming_content[:200]}'. "
+                        f"A disponibilidade foi verificada e confirmada com base nos dados e horários da empresa. "
+                        f"Escreva uma mensagem acolhedora, clara e profissional confirmando que a sua marcação/pedido está validada e registada com sucesso."
+                    )
+                    reply_text = await draft_reply(
+                        message=confirm_instruction,
+                        info_rows=info,
+                        instructions=user_dict.get("agent_instructions") or "",
+                        language=user_dict.get("language") or "Português",
+                        history=history,
+                        business_name=user_dict.get("name") or "nosso negócio",
+                        business_type=user_dict.get("business_type") or "Serviços",
+                        business_description=user_dict.get("business_description") or "",
+                        mandatory_responses=mandatory
+                    )
+                    c.execute(
+                        "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+                        (user_id, cid, reply_text)
+                    )
+                    c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
+                    reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+                    try:
+                        await send_email(
+                            integration=integration,
+                            to_email=customer_email,
+                            subject=reply_subject,
+                            body_text=reply_text,
+                            thread_id=thread_id,
+                            in_reply_to=message_id_header,
+                            references=message_id_header
+                        )
+                    except Exception as e_send:
+                        logger.error(f"Erro ao enviar confirmação automática de e-mail: {e_send}")
+                    return f"(Marcação de {intent['type']} validada e confirmada automaticamente com IA - Nível Totalmente Automático)"
+                else:
+                    # Fora de disponibilidade: propõe horários oficiais
+                    unavail_instruction = (
+                        f"Você é o atendente oficial de {user_dict.get('name') or 'nosso negócio'}. "
+                        f"O cliente solicitou {intent['type']}: '{incoming_content[:200]}', mas {avail['reason']}. "
+                        f"Horários do negócio: {avail['matched_info']}. "
+                        f"Escreva uma mensagem muito educada informando a indisponibilidade desse horário específico e propondo os horários/dias oficiais de atendimento."
+                    )
+                    reply_text = await draft_reply(
+                        message=unavail_instruction,
+                        info_rows=info,
+                        instructions=user_dict.get("agent_instructions") or "",
+                        language=user_dict.get("language") or "Português",
+                        history=history,
+                        business_name=user_dict.get("name") or "nosso negócio",
+                        business_type=user_dict.get("business_type") or "Serviços",
+                        business_description=user_dict.get("business_description") or "",
+                        mandatory_responses=mandatory
+                    )
+                    c.execute(
+                        """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status, resolved_at)
+                           VALUES (?, ?, ?, ?, 'treated', CURRENT_TIMESTAMP)""",
+                        (user_id, cid, intent["type"], f"Assunto: {subject}\n{incoming_content[:400]}")
+                    )
+                    c.execute(
+                        "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+                        (user_id, cid, reply_text)
+                    )
+                    c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
+                    reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+                    try:
+                        await send_email(
+                            integration=integration,
+                            to_email=customer_email,
+                            subject=reply_subject,
+                            body_text=reply_text,
+                            thread_id=thread_id,
+                            in_reply_to=message_id_header,
+                            references=message_id_header
+                        )
+                    except Exception as e_send:
+                        logger.error(f"Erro ao enviar alternativa: {e_send}")
+                    return f"(Pedido de {intent['type']} tratado automaticamente com proposta de horários alternativos)"
+            else:
+                # Nível Semi: a IA responde mas não valida de forma automática a marcação final, aguardando validação do usuário
+                has_pending = c.execute(
+                    "SELECT id FROM conversion_requests WHERE user_id = ? AND contact_id = ? AND status = 'pending'",
+                    (user_id, cid)
+                ).fetchone()
+                if not has_pending:
+                    c.execute(
+                        """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status)
+                           VALUES (?, ?, ?, ?, 'pending')""",
+                        (user_id, cid, intent["type"], f"Assunto: {subject}\n{incoming_content[:400]}")
+                    )
+                    logger.info(f"[Validação Pendente - Semi] Intenção de {intent['type']} de {customer_email} registada na Dashboard para validação.")
+                return f"(Pedido de {intent['type']} registrado. Aguardando validação do proprietário na Dashboard)"
 
     # Gerar resposta com a IA Drexier (Gemini ou fallback)
     try:

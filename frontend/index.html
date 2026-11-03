@@ -488,36 +488,18 @@
   <!-- FOOTER -->
   <footer class="lp-footer">
     <div class="lp-container">
-      <div class="lp-footer-grid">
+      <div class="lp-footer-grid" style="justify-content: center; text-align: center;">
         <div class="lp-footer-col">
           <div class="lp-brand" style="margin-bottom: 12px;">
             <span class="lp-wordmark">Drexier</span>
           </div>
-          <p class="muted" style="max-width: 320px; line-height: 1.6;">
+          <p class="muted" style="max-width: 420px; line-height: 1.6; margin: 0 auto;">
             Plataforma SaaS de inteligência artificial comercial, automação e gestão avançada de conversas com clientes.
           </p>
-        </div>
-        <div class="lp-footer-col">
-          <h4>Plataforma</h4>
-          <ul class="lp-footer-links">
-            <li><a href="#lp-hero">Visão Geral</a></li>
-            <li><a href="#lp-how-it-works">Como Funciona</a></li>
-            <li><a href="#lp-features">Funcionalidades</a></li>
-            <li><a href="#lp-benefits">Benefícios</a></li>
-          </ul>
-        </div>
-        <div class="lp-footer-col">
-          <h4>Acesso</h4>
-          <ul class="lp-footer-links">
-            <li><a href="#" id="lp-link-footer-login">Entrar na Conta</a></li>
-            <li><a href="#" id="lp-link-footer-signup">Criar Conta / Começar Agora</a></li>
-            <li><a href="#lp-faq">Perguntas Frequentes</a></li>
-          </ul>
         </div>
       </div>
       <div class="lp-footer-bottom">
         <span>&copy; Drexier &bull; Todos os direitos reservados.</span>
-        <span>Violet Intelligence Enterprise SaaS</span>
       </div>
     </div>
   </footer>
@@ -653,9 +635,45 @@
       </div>
 
       <div class="topbar-right">
+        <!-- CONTROLO NÍVEIS DE AUTOMAÇÃO -->
+        <div class="automation-levels-dropdown" id="automation-levels-control">
+          <button type="button" class="automation-level-trigger" id="btn-automation-level-trigger" aria-haspopup="true" aria-expanded="false" title="Níveis de Automação do Agente">
+            <span class="auto-level-dot full" id="auto-level-indicator"></span>
+            <span class="auto-level-label" id="auto-level-current-label">Totalmente Automático</span>
+            <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <div class="automation-level-menu hidden" id="automation-level-menu">
+            <div class="automation-menu-header">
+              <strong>Níveis de Automação</strong>
+              <span>Autonomia de resposta e validação</span>
+            </div>
+            <button type="button" class="automation-menu-item active" data-level="full">
+              <span class="auto-level-dot full"></span>
+              <div class="auto-menu-info">
+                <strong>Totalmente Automático</strong>
+                <p>A IA responde de maneira 100% automática e valida a marcação através da verificação de disponibilidade na aba Negócio.</p>
+              </div>
+            </button>
+            <button type="button" class="automation-menu-item" data-level="semi">
+              <span class="auto-level-dot semi"></span>
+              <div class="auto-menu-info">
+                <strong>Semi-automático</strong>
+                <p>A IA responde a dúvidas, mas não valida de forma automática a marcação final (valida apenas quando clica em 'Validar com IA').</p>
+              </div>
+            </button>
+            <button type="button" class="automation-menu-item" data-level="disabled">
+              <span class="auto-level-dot disabled"></span>
+              <div class="auto-menu-info">
+                <strong>Desativado</strong>
+                <p>A IA não responde às mensagens recebidas. Todas as mensagens aguardam resposta manual.</p>
+              </div>
+            </button>
+          </div>
+        </div>
+
         <div class="topbar-agent-pill active" id="topbar-agent-status">
           <span class="pulse-indicator"></span>
-          <span>IA Pronta</span>
+          <span>IA Ativa</span>
         </div>
         <div class="language-selector app-language-selector" role="group" aria-label="Idioma / Language">
           <button type="button" class="lang-btn active" data-lang="pt" title="Português">PT</button>
@@ -964,13 +982,77 @@
       <div class="dashboard-header-bar">
         <div>
           <h2 style="margin:0; font-size:18px; font-weight:700;">Relatórios &amp; Business Intelligence</h2>
-          <span class="muted">Analise o crescimento e a evolução comercial do seu negócio</span>
+          <span class="muted">Inteligência comercial, produtos mais vendidos e rumo estratégico</span>
         </div>
         <div class="dashboard-period-selector">
           <button type="button" class="period-btn active">Últimos 14 dias</button>
         </div>
       </div>
 
+      <!-- HERO BANNER: GERADOR DE RELATÓRIO ESTRATÉGICO IA -->
+      <div class="strategic-report-hero panel">
+        <div class="strategic-hero-left">
+          <div class="strategic-hero-badge">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <span>Inteligência Estratégica Drexier</span>
+          </div>
+          <h2>Relatório Estratégico &amp; Rumo do Negócio</h2>
+          <p class="muted">
+            A IA recolhe dados de conversas, produtos com maior volume de pedidos e abordagens com maior taxa de fecho para formular um ponto de vista analítico, rumo estratégico e mudanças práticas que aceleram os seus resultados.
+          </p>
+        </div>
+        <div class="strategic-hero-right">
+          <button type="button" class="btn primary btn-large" id="btn-generate-ai-report">
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+            <span>Gerar Relatório com IA</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ÁREA DO RELATÓRIO ESTRATÉGICO GERADO PELA IA -->
+      <div id="ai-strategic-report-container" class="panel hidden">
+        <div class="panel-heading" style="border-bottom:2px solid var(--border-arcade); padding-bottom:12px;">
+          <div>
+            <h2 id="ai-report-title" style="margin:0; font-size:16px;">Ponto de Vista &amp; Rumo Estratégico do Negócio</h2>
+            <span class="muted" id="ai-report-meta" style="font-size:12px;">Elaborado por IA Drexier com base em dados reais</span>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn outline small" id="btn-copy-ai-report" title="Copiar relatório completo">Copiar Relatório</button>
+            <button class="btn primary small" id="btn-regenerate-ai-report">Regenerar com IA</button>
+          </div>
+        </div>
+        <div id="ai-report-body" class="strategic-report-content"></div>
+      </div>
+
+      <!-- SEÇÃO 1: PRODUTOS MAIS VENDIDOS E PROCURADOS -->
+      <div class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Produtos &amp; Serviços Mais Vendidos</h2>
+            <p class="muted" style="margin:2px 0 0;">Informações recolhidas pela IA com base em pedidos confirmados e volume de procura</p>
+          </div>
+          <span class="badge" style="background:#DCFCE7; color:#15803D; font-weight:700;">Top Vendas &bull; IA Analytics</span>
+        </div>
+        <div id="reports-top-products" class="top-products-grid">
+          <div class="empty">A recolher dados de produtos mais vendidos...</div>
+        </div>
+      </div>
+
+      <!-- SEÇÃO 2: MENSAGENS E ABORDAGENS COM MAIS RESULTADOS -->
+      <div class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Mensagens &amp; Abordagens com Maior Resultado</h2>
+            <p class="muted" style="margin:2px 0 0;">Padrões de resposta que alcançaram a maior taxa de conversão e fecho de agendamentos</p>
+          </div>
+          <span class="badge" style="background:var(--violet-subtle); color:var(--lavender); font-weight:700;">Maior Taxa de Fecho</span>
+        </div>
+        <div id="reports-best-approaches" class="best-approaches-grid">
+          <div class="empty">A recolher mensagens com melhor taxa de conversão...</div>
+        </div>
+      </div>
+
+      <!-- SEÇÃO 3: GRÁFICO HISTÓRICO DE AQUISIÇÃO -->
       <div class="panel">
         <div class="panel-heading">
           <div>
@@ -980,38 +1062,6 @@
         </div>
         <div id="reports-chart" class="chart line-chart"></div>
         <div id="chart-labels" class="chart-labels"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-heading">
-          <div>
-            <h2>Business Intelligence &amp; Tendências</h2>
-            <span class="badge" style="background:var(--violet-subtle); color:var(--lavender);">Conclusões Analíticas</span>
-          </div>
-        </div>
-        <div class="insight-box">
-          <strong>Crescimento de Contactos Únicos</strong>
-          <p>O volume de novos contactos acompanha o ritmo das mensagens recebidas por e-mail. Mantenha os tempos de resposta baixos para maximizar a conversão.</p>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-heading">
-          <div>
-            <h2>Teste de estilos de resposta</h2>
-            <p class="muted" style="margin:2px 0 0;">Registe variantes para acompanhar a evolução dos resultados.</p>
-          </div>
-          <button class="btn primary small" id="add-variant">+ Novo estilo</button>
-        </div>
-        <div id="variants-list" class="variant-list empty">Ainda não existem variantes.</div>
-        <form id="variant-form" class="form hidden">
-          <label>Nome do estilo<input name="label" required placeholder="Ex: Direto e Comercial, Formal Executivo..."></label>
-          <label>Texto da resposta<textarea name="response_text" rows="3" required placeholder="Estrutura de resposta..."></textarea></label>
-          <div class="actions" style="display:flex; gap:8px;">
-            <button class="btn primary small" type="submit">Guardar estilo</button>
-            <button class="btn outline small" type="button" id="cancel-variant">Cancelar</button>
-          </div>
-        </form>
       </div>
     </section>
 

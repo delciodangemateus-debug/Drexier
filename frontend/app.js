@@ -28,6 +28,9 @@ if (token) {
   try { document.documentElement.classList.add("is-authenticated"); } catch (_) {}
 }
 let me = null, selectedContact = null, infoCache = [], activePage = localStorage.getItem("drexier_active_page") || "dashboard";
+let currentAutomationLevel = localStorage.getItem("drexier_automation_level") || "full";
+const conversationMessagesCache = {};
+
 let currentExpandedCardId = null, currentEditingItemIndex = null;
 let currentBusinessSubtab = "cards"; // "cards" | "training"
 let currentUploadedFile = "";
@@ -923,6 +926,8 @@ async function boot() {
     startLivePolling();
     $("#side-user").textContent = me.name;
     fillSettings();
+    loadAutomationLevel();
+    setupAutomationLevelListeners();
 
     // Limpeza de chaves residuais de legado se presentes
     localStorage.removeItem("drexier_wa_pending_code");
@@ -1070,8 +1075,15 @@ async function navigate(page) {
         $("#messages-chat-view")?.classList.add("hidden");
         $("#messages-inbox-view")?.classList.remove("hidden");
       }
-      if (contactsCache && contactsCache.length) renderContactsList(contactsCache);
-      Promise.allSettled([loadContacts(), loadEmailStatus()]).catch(() => {});
+      if (contactsCache && contactsCache.length) {
+        renderContactsList(contactsCache);
+      } else {
+        const list = $("#contacts-list");
+        if (list) {
+          list.innerHTML = '<div class="empty" style="padding:24px; color:var(--text-tertiary);"><span class="pulse-indicator" style="display:inline-block; margin-right:8px;"></span>A carregar conversas...</div>';
+        }
+      }
+      loadContacts().catch(() => {});
     } else if (page === "reports") {
       loadReports().catch((e) => showNotice(e.message, true));
     } else if (page === "business") {
@@ -1209,7 +1221,10 @@ function expandMetricCard(title, value, description) {
       <button class="btn primary" id="modal-done-btn">Fechar</button>
     </div>
   `);
-  $("#modal-close-btn").onclick = closeModal;
+  $("#modal-close-btn").onclick = async () => {
+    await saveCardGeneralData(cardId);
+    closeModal();
+  };
   $("#modal-done-btn").onclick = closeModal;
 }
 
@@ -1507,24 +1522,25 @@ function openBookingsModal(confirmedList) {
 
     header.append(clientInfo, statusBadge);
 
-    const detailsBox = document.createElement("div");
-    detailsBox.className = "modal-text-block";
-    detailsBox.style.background = "#FFFDF7";
-    detailsBox.style.padding = "10px 14px";
-    detailsBox.style.border = "2px solid var(--border-arcade)";
-    detailsBox.style.borderRadius = "var(--radius-sm)";
-    detailsBox.style.fontSize = "13px";
-    detailsBox.style.lineHeight = "1.5";
-    detailsBox.textContent = r.details || "Detalhes do agendamento ou pedido confirmado.";
+    // Na dashboard e no modal de marcações adquiridas deve aparecer apenas o nome e do que se trata (NÃO a mensagem completa)
+    const topicBox = document.createElement("div");
+    topicBox.className = "booking-topic-badge";
+    topicBox.style.padding = "8px 12px";
+    topicBox.style.background = "#F4F1E9";
+    topicBox.style.border = "1.5px solid var(--border-arcade)";
+    topicBox.style.borderRadius = "var(--radius-sm)";
+    topicBox.style.fontSize = "13px";
+    topicBox.style.margin = "8px 0";
+    topicBox.innerHTML = `<strong>Do que se trata:</strong> <span>${escapeHtml(r.request_type || "Marcação de Serviço")}</span>`;
 
     const metaLine = document.createElement("div");
     metaLine.style.fontSize = "11.5px";
     metaLine.style.color = "var(--text-secondary)";
     metaLine.style.fontFamily = "var(--font-mono)";
     const dateStr = r.resolved_at || r.created_at;
-    metaLine.textContent = `Registado em: ${dateStr ? new Date(dateStr).toLocaleString("pt-PT") : "Data recente"}`;
+    metaLine.textContent = `Confirmado em: ${dateStr ? new Date(dateStr).toLocaleString("pt-PT") : "Data recente"}`;
 
-    card.append(header, detailsBox, metaLine);
+    card.append(header, topicBox, metaLine);
     fragment.append(card);
   });
 
@@ -1880,66 +1896,90 @@ async function openConversation(id) {
   await renderConversationMessages(id, true);
 }
 
+function buildConversationDOM(el, msgs, id, autoScroll) {
+  el.innerHTML = "";
+  el.className = "conversation";
+
+  if (!msgs.length) {
+    el.className = "conversation empty";
+    el.textContent = "Sem mensagens nesta conversa.";
+    return;
+  }
+
+  msgs.forEach(m => {
+    const b = document.createElement("div");
+    b.className = `bubble ${m.sender}`;
+
+    const textNode = document.createElement("div");
+    textNode.textContent = m.content;
+    b.append(textNode);
+
+    const footer = document.createElement("div");
+    footer.className = "bubble-footer";
+
+    const time = document.createElement("small");
+    const senderLabel = m.sender === "customer" ? "Cliente" : m.sender === "agent" ? "IA Drexier" : "Proprietário (Você)";
+    time.textContent = `${senderLabel} · ${m.created_at || ""}`;
+    footer.append(time);
+
+    // Validação da mensagem: se foi validada com IA ou escrita normal, exibe a tag "✓ Validado"
+    const isValidated = (m.sender === "agent" || m.sender === "owner") && /confirmad|validad|agendad|reserva|sucesso/i.test(m.content);
+    if (isValidated) {
+      const vBadge = document.createElement("span");
+      vBadge.className = "badge-validated-pill";
+      vBadge.textContent = "✓ Validado";
+      footer.append(vBadge);
+    }
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-delete-msg";
+    delBtn.title = "Eliminar esta mensagem";
+    delBtn.innerHTML = '<svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+    delBtn.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (!confirm("Tem a certeza de que deseja eliminar esta mensagem?")) return;
+      try {
+        await api(`/api/messages/${m.id}`, { method: "DELETE" });
+        showNotice("Mensagem eliminada com sucesso.");
+        delete conversationMessagesCache[id];
+        await renderConversationMessages(id, false);
+        await loadContacts(true);
+      } catch (err) {
+        showNotice(err.message, true);
+      }
+    };
+    footer.append(delBtn);
+
+    b.append(footer);
+    el.append(b);
+  });
+
+  if (autoScroll) {
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
 async function renderConversationMessages(id, autoScroll = true) {
   const el = $("#conversation");
   if (!el) return;
 
+  // Renderização instantânea se já estiver em cache na sessão
+  if (conversationMessagesCache[id] && conversationMessagesCache[id].length) {
+    buildConversationDOM(el, conversationMessagesCache[id], id, autoScroll);
+  } else {
+    el.innerHTML = '<div class="conversation empty" style="padding:24px;"><span class="pulse-indicator" style="display:inline-block; margin-right:8px;"></span>A carregar histórico...</div>';
+  }
+
   try {
     const msgs = await api(`/api/contacts/${id}/messages`);
-    el.innerHTML = "";
-    el.className = "conversation";
-
-    if (!msgs.length) {
-      el.className = "conversation empty";
-      el.textContent = "Sem mensagens nesta conversa.";
-      return;
-    }
-
-    msgs.forEach(m => {
-      const b = document.createElement("div");
-      b.className = `bubble ${m.sender}`;
-
-      const textNode = document.createElement("div");
-      textNode.textContent = m.content;
-      b.append(textNode);
-
-      const footer = document.createElement("div");
-      footer.className = "bubble-footer";
-
-      const time = document.createElement("small");
-      const senderLabel = m.sender === "customer" ? "Cliente" : m.sender === "agent" ? "IA Drexier" : "Proprietário (Você)";
-      time.textContent = `${senderLabel} · ${m.created_at || ""}`;
-      footer.append(time);
-
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "btn-delete-msg";
-      delBtn.title = "Eliminar esta mensagem";
-      delBtn.innerHTML = '<svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
-      delBtn.onclick = async (ev) => {
-        ev.stopPropagation();
-        if (!confirm("Tem a certeza de que deseja eliminar esta mensagem?")) return;
-        try {
-          await api(`/api/messages/${m.id}`, { method: "DELETE" });
-          showNotice("Mensagem eliminada com sucesso.");
-          await renderConversationMessages(id, false);
-          await loadContacts(true);
-        } catch (err) {
-          showNotice(err.message, true);
-        }
-      };
-      footer.append(delBtn);
-
-      b.append(footer);
-      el.append(b);
-    });
-
-    if (autoScroll) {
-      el.scrollTop = el.scrollHeight;
-    }
+    conversationMessagesCache[id] = msgs;
+    buildConversationDOM(el, msgs, id, autoScroll);
   } catch (err) {
-    el.className = "conversation empty";
-    el.textContent = `Erro ao carregar mensagens: ${err.message}`;
+    if (!conversationMessagesCache[id]) {
+      el.className = "conversation empty";
+      el.textContent = `Erro ao carregar mensagens: ${err.message}`;
+    }
   }
 }
 
@@ -2038,7 +2078,24 @@ $("#conversion-form")?.addEventListener("submit", async e => {
 
 /* Relatórios */
 async function loadReports() {
-  const d = await api("/api/analytics");
+  let d;
+  try {
+    d = await api("/api/analytics");
+  } catch (err) {
+    showNotice(err.message, true);
+    return;
+  }
+
+  // Top Produtos
+  renderTopProducts(Array.isArray(d.top_products) ? d.top_products : []);
+
+  // Melhores Abordagens
+  renderBestApproaches(Array.isArray(d.best_approaches) ? d.best_approaches : []);
+
+  // Configurar botão de relatório estratégico
+  setupStrategicAiReportButton();
+
+  // Gráfico histórico de aquisição
   const el = $("#reports-chart");
   el.innerHTML = "";
   const vals = Array.isArray(d.acquisitions) ? d.acquisitions : [];
@@ -2078,7 +2135,6 @@ async function loadReports() {
   poly.setAttribute("stroke-linecap", "round");
   poly.setAttribute("stroke-linejoin", "round");
   svg.append(poly);
-
   pts.forEach(p => {
     const circle = document.createElementNS(svg.namespaceURI, "circle");
     circle.setAttribute("cx", p.x);
@@ -2089,8 +2145,6 @@ async function loadReports() {
     circle.setAttribute("stroke-width", "2");
     circle.style.cursor = "pointer";
     circle.style.transition = "transform 0.15s ease, r 0.15s ease";
-
-    // Tooltip dinâmico de alta precisão ao passar o mouse nas etapas da linha
     circle.addEventListener("mouseenter", e => {
       circle.setAttribute("r", "7");
       circle.setAttribute("fill", "#C9F36A");
@@ -2109,7 +2163,6 @@ async function loadReports() {
     svg.append(circle);
   });
   el.append(svg);
-
   $("#chart-labels").innerHTML = "";
   [...new Map([vals[0], vals[Math.floor(vals.length / 2)], vals[vals.length - 1]]
     .filter(Boolean)
@@ -2118,89 +2171,148 @@ async function loadReports() {
     s.textContent = `${v.date} · ${v.count}`;
     $("#chart-labels").append(s);
   });
+}
 
-  const list = $("#variants-list");
-  list.innerHTML = "";
-  if (!d.variants.length) {
-    list.className = "variant-list empty";
-    list.textContent = "Ainda não existem variantes.";
+function renderTopProducts(products) {
+  const grid = $("#reports-top-products");
+  if (!grid) return;
+  grid.innerHTML = "";
+  if (!products.length) {
+    grid.innerHTML = `<div class="empty">Ainda não existem dados de produtos vendidos.</div>`;
     return;
   }
-  list.className = "variant-list card-grid";
-  d.variants.forEach(v => {
-    const card = document.createElement("article");
-    card.className = "variant-card clickable-card";
-    const h = document.createElement("h3");
-    h.textContent = v.label;
-    const p = document.createElement("p");
-    p.textContent = v.response_text;
-    const stats = document.createElement("p");
-    stats.textContent = `Envios: ${v.sent_count} · Conversões: ${v.conversions}`;
-
-    card.onclick = () => {
-      openModal(`
-        <div class="expanded-header">
-          <div class="expanded-header-left">
-            <div class="expanded-header-kbadge"><span class="expanded-header-kbadge-dot"></span>VARIANTE DE RESPOSTA</div>
-            <h2 class="expanded-header-title" id="expanded-modal-title">${escapeHtml(v.label)}</h2>
-          </div>
-          <button class="expanded-close" id="modal-close-btn">&times;</button>
-        </div>
-        <div class="expanded-body">
-          <div class="modal-section">
-            <div class="modal-section-label">Texto configurado</div>
-            <div class="modal-text-block">${escapeHtml(v.response_text)}</div>
-          </div>
-          <div class="modal-section">
-            <div class="modal-section-label">Estatísticas</div>
-            <div class="modal-stat-row">
-              <div class="modal-stat-chip"><span>Envios</span><strong>${v.sent_count}</strong></div>
-              <div class="modal-stat-chip"><span>Conversões</span><strong>${v.conversions}</strong></div>
-            </div>
-          </div>
-        </div>
-        <div class="expanded-footer">
-          <button class="btn outline small danger" id="delete-variant-modal-btn">Eliminar estilo</button>
-          <button class="btn primary" id="modal-done-btn">Fechar</button>
-        </div>
-      `);
-      $("#modal-close-btn").onclick = closeModal;
-      $("#modal-done-btn").onclick = closeModal;
-      $("#delete-variant-modal-btn").onclick = async () => {
-        if (!confirm("Eliminar este estilo de resposta?")) return;
-        try {
-          await api(`/api/variants/${v.id}`, { method: "DELETE" });
-          closeModal();
-          loadReports();
-        } catch (e) {
-          showNotice(e.message, true);
-        }
-      };
-    };
-
-    card.append(h, p, stats);
-    list.append(card);
+  products.forEach((p, i) => {
+    const card = document.createElement("div");
+    card.className = "top-product-card";
+    card.innerHTML = `
+      <div class="top-product-rank">#${i + 1}</div>
+      <div class="top-product-info">
+        <div class="top-product-name">${escapeHtml(p.name || "Produto")}</div>
+        <div class="top-product-meta muted">${escapeHtml(p.category || "")}</div>
+      </div>
+      <div class="top-product-stats">
+        <span class="top-product-count">${p.count || 0}</span>
+        <span class="muted" style="font-size:11px;">pedidos</span>
+      </div>
+    `;
+    grid.append(card);
   });
 }
 
-$("#add-variant").addEventListener("click", () => {
-  if (!paywallCheck()) return;
-  $("#variant-form").classList.remove("hidden");
-});
-$("#cancel-variant").addEventListener("click", () => $("#variant-form").classList.add("hidden"));
-$("#variant-form").addEventListener("submit", async e => {
-  e.preventDefault();
-  if (!paywallCheck()) return;
-  try {
-    await api("/api/variants", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(e.target))) });
-    e.target.reset();
-    e.target.classList.add("hidden");
-    showNotice("Estilo guardado.");
-    loadReports();
-  } catch (err) {
-    showNotice(err.message, true);
+function renderBestApproaches(approaches) {
+  const grid = $("#reports-best-approaches");
+  if (!grid) return;
+  grid.innerHTML = "";
+  if (!approaches.length) {
+    grid.innerHTML = `<div class="empty">Ainda não existem dados de abordagens com maior resultado.</div>`;
+    return;
   }
-});
+  approaches.forEach(a => {
+    const card = document.createElement("div");
+    card.className = "approach-card";
+    const successPct = a.success_rate != null ? `${Math.round(a.success_rate * 100)}%` : "\u2014";
+    card.innerHTML = `
+      <div class="approach-card-header">
+        <span class="approach-label">${escapeHtml(a.label || "Abordagem")}</span>
+        <span class="approach-success-badge">${successPct} fator de sucesso</span>
+      </div>
+      <p class="approach-text">${escapeHtml(a.text || a.response_text || "")}</p>
+      <div class="approach-stats">
+        <span>Envios: <strong>${a.sent_count || 0}</strong></span>
+        <span>Conversões: <strong>${a.conversions || 0}</strong></span>
+      </div>
+    `;
+    grid.append(card);
+  });
+}
+
+function setupStrategicAiReportButton() {
+  const btnGenerate = $("#btn-generate-ai-report");
+  const btnCopy = $("#btn-copy-ai-report");
+  const btnRegen = $("#btn-regenerate-ai-report");
+  const container = $("#ai-strategic-report-container");
+  const body = $("#ai-report-body");
+  if (!btnGenerate) return;
+
+  async function generateReport() {
+    btnGenerate.disabled = true;
+    const span = btnGenerate.querySelector("span");
+    const originalText = span ? span.textContent : btnGenerate.textContent;
+    if (span) span.textContent = "A gerar relatório com IA...";
+    else btnGenerate.textContent = "A gerar relatório com IA...";
+    try {
+      const res = await api("/api/reports/generate-ai-report", { method: "POST", body: JSON.stringify({}) });
+      if (res.report) {
+        body.innerHTML = "";
+        const sections = res.report.split(/\n(?=#{1,3}\s)/);
+        sections.forEach(sec => {
+          const div = document.createElement("div");
+          div.className = "strategic-report-section";
+          div.innerHTML = sec
+            .replace(/^###\s+(.+)$/gm, "<h4>$1</h4>")
+            .replace(/^##\s+(.+)$/gm, "<h3>$1</h3>")
+            .replace(/^#\s+(.+)$/gm, "<h2>$1</h2>")
+            .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+            .replace(/\n/g, "<br>");
+          body.append(div);
+        });
+        container.classList.remove("hidden");
+        container.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    } catch (err) {
+      showNotice("Erro ao gerar relatório: " + err.message, true);
+    } finally {
+      btnGenerate.disabled = false;
+      if (span) span.textContent = originalText;
+      else btnGenerate.textContent = originalText;
+    }
+  }
+
+  const newBtnGen = btnGenerate.cloneNode(true);
+  btnGenerate.parentNode.replaceChild(newBtnGen, btnGenerate);
+  newBtnGen.addEventListener("click", generateReport);
+
+  if (btnRegen) {
+    const newBtnRegen = btnRegen.cloneNode(true);
+    btnRegen.parentNode.replaceChild(newBtnRegen, btnRegen);
+    newBtnRegen.addEventListener("click", generateReport);
+  }
+
+  if (btnCopy) {
+    const newBtnCopy = btnCopy.cloneNode(true);
+    btnCopy.parentNode.replaceChild(newBtnCopy, btnCopy);
+    newBtnCopy.addEventListener("click", () => {
+      const text = body.innerText || body.textContent || "";
+      navigator.clipboard.writeText(text).then(() => showNotice("Relatório copiado!"));
+    });
+  }
+}
+
+if ($("#add-variant")) {
+  $("#add-variant").addEventListener("click", () => {
+    if (!paywallCheck()) return;
+    const vf = $("#variant-form");
+    if (vf) vf.classList.remove("hidden");
+  });
+}
+if ($("#cancel-variant")) {
+  $("#cancel-variant").addEventListener("click", () => { const vf = $("#variant-form"); if (vf) vf.classList.add("hidden"); });
+}
+if ($("#variant-form")) {
+  $("#variant-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!paywallCheck()) return;
+    try {
+      await api("/api/variants", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(e.target))) });
+      e.target.reset();
+      e.target.classList.add("hidden");
+      showNotice("Estilo guardado.");
+      loadReports();
+    } catch (err) {
+      showNotice(err.message, true);
+    }
+  });
+}
 
 /* ========================================================================= */
 /* ABA NEGÓCIO: CARDS EXPANSÍVEIS E GESTÃO DE MÚLTIPLOS ITENS POR CARD      */
@@ -3009,17 +3121,32 @@ async function saveCardGeneralData(cardId) {
   const newTitle = $("#card-title-field")?.value.trim() || it.title;
   const newNotes = $("#card-general-notes")?.value.trim() || "";
   const meta = it.metadata || {};
-  const oldNotes = meta.generalNote || "";
-  const oldTitle = it.title || "";
+  let items = Array.isArray(meta.items) ? [...meta.items] : [];
 
-  if (newTitle === oldTitle && newNotes === oldNotes) {
-    return; // Nada mudou, evita chamada de rede inútil!
+  // RECUPERAÇÃO AUTOMÁTICA: Se o usuário preencheu nome/preço/detalhes no formulário e clicou Concluído ou fechou, salva o item!
+  const bName = $("#builder-name")?.value.trim();
+  const bPrice = $("#builder-price")?.value.trim() || "";
+  const bDetails = $("#builder-details")?.value.trim() || "";
+
+  if (bName) {
+    if (currentEditingItemIndex !== null && items[currentEditingItemIndex]) {
+      items[currentEditingItemIndex] = { ...items[currentEditingItemIndex], name: bName, price: bPrice, details: bDetails };
+    } else {
+      items.push({ id: Date.now().toString(), name: bName, price: bPrice, details: bDetails });
+    }
+    currentEditingItemIndex = null;
   }
 
+  meta.items = items;
   meta.generalNote = newNotes;
   it.title = newTitle;
   it.metadata = meta;
-  it.content = compileItemsToContent(meta.items || [], newNotes);
+  it.content = compileItemsToContent(items, newNotes);
+
+  try {
+    localStorage.setItem("drexier_info_cache_backup", JSON.stringify(infoCache));
+  } catch(_) {}
+
   renderCardsFromCache();
 
   try {
@@ -4509,3 +4636,135 @@ window.addEventListener("drexier:languagechange", () => {
     fillSettings();
   }
 });
+
+
+/* ============================================================
+   CONTROLO DE NÍVEIS DE AUTOMAÇÃO DA IA
+   ============================================================ */
+function renderAutomationLevelUI(level) {
+  currentAutomationLevel = level;
+  try { localStorage.setItem("drexier_automation_level", level); } catch(_) {}
+
+  const indicator = $("#auto-level-indicator");
+  const label = $("#auto-level-current-label");
+  const topbarPill = $("#topbar-agent-status");
+  const sideAgentStatus = $("#side-agent-status");
+
+  let labelText = "Totalmente Automático";
+  let dotClass = "full";
+  let pillText = "IA: Total";
+
+  if (level === "semi") {
+    labelText = "Semi-automático";
+    dotClass = "semi";
+    pillText = "IA: Semi";
+  } else if (level === "disabled") {
+    labelText = "Desativado";
+    dotClass = "disabled";
+    pillText = "IA: Pausada";
+  }
+
+  if (indicator) {
+    indicator.className = `auto-level-dot ${dotClass}`;
+  }
+  if (label) {
+    label.textContent = labelText;
+  }
+  if (topbarPill) {
+    topbarPill.classList.toggle("active", level !== "disabled");
+    const span = topbarPill.querySelector("span:last-child");
+    if (span) span.textContent = pillText;
+  }
+  if (sideAgentStatus) {
+    sideAgentStatus.classList.toggle("inactive", level === "disabled");
+    const span = sideAgentStatus.querySelector("span:last-child");
+    if (span) span.textContent = level === "disabled" ? "Agente Desativado" : (level === "full" ? "Agente Total" : "Agente Semi");
+  }
+
+  // Marca ativo no menu dropdown
+  $$(".automation-menu-item").forEach(item => {
+    item.classList.toggle("active", item.dataset.level === level);
+  });
+
+  // Atualiza botão do Agent Switch na aba Mensagens
+  const msgSwitch = $("#btn-toggle-agent-global");
+  if (msgSwitch) {
+    msgSwitch.classList.toggle("active", level !== "disabled");
+  }
+}
+
+async function loadAutomationLevel() {
+  try {
+    const res = await api("/api/agent/automation-level");
+    if (res && res.level) {
+      renderAutomationLevelUI(res.level);
+    }
+  } catch(e) {
+    renderAutomationLevelUI(currentAutomationLevel || "full");
+  }
+}
+
+async function setAutomationLevel(newLevel) {
+  renderAutomationLevelUI(newLevel);
+  try {
+    await api("/api/agent/automation-level", {
+      method: "POST",
+      body: JSON.stringify({ level: newLevel })
+    });
+    const levelNames = {
+      full: "Totalmente Automático (IA responde e valida marcações com base nos horários da aba Negócio)",
+      semi: "Semi-automático (IA responde a dúvidas, mas marcação requer 'Validar com IA')",
+      disabled: "Desativado (IA não responde às mensagens recebidas)"
+    };
+    showNotice(`Nível de Automação alterado para: ${levelNames[newLevel] || newLevel}`);
+  } catch(err) {
+    showNotice(err.message, true);
+  }
+}
+
+function setupAutomationLevelListeners() {
+  const trigger = $("#btn-automation-level-trigger");
+  const menu = $("#automation-level-menu");
+
+  if (trigger && menu) {
+    trigger.onclick = (e) => {
+      e.stopPropagation();
+      const isHidden = menu.classList.contains("hidden");
+      menu.classList.toggle("hidden", !isHidden);
+      trigger.setAttribute("aria-expanded", isHidden ? "true" : "false");
+    };
+
+    document.addEventListener("click", (e) => {
+      if (!menu.contains(e.target) && e.target !== trigger) {
+        menu.classList.add("hidden");
+        trigger.setAttribute("aria-expanded", "false");
+      }
+    });
+
+    $$(".automation-menu-item").forEach(item => {
+      item.onclick = async (e) => {
+        e.stopPropagation();
+        menu.classList.add("hidden");
+        trigger.setAttribute("aria-expanded", "false");
+        const level = item.dataset.level;
+        if (level) {
+          await setAutomationLevel(level);
+        }
+      };
+    });
+  }
+
+  // Interação com o botão global na aba mensagens para ciclar os níveis
+  const agentGlobalBtn = $("#btn-toggle-agent-global");
+  if (agentGlobalBtn) {
+    agentGlobalBtn.onclick = async (e) => {
+      e.preventDefault();
+      // Alterna entre Full -> Semi -> Disabled -> Full
+      let nextLevel = "full";
+      if (currentAutomationLevel === "full") nextLevel = "semi";
+      else if (currentAutomationLevel === "semi") nextLevel = "disabled";
+      else nextLevel = "full";
+      await setAutomationLevel(nextLevel);
+    };
+  }
+}
