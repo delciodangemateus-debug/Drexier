@@ -22,6 +22,64 @@ def test_static_routes():
     res_js = client.get("/app.js")
     assert res_js.status_code == 200
 
+
+def test_business_info_cards_persist_and_keep_multiple_custom_cards():
+    import time
+
+    email = f"business_cards_{int(time.time() * 1000)}@example.com"
+    password = "SecurePassword123"
+    signup = signup_and_verify(client, {
+        "name": "Business Cards",
+        "email": email,
+        "password": password,
+        "confirm_password": password,
+        "business_type": "Serviços e vendas",
+    })
+    assert signup.status_code == 200
+    auth = login_and_verify(client, email, password)
+    headers = {"Authorization": f"Bearer {auth.json()['token']}"}
+    _save_stored_subscription(auth.json()["user_id"], {
+        "status": "active",
+        "plan_name": "Plano Business",
+    })
+
+    payload = {
+        "kind": "personalizado",
+        "title": "Informação Personalizada",
+        "content": "Detalhes da operação",
+        "metadata": {"items": [{"name": "Item de teste"}], "generalNote": "Nota inicial"},
+    }
+    first = client.post("/api/business-info", json=payload, headers=headers)
+    second = client.post("/api/business-info", json=payload | {"title": "Segundo Card"}, headers=headers)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_id = first.json()["id"]
+    second_id = second.json()["id"]
+    assert first_id != second_id
+
+    update_payload = {
+        **payload,
+        "title": "Card Atualizado",
+        "content": "Dados salvos",
+        "metadata": {"items": [{"name": "Item atualizado"}], "generalNote": "Nota salva"},
+    }
+    updated = client.put(f"/api/business-info/{first_id}", json=update_payload, headers=headers)
+    assert updated.status_code == 200
+    assert updated.json()["metadata"]["items"][0]["name"] == "Item atualizado"
+
+    listed = client.get("/api/business-info", headers=headers)
+    assert listed.status_code == 200
+    listed_cards = {item["id"]: item for item in listed.json()}
+    assert listed_cards[first_id]["title"] == "Card Atualizado"
+    assert listed_cards[first_id]["metadata"]["generalNote"] == "Nota salva"
+    assert listed_cards[second_id]["title"] == "Segundo Card"
+
+    deleted = client.delete(f"/api/business-info/{first_id}", headers=headers)
+    assert deleted.status_code == 200
+    remaining = client.get("/api/business-info", headers=headers).json()
+    assert [item["id"] for item in remaining] == [second_id]
+
+
 def test_full_auth_and_business_flow():
     import time
     # 1. Signup com email exclusivo para garantir isolamento do teste
@@ -329,6 +387,5 @@ def test_paywall_strict_enforcement():
         "mandatory_responses": {}
     }, headers=headers)
     assert res_agent_ok.status_code == 200
-
 
 

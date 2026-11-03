@@ -116,16 +116,6 @@ class SupabaseCursor:
         self._idx = len(self._rows)
         return r
 
-    def _get_next_id(self, table: str) -> int:
-        """Gera o próximo ID sequencial seguro para uma tabela no Supabase."""
-        try:
-            res = self.client.table(table).select("id").order("id", desc=True).limit(1).execute()
-            if res.data and len(res.data) > 0 and res.data[0].get("id") is not None:
-                return int(res.data[0]["id"]) + 1
-        except Exception:
-            pass
-        return 1
-
     def execute(self, sql: str, params: Optional[Union[tuple, list, dict]] = None) -> "SupabaseCursor":
         clean_sql = " ".join(sql.strip().split())
         self._rows = []
@@ -330,16 +320,13 @@ class SupabaseCursor:
                 if is_upsert:
                     res = self.client.table(table).upsert(insert_data).execute()
                 else:
-                    if "id" not in insert_data:
-                        insert_data["id"] = self._get_next_id(table)
-                    res = self.client.table(table).insert(insert_data).execute()
+                    res = self.client.table(table).insert(insert_data).select("*").execute()
             except Exception as e:
                 err_str = str(e)
                 if "duplicate key" in err_str or "23505" in err_str:
-                    raise Exception(f"UNIQUE constraint failed: {err_str}")
-                # Fallback tolerante para tabelas opcionais
-                logger.warning(f"[SupabaseCursor] Falha no insert em {table}: {e}")
-                res = None
+                    raise Exception(f"UNIQUE constraint failed: {err_str}") from e
+                logger.exception(f"[SupabaseCursor] Falha no insert em {table}")
+                raise
 
             if res.data and len(res.data) > 0:
                 inserted_row = res.data[0]
@@ -347,6 +334,8 @@ class SupabaseCursor:
                 self._rows = [SupabaseRow(_format_row_for_app(table, inserted_row))]
                 self.rowcount = 1
             else:
+                if not is_upsert:
+                    raise RuntimeError(f"Supabase não retornou o registro criado em {table}.")
                 self.lastrowid = insert_data.get("id")
                 self.rowcount = 1
             return self

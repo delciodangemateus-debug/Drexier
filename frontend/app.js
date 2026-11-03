@@ -28,6 +28,7 @@ if (token) {
   try { document.documentElement.classList.add("is-authenticated"); } catch (_) {}
 }
 let me = null, selectedContact = null, infoCache = [], activePage = localStorage.getItem("drexier_active_page") || "dashboard";
+let businessInfoRevision = 0, businessInfoLoadSequence = 0;
 let currentAutomationLevel = localStorage.getItem("drexier_automation_level") || "full";
 const conversationMessagesCache = {};
 
@@ -474,8 +475,9 @@ const CACHE_TTL = 30000; // 30 segundos
 
 async function api(url, options = {}) {
   const method = (options.method || "GET").toUpperCase();
+  const useGetCache = method === "GET" && options.cache !== "no-store";
 
-  if (method === "GET") {
+  if (useGetCache) {
     const cached = apiCache.get(url);
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
       return cached.data;
@@ -519,10 +521,13 @@ async function api(url, options = {}) {
       }
 
       if (method === "GET") {
-        apiCache.set(url, { data, ts: Date.now() });
+        if (useGetCache) apiCache.set(url, { data, ts: Date.now() });
       } else {
         // Invalidação seletiva de rotas afetadas
         const base = url.split("?")[0];
+        if (base === "/api/business-info" || base.startsWith("/api/business-info/")) {
+          businessInfoRevision++;
+        }
         for (const key of apiCache.keys()) {
           if (key === base || key.startsWith(base) || (base.startsWith("/api/business-info") && key.startsWith("/api/business-info")) || (base.startsWith("/api/contacts") && key.startsWith("/api/contacts"))) {
             apiCache.delete(key);
@@ -531,7 +536,7 @@ async function api(url, options = {}) {
       }
       return data;
     } catch (e) {
-      if (method === "GET") {
+      if (useGetCache) {
         const cached = apiCache.get(url);
         if (cached) return cached.data;
       }
@@ -543,7 +548,7 @@ async function api(url, options = {}) {
       }
       throw e;
     } finally {
-      if (method === "GET") {
+      if (useGetCache) {
         inFlightRequests.delete(url);
       }
     }
@@ -551,7 +556,7 @@ async function api(url, options = {}) {
 
   if (method === "GET") {
     const promise = runRequest();
-    inFlightRequests.set(url, promise);
+    if (useGetCache) inFlightRequests.set(url, promise);
     return promise;
   }
   return runRequest();
@@ -597,15 +602,23 @@ function closeModal() {
   modalReturnFocus = null;
 }
 
+async function requestModalClose() {
+  if (currentExpandedCardId !== null) {
+    const saved = await saveCardGeneralData(currentExpandedCardId);
+    if (!saved) return;
+  }
+  closeModal();
+}
+
 $("#card-expand-modal").addEventListener("click", e => {
-  if (e.target === $("#card-expand-modal")) closeModal();
+  if (e.target === $("#card-expand-modal")) requestModalClose();
 });
 
 window.addEventListener("keydown", e => {
   const modal = $("#card-expand-modal");
   if (modal.classList.contains("hidden")) return;
   if (e.key === "Escape") {
-    closeModal();
+    requestModalClose();
     return;
   }
   if (e.key === "Tab") {
@@ -1221,10 +1234,7 @@ function expandMetricCard(title, value, description) {
       <button class="btn primary" id="modal-done-btn">Fechar</button>
     </div>
   `);
-  $("#modal-close-btn").onclick = async () => {
-    await saveCardGeneralData(cardId);
-    closeModal();
-  };
+  $("#modal-close-btn").onclick = closeModal;
   $("#modal-done-btn").onclick = closeModal;
 }
 
@@ -2987,11 +2997,10 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
   openModal(html);
 
   // Vincular eventos dentro do card expandido
-  $("#modal-close-btn").onclick = closeModal;
+  $("#modal-close-btn").onclick = requestModalClose;
   $("#modal-done-btn").onclick = async () => {
     if (!paywallCheck()) return;
-    await saveCardGeneralData(cardId);
-    closeModal();
+    if (await saveCardGeneralData(cardId)) closeModal();
   };
 
   // Botão Adicionar / Atualizar item (Atualização Instantânea na UI)
@@ -3014,6 +3023,7 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
     }
 
     const saveBtn = $("#builder-save-btn");
+    const originalLabel = saveBtn?.textContent || "Adicionar ao card";
     if (saveBtn) {
       saveBtn.disabled = true;
       saveBtn.textContent = "A guardar...";
@@ -3028,29 +3038,32 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
       items.push({ id: Date.now().toString(), name, price, details });
     }
 
-    meta.items = items;
-    if (notesEl) meta.generalNote = notesEl.value.trim();
-    it.metadata = meta;
-    if (titleEl && titleEl.value.trim()) it.title = titleEl.value.trim();
-    it.content = compileItemsToContent(items, meta.generalNote || "");
+    const updatedMetadata = {
+      ...meta,
+      items,
+      generalNote: notesEl ? notesEl.value.trim() : (meta.generalNote || "")
+    };
+    const payload = {
+      kind: it.kind,
+      title: titleEl?.value.trim() || it.title,
+      content: compileItemsToContent(items, updatedMetadata.generalNote),
+      metadata: updatedMetadata
+    };
 
-    // 1. Atualização Instantânea no Modal e nos Cards em 0ms
-    openExpandBusinessCard(cardId, null);
-    renderCardsFromCache();
-
-    // 2. Persistência assíncrona em segundo plano sem travar a interface
     try {
-      await api(`/api/business-info/${cardId}`, {
+      const saved = await api(`/api/business-info/${cardId}`, {
         method: "PUT",
-        body: JSON.stringify({
-          kind: it.kind,
-          title: it.title,
-          content: it.content,
-          metadata: it.metadata
-        })
+        body: JSON.stringify(payload)
       });
+      Object.assign(it, saved);
+      openExpandBusinessCard(cardId, null);
+      renderCardsFromCache();
     } catch (err) {
       showNotice(err.message, true);
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalLabel;
+      }
     }
   };
 
@@ -3073,24 +3086,25 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
       const meta = it.metadata || {};
       const items = Array.isArray(meta.items) ? [...meta.items] : [];
       items.splice(idx, 1);
-      meta.items = items;
-      it.metadata = meta;
-      it.content = compileItemsToContent(items, $("#card-general-notes")?.value.trim() || meta.generalNote || "");
-
-      // Atualização imediata em 0ms
-      openExpandBusinessCard(cardId, null);
-      renderCardsFromCache();
+      const updatedMetadata = {
+        ...meta,
+        items,
+        generalNote: $("#card-general-notes")?.value.trim() ?? (meta.generalNote || "")
+      };
 
       try {
-        await api(`/api/business-info/${cardId}`, {
+        const saved = await api(`/api/business-info/${cardId}`, {
           method: "PUT",
           body: JSON.stringify({
             kind: it.kind,
             title: it.title,
-            content: it.content,
-            metadata: it.metadata
+            content: compileItemsToContent(items, updatedMetadata.generalNote),
+            metadata: updatedMetadata
           })
         });
+        Object.assign(it, saved);
+        openExpandBusinessCard(cardId, null);
+        renderCardsFromCache();
       } catch (err) {
         showNotice(err.message, true);
       }
@@ -3115,11 +3129,11 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
 }
 
 async function saveCardGeneralData(cardId) {
-  if (!paywallCheck()) return;
+  if (!paywallCheck()) return false;
   const it = infoCache.find(x => x.id === cardId);
-  if (!it) return;
+  if (!it) return false;
   const newTitle = $("#card-title-field")?.value.trim() || it.title;
-  const newNotes = $("#card-general-notes")?.value.trim() || "";
+  const newNotes = $("#card-general-notes")?.value.trim() ?? "";
   const meta = it.metadata || {};
   let items = Array.isArray(meta.items) ? [...meta.items] : [];
 
@@ -3137,30 +3151,25 @@ async function saveCardGeneralData(cardId) {
     currentEditingItemIndex = null;
   }
 
-  meta.items = items;
-  meta.generalNote = newNotes;
-  it.title = newTitle;
-  it.metadata = meta;
-  it.content = compileItemsToContent(items, newNotes);
+  const updatedMetadata = { ...meta, items, generalNote: newNotes };
 
   try {
-    localStorage.setItem("drexier_info_cache_backup", JSON.stringify(infoCache));
-  } catch(_) {}
-
-  renderCardsFromCache();
-
-  try {
-    await api(`/api/business-info/${cardId}`, {
+    const saved = await api(`/api/business-info/${cardId}`, {
       method: "PUT",
       body: JSON.stringify({
         kind: it.kind,
-        title: it.title,
-        content: it.content,
-        metadata: it.metadata
+        title: newTitle,
+        content: compileItemsToContent(items, newNotes),
+        metadata: updatedMetadata
       })
     });
+    Object.assign(it, saved);
+    currentEditingItemIndex = null;
+    renderCardsFromCache();
+    return true;
   } catch (err) {
     showNotice(err.message, true);
+    return false;
   }
 }
 
@@ -3357,7 +3366,11 @@ function renderCardsFromCache() {
 }
 
 async function loadInfo() {
-  infoCache = (await api("/api/business-info") || []).filter(x => x.kind !== "subscription" && x.kind !== "assinatura" && !x.title.toLowerCase().startsWith("assinatura"));
+  const requestSequence = ++businessInfoLoadSequence;
+  const revision = businessInfoRevision;
+  const rows = await api("/api/business-info", { cache: "no-store" }) || [];
+  if (requestSequence !== businessInfoLoadSequence || revision !== businessInfoRevision) return;
+  infoCache = rows.filter(x => x.kind !== "subscription" && x.kind !== "assinatura" && !x.title.toLowerCase().startsWith("assinatura"));
   renderCardsFromCache();
 }
 
@@ -3688,7 +3701,7 @@ $$(".kind-option").forEach(b => b.addEventListener("click", async () => {
   $("#info-kind-picker").classList.add("hidden");
 
   // Se já existe um card deste tipo, abre o card existente para concentrar todos os itens no mesmo card
-  const existing = infoCache.find(x => x.kind === kind);
+  const existing = kind === "personalizado" ? null : infoCache.find(x => x.kind === kind);
   if (existing) {
     showNotice(`Aberto o card de ${kindNames[kind] || kind} existente.`);
     openExpandBusinessCard(existing.id);
