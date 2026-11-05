@@ -1,5 +1,18 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+
+document.addEventListener("click", event => {
+  const button = event.target instanceof Element ? event.target.closest("button") : null;
+  if (!button || button.disabled) return;
+  button.classList.remove("is-click-loading");
+  button.setAttribute("aria-busy", "true");
+  requestAnimationFrame(() => button.classList.add("is-click-loading"));
+  clearTimeout(button._clickLoadingTimer);
+  button._clickLoadingTimer = setTimeout(() => {
+    button.classList.remove("is-click-loading");
+    button.removeAttribute("aria-busy");
+  }, 750);
+}, true);
 // Debounce helper para melhorar responsividade
 function debounce(fn, delay = 250) {
   let timer;
@@ -117,8 +130,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (dashboardCacheData) {
         if (period === "today") {
           renderBars("#dashboard-chart", [
-            { date: "Ontem", count: dashboardCacheData.yesterday_contacts ?? 0 },
-            { date: "Hoje", count: dashboardCacheData.today_contacts ?? 0 }
+            { date: "24h anteriores", count: dashboardCacheData.yesterday_contacts ?? 0 },
+            { date: "Últimas 24h", count: dashboardCacheData.today_contacts ?? 0 }
           ]);
         } else if (period === "7d") {
           const base = dashboardCacheData.total_contacts || 10;
@@ -128,8 +141,8 @@ document.addEventListener("DOMContentLoaded", () => {
             { date: "D-4", count: Math.max(1, Math.round(base * 0.12)) },
             { date: "D-3", count: Math.max(1, Math.round(base * 0.2)) },
             { date: "D-2", count: Math.max(1, Math.round(base * 0.18)) },
-            { date: "Ontem", count: dashboardCacheData.yesterday_contacts ?? 0 },
-            { date: "Hoje", count: dashboardCacheData.today_contacts ?? 0 }
+            { date: "24h anteriores", count: dashboardCacheData.yesterday_contacts ?? 0 },
+            { date: "Últimas 24h", count: dashboardCacheData.today_contacts ?? 0 }
           ]);
         } else if (period === "30d") {
           const base = dashboardCacheData.total_contacts || 20;
@@ -1266,11 +1279,11 @@ function renderDashboardData(d) {
   const mAi = $("#metric-ai-conversations");
   if (mAi) mAi.textContent = msgs > 0 ? Math.max(msgs, contacts) : contacts;
 
-  // 3: Novos clientes hoje
+  // 3: Aquisições em janelas consecutivas de 24 horas
   const mToday = $("#metric-today");
   if (mToday) mToday.textContent = today;
   const cmpYest = $("#compare-yesterday");
-  if (cmpYest) cmpYest.textContent = `Dia anterior: ${yest}`;
+  if (cmpYest) cmpYest.textContent = `24h anteriores: ${yest}`;
 
   // 4: Total de clientes adquiridos
   const mContacts = $("#metric-contacts");
@@ -1280,7 +1293,7 @@ function renderDashboardData(d) {
   const mPending = $("#metric-pending");
   if (mPending) mPending.textContent = pending;
 
-  // 5: Marcações Adquiridas
+  // 5: Marcações previstas para os próximos sete dias
   const mBookings = $("#metric-bookings");
   const confirmedList = d.confirmed_bookings || [];
   const bookingsCount = d.bookings_count ?? confirmedList.filter(b => b.status !== "treated").length;
@@ -1305,12 +1318,12 @@ function renderDashboardData(d) {
   // Tornar os KPI cards clicáveis e expansíveis
   const metrics = $$(".kpi-card");
   const metricData = [
-    { title: "Mensagens Recebidas", val: msgs, desc: "Total de respostas geradas e enviadas aos clientes pela sua IA Gemini e atendentes oficiais." },
+    { title: "Mensagens Recebidas", val: msgs, desc: "Total de respostas geradas e enviadas aos clientes pelo agente e pelos atendentes oficiais." },
     { title: "Atendidas pela IA", val: msgs > 0 ? Math.max(msgs, contacts) : contacts, desc: "Volume de conversas geridas autonomamente pelo agente de inteligência artificial comercial." },
-    { title: "Novos Clientes Hoje", val: `${today} (Ontem: ${yest})`, desc: "Novos clientes registados hoje em comparação com o dia anterior." },
+    { title: "Novos Clientes (24h)", val: `${today} (24h anteriores: ${yest})`, desc: "Novos contactos nas últimas 24 horas, comparados com as 24 horas imediatamente anteriores." },
     { title: "Clientes na Base", val: contacts, desc: "Número acumulado de contactos únicos que iniciaram conversa com o seu negócio." },
     { title: "Vendas & Pedidos", val: pending, desc: "Intenções de compra recolhidas pelo agente aguardando a sua validação ou confirmação." },
-    { title: "Marcações Adquiridas", val: bookingsCount, desc: "Agendamentos e reservas de serviços capturados e estruturados pela IA." },
+    { title: "Marcações da Semana", val: bookingsCount, desc: "Pedidos e marcações com data e hora registadas para os próximos sete dias." },
     { title: "Taxa de Conversão", val: mConv ? mConv.textContent : "0%", desc: "Proporção de contactos que evoluíram para intenção de compra ou marcação de serviço." }
   ];
 
@@ -1334,7 +1347,10 @@ function renderDashboardData(d) {
     }
   });
 
-  renderBars("#dashboard-chart", [{ date: "Ontem", count: yest }, { date: "Hoje", count: today }]);
+  renderBars("#dashboard-chart", [
+    { date: "24h anteriores", count: yest },
+    { date: "Últimas 24h", count: today }
+  ]);
 
   // Atividade recente
   const actFeed = $("#dashboard-activity-feed");
@@ -1499,58 +1515,83 @@ function openBookingsModal(confirmedList) {
 
   const list = Array.isArray(confirmedList) ? confirmedList : [];
   if (!list.length) {
-    modalBody.innerHTML = '<div class="empty">Ainda não existem marcações ou pedidos confirmados. Quando validar solicitações de clientes, elas aparecerão aqui.</div>';
+    modalBody.innerHTML = '<div class="empty">Ainda não existem marcações para os próximos sete dias com data e hora registadas. A IA pedirá esses dados ao cliente quando necessário.</div>';
     return;
   }
 
   const fragment = document.createDocumentFragment();
+  let currentDay = "";
   list.forEach(r => {
-    const card = document.createElement("div");
-    card.className = "pending-action-card";
-
-    const header = document.createElement("div");
-    header.className = "pending-action-card-header";
-
-    const clientInfo = document.createElement("div");
-    clientInfo.innerHTML = `<strong>${escapeHtml(r.name || r.contact_key)}</strong> <span class="muted" style="font-size:12px;">(${escapeHtml(r.contact_key)})</span>`;
-
-    const statusBadge = document.createElement("span");
-    statusBadge.className = "badge";
-    if (r.status === "confirmed_manual") {
-      statusBadge.style.background = "#EBE5FF";
-      statusBadge.style.color = "#7657E8";
-      statusBadge.textContent = "Confirmado Manualmente";
-    } else if (r.status === "treated") {
-      statusBadge.style.background = "#FEE2E2";
-      statusBadge.style.color = "#DC2626";
-      statusBadge.textContent = "Tratado (Sem disponibilidade)";
-    } else {
-      statusBadge.style.background = "#DCFCE7";
-      statusBadge.style.color = "#15803D";
-      statusBadge.textContent = "Confirmado com IA";
+    const appointmentDate = new Date(r.scheduled_at);
+    if (Number.isNaN(appointmentDate.getTime())) return;
+    const dayLabel = appointmentDate.toLocaleDateString("pt-PT", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
+    if (dayLabel !== currentDay) {
+      currentDay = dayLabel;
+      const dayHeading = document.createElement("h3");
+      dayHeading.className = "booking-day-heading";
+      dayHeading.textContent = dayLabel;
+      fragment.append(dayHeading);
     }
 
-    header.append(clientInfo, statusBadge);
-
-    // Na dashboard e no modal de marcações adquiridas deve aparecer apenas o nome e do que se trata (NÃO a mensagem completa)
-    const topicBox = document.createElement("div");
-    topicBox.className = "booking-topic-badge";
-    topicBox.style.padding = "8px 12px";
-    topicBox.style.background = "#F4F1E9";
-    topicBox.style.border = "1.5px solid var(--border-arcade)";
-    topicBox.style.borderRadius = "var(--radius-sm)";
-    topicBox.style.fontSize = "13px";
-    topicBox.style.margin = "8px 0";
-    topicBox.innerHTML = `<strong>Do que se trata:</strong> <span>${escapeHtml(r.request_type || "Marcação de Serviço")}</span>`;
-
-    const metaLine = document.createElement("div");
-    metaLine.style.fontSize = "11.5px";
-    metaLine.style.color = "var(--text-secondary)";
-    metaLine.style.fontFamily = "var(--font-mono)";
-    const dateStr = r.resolved_at || r.created_at;
-    metaLine.textContent = `Confirmado em: ${dateStr ? new Date(dateStr).toLocaleString("pt-PT") : "Data recente"}`;
-
-    card.append(header, topicBox, metaLine);
+    const card = document.createElement("div");
+    card.className = "booking-week-item";
+    const dayDifference = Math.ceil((
+      Date.UTC(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate()) -
+      Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())
+    ) / 86400000);
+    const urgency = dayDifference <= 1
+      ? { className: "urgent", label: dayDifference <= 0 ? "Urgente · hoje" : "Urgente · falta 1 dia" }
+      : dayDifference <= 3
+        ? { className: "almost", label: `Quase · faltam ${dayDifference} dias` }
+        : dayDifference <= 5
+          ? { className: "approaching", label: `Atenção · faltam ${dayDifference} dias` }
+          : { className: "upcoming", label: `Pendente · faltam ${dayDifference} dias` };
+    const typeLabel = /purchase|compra|encomenda/i.test(r.request_type || "") ? "Compra" : "Marcação";
+    const details = String(r.details || "")
+      .replace(/^Assunto:\s*[^\n]*\n?/i, "")
+      .replace(/\nData e hora escolhidas pelo cliente:[\s\S]*$/i, "")
+      .trim();
+    const scheduledLabel = appointmentDate.toLocaleString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+    const validationLabel = r.status === "pending" ? "A aguardar validação" : "Validada";
+    card.innerHTML = `
+      <div class="booking-week-info">
+        <div class="booking-week-heading">
+          <strong class="booking-clean-name">${escapeHtml(r.name || r.contact_key)}</strong>
+          <span class="booking-urgency ${urgency.className}">${escapeHtml(urgency.label)}</span>
+        </div>
+        <span class="muted booking-week-contact">${escapeHtml(r.contact_key || "")}</span>
+        <div class="booking-week-description"><strong>${typeLabel}:</strong> ${escapeHtml(details || r.request_type || "Pedido")}</div>
+        <div class="booking-week-time">${escapeHtml(scheduledLabel)} · ${validationLabel}</div>
+      </div>
+      <button type="button" class="btn outline small booking-reminder-btn" data-request-id="${Number(r.id)}">
+        Lembrar com IA
+      </button>
+    `;
+    const reminderBtn = card.querySelector(".booking-reminder-btn");
+    reminderBtn?.addEventListener("click", async () => {
+      reminderBtn.disabled = true;
+      reminderBtn.textContent = "A enviar…";
+      try {
+        await api(`/api/conversions/${Number(r.id)}/remind`, { method: "POST" });
+        showNotice("Lembrete contextual enviado ao cliente com sucesso.");
+        reminderBtn.textContent = "Lembrete enviado";
+      } catch (err) {
+        showNotice(err.message, true);
+        reminderBtn.disabled = false;
+        reminderBtn.textContent = "Lembrar com IA";
+      }
+    });
     fragment.append(card);
   });
 
@@ -2096,12 +2137,7 @@ async function loadReports() {
     return;
   }
 
-  // Top Produtos
-  renderTopProducts(Array.isArray(d.top_products) ? d.top_products : []);
-
-  // Melhores Abordagens
-  renderBestApproaches(Array.isArray(d.best_approaches) ? d.best_approaches : []);
-
+  setupConversationAnalysisReports();
   // Configurar botão de relatório estratégico
   setupStrategicAiReportButton();
 
@@ -2183,57 +2219,180 @@ async function loadReports() {
   });
 }
 
-function renderTopProducts(products) {
-  const grid = $("#reports-top-products");
-  if (!grid) return;
-  grid.innerHTML = "";
-  if (!products.length) {
-    grid.innerHTML = `<div class="empty">Ainda não existem dados de produtos vendidos.</div>`;
-    return;
-  }
-  products.forEach((p, i) => {
-    const card = document.createElement("div");
-    card.className = "top-product-card";
-    card.innerHTML = `
-      <div class="top-product-rank">#${i + 1}</div>
-      <div class="top-product-info">
-        <div class="top-product-name">${escapeHtml(p.name || "Produto")}</div>
-        <div class="top-product-meta muted">${escapeHtml(p.category || "")}</div>
-      </div>
-      <div class="top-product-stats">
-        <span class="top-product-count">${p.count || 0}</span>
-        <span class="muted" style="font-size:11px;">pedidos</span>
-      </div>
-    `;
-    grid.append(card);
+function makeReportPdf(lines, filename) {
+  const wrapped = [];
+  lines.forEach(line => {
+    const ascii = String(line).normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\x20-\x7E]/g, "");
+    for (let start = 0; start < Math.max(ascii.length, 1); start += 84) {
+      wrapped.push(ascii.slice(start, start + 84));
+    }
   });
+  const pages = [];
+  for (let i = 0; i < wrapped.length; i += 44) pages.push(wrapped.slice(i, i + 44));
+  if (!pages.length) pages.push(["Sem resultados para apresentar."]);
+
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${pages.map((_, i) => `${4 + i * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  pages.forEach((pageLines, index) => {
+    const pageId = 4 + index * 2;
+    const contentId = pageId + 1;
+    const commands = ["BT", "/F1 12 Tf", "50 790 Td", "16 TL"];
+    pageLines.forEach(line => {
+      const escaped = line.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+      commands.push(`(${escaped}) Tj`, "T*");
+    });
+    commands.push("ET");
+    const content = commands.join("\n");
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`,
+      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
+    );
+  });
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach(offset => { pdf += `${String(offset).padStart(10, "0")} 00000 n \n`; });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  const link = document.createElement("a");
+  const fileUrl = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
+  link.href = fileUrl;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(fileUrl), 1000);
 }
 
-function renderBestApproaches(approaches) {
-  const grid = $("#reports-best-approaches");
-  if (!grid) return;
-  grid.innerHTML = "";
-  if (!approaches.length) {
-    grid.innerHTML = `<div class="empty">Ainda não existem dados de abordagens com maior resultado.</div>`;
-    return;
-  }
-  approaches.forEach(a => {
-    const card = document.createElement("div");
-    card.className = "approach-card";
-    const successPct = a.success_rate != null ? `${Math.round(a.success_rate * 100)}%` : "\u2014";
-    card.innerHTML = `
-      <div class="approach-card-header">
-        <span class="approach-label">${escapeHtml(a.label || "Abordagem")}</span>
-        <span class="approach-success-badge">${successPct} fator de sucesso</span>
-      </div>
-      <p class="approach-text">${escapeHtml(a.text || a.response_text || "")}</p>
-      <div class="approach-stats">
-        <span>Envios: <strong>${a.sent_count || 0}</strong></span>
-        <span>Conversões: <strong>${a.conversions || 0}</strong></span>
-      </div>
-    `;
-    grid.append(card);
+function renderProductsReport(report) {
+  const grid = $("#reports-top-products");
+  const button = $("#btn-generate-products-report");
+  const items = Array.isArray(report.items) ? report.items : [];
+  grid.innerHTML = items.length
+    ? `<ol class="report-results-list">${items.map(item => `<li><strong>${escapeHtml(item.name)}</strong> <span class="muted">— ${escapeHtml(item.type)} · ${escapeHtml(item.result)} · ${Number(item.count) || 1}</span></li>`).join("")}</ol>`
+    : `<p class="empty">${escapeHtml(report.message || "Não foi possível identificar produtos vendidos ou serviços solicitados nas conversas analisadas.")}</p>`;
+  const download = document.createElement("button");
+  download.type = "button";
+  download.className = "btn outline small";
+  download.textContent = "Descarregar lista em PDF";
+  download.addEventListener("click", () => {
+    const lines = ["Produtos e serviços mais vendidos ou solicitados", "", ...items.map((item, index) => `${index + 1}. ${item.name} - ${item.type}: ${item.result} (${item.count})`)];
+    makeReportPdf(lines, "relatorio-produtos-servicos.pdf");
+    grid.classList.add("hidden");
+    grid.innerHTML = "";
+    button.classList.remove("hidden");
+    showNotice("Lista descarregada em PDF. A análise temporária foi fechada e não foi guardada.");
   });
+  grid.append(download);
+  button.classList.add("hidden");
+  grid.classList.remove("hidden");
+}
+
+function renderApproachesReport(report) {
+  const grid = $("#reports-best-approaches");
+  const sections = [
+    ["Abordagens associadas a conversões", report.successful],
+    ["Abordagens associadas a abandono ou ausência de conversão", report.abandoned],
+  ];
+  grid.innerHTML = sections.map(([title, approaches]) => `
+    <section class="approach-report-group">
+      <h3>${title}</h3>
+      ${Array.isArray(approaches) && approaches.length ? approaches.map(item => `
+        <article class="approach-report-item">
+          <strong>${escapeHtml(item.label)}</strong>
+          <p>${escapeHtml(item.description)}</p>
+          ${item.evidence ? `<p class="muted">${escapeHtml(item.evidence)}</p>` : ""}
+        </article>`).join("") : `<p class="muted">Sem evidência suficiente nas conversas analisadas.</p>`}
+    </section>`).join("");
+  if (report.recommended_style) {
+    const adopt = document.createElement("button");
+    adopt.type = "button";
+    adopt.className = "btn primary small";
+    adopt.dataset.adoptStyle = report.recommended_style;
+    adopt.textContent = "Adotar estilo de abordagem";
+    grid.append(adopt);
+  }
+  grid.classList.remove("hidden");
+}
+
+function setupConversationAnalysisReports() {
+  const productsButton = $("#btn-generate-products-report");
+  if (productsButton && !productsButton.dataset.bound) {
+    productsButton.dataset.bound = "true";
+    productsButton.addEventListener("click", async () => {
+      productsButton.disabled = true;
+      productsButton.textContent = "A analisar conversas...";
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
+        const report = await api("/api/reports/products-services", {
+          method: "POST",
+          body: JSON.stringify({}),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
+        renderProductsReport(report);
+      } catch (error) {
+        showNotice(error.message || "Não foi possível gerar a lista.", true);
+      } finally {
+        productsButton.disabled = false;
+        productsButton.textContent = "Gerar relatório de produtos e serviços";
+      }
+    });
+  }
+
+  const approachesButton = $("#btn-generate-approaches-report");
+  if (approachesButton && !approachesButton.dataset.bound) {
+    approachesButton.dataset.bound = "true";
+    approachesButton.addEventListener("click", async () => {
+      approachesButton.disabled = true;
+      approachesButton.textContent = "A analisar conversas...";
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
+        const report = await api("/api/reports/approaches", {
+          method: "POST",
+          body: JSON.stringify({}),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeout));
+        renderApproachesReport(report);
+        approachesButton.classList.add("hidden");
+      } catch (error) {
+        showNotice(error.message || "Não foi possível analisar as abordagens.", true);
+      } finally {
+        approachesButton.disabled = false;
+        approachesButton.textContent = "Analisar abordagens com IA";
+      }
+    });
+  }
+
+  const approachesGrid = $("#reports-best-approaches");
+  if (approachesGrid && !approachesGrid.dataset.bound) {
+    approachesGrid.dataset.bound = "true";
+    approachesGrid.addEventListener("click", async event => {
+      const adoptButton = event.target.closest("[data-adopt-style]");
+      if (!adoptButton || !paywallCheck()) return;
+      adoptButton.disabled = true;
+      try {
+        await api("/api/reports/adopted-approach", {
+          method: "POST",
+          body: JSON.stringify({ style: adoptButton.dataset.adoptStyle }),
+        });
+        me = await api("/api/me", { cache: "no-store" });
+        fillSettings();
+        showNotice("Estilo de abordagem adotado. Pode desfazê-lo nas definições de Personalidade & Tom.");
+      } catch (error) {
+        showNotice(error.message, true);
+      } finally {
+        adoptButton.disabled = false;
+      }
+    });
+  }
 }
 
 function setupStrategicAiReportButton() {
@@ -4036,7 +4195,13 @@ function fillSettings() {
   f.elements.business_type.value = me.business_type || "Outro";
   f.elements.business_description.value = me.business_description || "";
   f.elements.language.value = me.language || "Português";
-  $("#instructions-form").elements.instructions.value = me.agent_instructions || "";
+  const personalityForm = $("#personality-form");
+  personalityForm.elements.personality.value = me.agent_instructions || me.default_agent_personality || "";
+  const adoptedStyle = Boolean((me.agent_adopted_style || "").trim());
+  $("#adopted-approach-status").textContent = adoptedStyle
+    ? "Um estilo de abordagem está ativo e será aplicado às respostas do agente."
+    : "";
+  $("#btn-undo-adopted-approach").classList.toggle("hidden", !adoptedStyle);
   const mandatory = me.mandatory_responses || {};
   const mf = $("#mandatory-form");
   ["greeting", "unknown", "conversion", "closing"].forEach(k => mf.elements[k].value = mandatory[k] || "");
@@ -4047,20 +4212,41 @@ async function loadMe() {
   fillSettings();
 }
 
-$("#instructions-form").addEventListener("submit", async e => {
+$("#personality-form").addEventListener("submit", async e => {
   e.preventDefault();
   if (!paywallCheck()) return;
   try {
-    const meNow = await api("/api/me");
+    const meNow = await api("/api/me", { cache: "no-store" });
     await api("/api/agent-settings", {
       method: "PUT",
-      body: JSON.stringify({ instructions: e.target.elements.instructions.value, mandatory_responses: meNow.mandatory_responses || {} })
+      body: JSON.stringify({ instructions: e.target.elements.personality.value.trim(), mandatory_responses: meNow.mandatory_responses || {} })
     });
-    me = await api("/api/me");
+    me = await api("/api/me", { cache: "no-store" });
     fillSettings();
-    showNotice("Instruções guardadas.");
+    showNotice("Postura oficial guardada.");
   } catch (err) {
     showNotice(err.message, true);
+  }
+});
+
+$("#btn-reset-personality").addEventListener("click", () => {
+  $("#personality-form").elements.personality.value = me?.default_agent_personality || "";
+  $("#personality-form").requestSubmit();
+});
+
+$("#btn-undo-adopted-approach").addEventListener("click", async event => {
+  if (!paywallCheck()) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await api("/api/reports/adopted-approach", { method: "DELETE" });
+    me = await api("/api/me", { cache: "no-store" });
+    fillSettings();
+    showNotice("Adoção desfeita. O agente voltou à postura oficial definida.");
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    button.disabled = false;
   }
 });
 
@@ -4497,8 +4683,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (dashboardCacheData) {
         if (period === "today") {
           renderBars("#dashboard-chart", [
-            { date: "Ontem", count: dashboardCacheData.yesterday_contacts ?? 0 },
-            { date: "Hoje", count: dashboardCacheData.today_contacts ?? 0 }
+            { date: "24h anteriores", count: dashboardCacheData.yesterday_contacts ?? 0 },
+            { date: "Últimas 24h", count: dashboardCacheData.today_contacts ?? 0 }
           ]);
         } else if (period === "7d") {
           const base = dashboardCacheData.total_contacts || 10;
@@ -4508,8 +4694,8 @@ document.addEventListener("DOMContentLoaded", () => {
             { date: "D-4", count: Math.max(1, Math.round(base * 0.12)) },
             { date: "D-3", count: Math.max(1, Math.round(base * 0.2)) },
             { date: "D-2", count: Math.max(1, Math.round(base * 0.18)) },
-            { date: "Ontem", count: dashboardCacheData.yesterday_contacts ?? 0 },
-            { date: "Hoje", count: dashboardCacheData.today_contacts ?? 0 }
+            { date: "24h anteriores", count: dashboardCacheData.yesterday_contacts ?? 0 },
+            { date: "Últimas 24h", count: dashboardCacheData.today_contacts ?? 0 }
           ]);
         } else if (period === "30d") {
           const base = dashboardCacheData.total_contacts || 20;

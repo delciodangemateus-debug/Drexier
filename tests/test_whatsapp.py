@@ -236,6 +236,88 @@ async def test_meta_webhook_incoming_message_triggers_ai_and_reply(auth_client):
         assert "50" in msgs[1]["content"] or "consultoria" in msgs[1]["content"].lower()
 
 
+@pytest.mark.anyio
+async def test_whatsapp_booking_collects_date_and_time_before_pending_validation(auth_client):
+    client, _, user_id = auth_client
+    with connect() as c:
+        c.execute(
+            """INSERT INTO whatsapp_integrations
+               (user_id, waba_id, phone_number_id, phone_number, business_name, access_token, status)
+               VALUES (?, 'waba_schedule', 'phone_schedule', '+351910000000', 'Clínica', 'test-token', 'connected')""",
+            (user_id,),
+        )
+
+    def post_customer_message(message_id, text):
+        payload = {
+            "object": "whatsapp_business_account",
+            "entry": [{
+                "id": "waba_schedule",
+                "changes": [{
+                    "value": {
+                        "metadata": {"phone_number_id": "phone_schedule"},
+                        "contacts": [{
+                            "profile": {"name": "Ana Cliente"},
+                            "wa_id": "351911111111",
+                        }],
+                        "messages": [{
+                            "from": "351911111111",
+                            "id": message_id,
+                            "timestamp": "1793880000",
+                            "type": "text",
+                            "text": {"body": text},
+                        }],
+                    },
+                    "field": "messages",
+                }],
+            }],
+        }
+        body = json.dumps(payload).encode("utf-8")
+        signature = hmac.new(
+            b"test_app_secret_abc", body, hashlib.sha256
+        ).hexdigest()
+        return client.post(
+            "/api/webhooks/whatsapp",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": f"sha256={signature}",
+            },
+        )
+
+    with patch(
+        "backend.routers.whatsapp.draft_reply",
+        new_callable=AsyncMock,
+        side_effect=[
+            "Qual a data e hora pretendidas para a consulta?",
+            "Registei a sua preferência para amanhã às 14h.",
+        ],
+    ) as mock_draft, patch(
+        "backend.routers.whatsapp.send_whatsapp_message",
+        new_callable=AsyncMock,
+        return_value={"messages": [{"id": "outgoing"}]},
+    ):
+        assert post_customer_message("in-1", "Gostaria de marcar uma consulta.").status_code == 200
+        with connect() as c:
+            request = c.execute(
+                "SELECT id, status, scheduled_at FROM conversion_requests WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        assert request["status"] == "awaiting_schedule"
+        assert request["scheduled_at"] is None
+
+        assert post_customer_message("in-2", "Amanhã às 14h.").status_code == 200
+        assert "data e hora" in mock_draft.await_args_list[0].kwargs["message"]
+
+    with connect() as c:
+        request = c.execute(
+            "SELECT status, scheduled_at, details FROM conversion_requests WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    assert request["status"] == "pending"
+    assert request["scheduled_at"] is not None
+    assert "Data e hora escolhidas pelo cliente" in request["details"]
+
+
 def test_extract_incoming_messages_helpers():
     payload = {
         "object": "whatsapp_business_account",

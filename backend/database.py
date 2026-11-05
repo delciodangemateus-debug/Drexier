@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS users (
   business_description TEXT DEFAULT '',
   language TEXT NOT NULL DEFAULT 'Português',
   agent_instructions TEXT DEFAULT '',
+  agent_adopted_style TEXT DEFAULT '',
   mandatory_responses TEXT DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -74,6 +75,7 @@ CREATE TABLE IF NOT EXISTS conversion_requests (
   contact_id INTEGER NOT NULL,
   request_type TEXT NOT NULL,
   details TEXT NOT NULL DEFAULT '',
+  scheduled_at TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   resolved_at TEXT,
@@ -183,6 +185,16 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
     if not has_users:
         conn.executescript(SQL_SCHEMA_FOR_TESTS)
     else:
+        user_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "agent_adopted_style" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN agent_adopted_style TEXT DEFAULT ''")
+        conversion_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(conversion_requests)").fetchall()
+        }
+        if "scheduled_at" not in conversion_columns:
+            conn.execute("ALTER TABLE conversion_requests ADD COLUMN scheduled_at TEXT")
         try:
             conn.execute("ALTER TABLE subscriptions ADD COLUMN last_successful_payment_at TEXT DEFAULT ''")
         except Exception:

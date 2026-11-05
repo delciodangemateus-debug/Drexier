@@ -11,6 +11,20 @@ load_dotenv()
 logger = logging.getLogger("drexier.ai")
 
 UNKNOWN_REPLY = "De momento, não tenho essa informação cadastrada. Tem alguma outra questão em que possa ajudar?"
+DEFAULT_AGENT_PERSONALITY = (
+    "O agente adota um tom cordial, seguro, executivo e conciso. "
+    "Foca-se em responder objetivamente às questões do cliente e em facilitar "
+    "a conclusão do pedido ou marcação."
+)
+
+
+def effective_agent_instructions(user: Dict[str, Any]) -> str:
+    """Combina a postura oficial escolhida com uma abordagem temporariamente adotada."""
+    personality = (user.get("agent_instructions") or DEFAULT_AGENT_PERSONALITY).strip()
+    adopted_style = (user.get("agent_adopted_style") or "").strip()
+    if adopted_style:
+        return f"{personality}\n\nEstilo de abordagem adotado pelo proprietário:\n{adopted_style}"
+    return personality
 
 def get_gemini_config() -> Dict[str, str]:
     """Obtém a configuração do Gemini a partir das variáveis de ambiente."""

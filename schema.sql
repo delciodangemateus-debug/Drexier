@@ -37,10 +37,14 @@ CREATE TABLE IF NOT EXISTS public.users (
     business_description TEXT DEFAULT '',
     language TEXT NOT NULL DEFAULT 'Português',
     agent_instructions TEXT DEFAULT '',
+    agent_adopted_style TEXT DEFAULT '',
     mandatory_responses JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW())
 );
+
+ALTER TABLE public.users
+    ADD COLUMN IF NOT EXISTS agent_adopted_style TEXT DEFAULT '';
 
 CREATE TRIGGER set_timestamp_users
 BEFORE UPDATE ON public.users
@@ -253,14 +257,19 @@ CREATE TABLE IF NOT EXISTS public.conversion_requests (
     contact_id BIGINT NOT NULL REFERENCES public.contacts(id) ON DELETE CASCADE,
     request_type TEXT NOT NULL,
     details TEXT NOT NULL DEFAULT '',
+    scheduled_at TIMESTAMPTZ,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW()),
     resolved_at TIMESTAMPTZ
 );
 
+ALTER TABLE public.conversion_requests
+    ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_conversion_requests_user_id ON public.conversion_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_conversion_requests_contact_id ON public.conversion_requests(contact_id);
 CREATE INDEX IF NOT EXISTS idx_conversion_requests_status ON public.conversion_requests(status);
+CREATE INDEX IF NOT EXISTS idx_conversion_requests_scheduled_at ON public.conversion_requests(scheduled_at);
 
 COMMENT ON TABLE public.conversion_requests IS 'Pedidos identificados pela IA aguardando validação do proprietário.';
 

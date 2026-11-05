@@ -36,7 +36,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
         raise HTTPException(401, "Sessão inválida ou expirada.")
     with connect() as c:
         row = c.execute(
-            "SELECT id, name, email, business_type, business_description, language, agent_instructions, mandatory_responses FROM users WHERE id=?",
+            "SELECT id, name, email, business_type, business_description, language, agent_instructions, agent_adopted_style, mandatory_responses FROM users WHERE id=?",
             (uid,),
         ).fetchone()
     if not row:

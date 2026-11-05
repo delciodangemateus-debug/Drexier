@@ -71,7 +71,17 @@ def _apply_where_conditions(query, where_clause: str, params: list, param_offset
     for cond in conds:
         c_norm = re.sub(r"\s*=\s*", "=", cond)
         # Remove eventuais prefixos de tabela (ex: r.id -> id, ct.id -> id)
-        if "=?" in c_norm:
+        if ">=" in c_norm and "?" in c_norm:
+            col_part = c_norm.split(">=")[0].strip()
+            col = col_part.split(".")[-1] if "." in col_part else col_part
+            query = query.gte(col, params[p_idx])
+            p_idx += 1
+        elif "<" in c_norm and "?" in c_norm:
+            col_part = c_norm.split("<")[0].strip()
+            col = col_part.split(".")[-1] if "." in col_part else col_part
+            query = query.lt(col, params[p_idx])
+            p_idx += 1
+        elif "=?" in c_norm:
             col_part = c_norm.split("=?")[0].strip()
             col = col_part.split(".")[-1] if "." in col_part else col_part
             val = params[p_idx]
@@ -130,7 +140,7 @@ class SupabaseCursor:
         # 1.1 Conversion requests with contacts join (dashboard list or single action)
         if "FROM conversion_requests r" in clean_sql and "JOIN contacts ct" in clean_sql:
             query = self.client.table("conversion_requests").select(
-                "id, request_type, details, created_at, status, user_id, contact_id"
+                "id, request_type, details, created_at, resolved_at, scheduled_at, status, user_id, contact_id"
             )
             where_part = clean_sql.split("WHERE", 1)[1] if "WHERE" in clean_sql else ""
             if "r.id" in where_part or "id = ?" in where_part.replace(" ", ""):
@@ -141,14 +151,19 @@ class SupabaseCursor:
             elif "status='pending'" in where_part.replace(" ", ""):
                 uid = p[0]
                 query = query.eq("user_id", uid).eq("status", "pending")
-            elif "statusIN" in where_part.replace(" ", "") or "status in" in where_part.lower():
+            elif re.search(r"r\.status\s+IN\s*\(", where_part, re.IGNORECASE):
                 uid = p[0]
-                query = query.eq("user_id", uid).neq("status", "pending")
+                statuses_match = re.search(r"r\.status\s+IN\s*\(([^)]*)\)", where_part, re.IGNORECASE)
+                statuses = re.findall(r"'([^']+)'", statuses_match.group(1)) if statuses_match else []
+                query = query.eq("user_id", uid).in_("status", statuses)
             else:
                 uid = p[0]
                 query = query.eq("user_id", uid)
 
-            reqs = query.order("created_at", desc=True).execute().data or []
+            order_match = re.search(r"ORDER BY\s+(?:r\.)?(\w+)(?:\s+(ASC|DESC))?", clean_sql, re.IGNORECASE)
+            order_column = order_match.group(1) if order_match else "created_at"
+            order_desc = order_match is None or (order_match.group(2) or "ASC").upper() == "DESC"
+            reqs = query.order(order_column, desc=order_desc).execute().data or []
             contact_ids = list({r["contact_id"] for r in reqs if r.get("contact_id")})
             contacts_map = {}
             if contact_ids:
@@ -167,6 +182,7 @@ class SupabaseCursor:
                     "request_type": r["request_type"],
                     "details": r["details"],
                     "created_at": r["created_at"],
+                    "scheduled_at": r.get("scheduled_at"),
                     "status": r.get("status", "pending"),
                     "resolved_at": r.get("resolved_at"),
                     "contact_id": r["contact_id"],
@@ -210,6 +226,22 @@ class SupabaseCursor:
             m_alias = re.search(r"SELECT COUNT\(\*\)\s+(?:AS\s+)?(\w+)\s+FROM\s+(\w+)", clean_sql, re.IGNORECASE)
             alias = m_alias.group(1) if m_alias else "n"
             table = m_alias.group(2) if m_alias else "contacts"
+
+            if "created_at>=?" in clean_sql.replace(" ", "") and "created_at<?" in clean_sql.replace(" ", ""):
+                uid, start_at, end_at = p[0], p[1], p[2]
+                cnt = (
+                    self.client.table(table)
+                    .select("id", count="exact")
+                    .eq("user_id", uid)
+                    .gte("created_at", start_at)
+                    .lt("created_at", end_at)
+                    .execute()
+                    .count
+                    or 0
+                )
+                self._rows = [SupabaseRow({alias: cnt})]
+                self.rowcount = 1
+                return self
 
             # Count contacts today
             if "date(created_at)=date('now','localtime')" in clean_sql.replace(" ", ""):

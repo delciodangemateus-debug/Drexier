@@ -23,6 +23,65 @@ def test_static_routes():
     assert res_js.status_code == 200
 
 
+def test_dashboard_uses_consecutive_24_hour_windows_and_week_schedule():
+    from datetime import datetime, timedelta, timezone
+    import time
+    from backend.main import _dashboard_cache
+
+    email = f"dashboard_week_{int(time.time() * 1000)}@example.com"
+    password = "SecurePassword123"
+    signup_and_verify(client, {
+        "name": "Dashboard Semana",
+        "email": email,
+        "password": password,
+        "confirm_password": password,
+        "business_type": "Serviços",
+    })
+    auth = login_and_verify(client, email, password)
+    user_id = auth.json()["user_id"]
+    headers = {"Authorization": f"Bearer {auth.json()['token']}"}
+
+    now = datetime.now(timezone.utc)
+    contact_ids = {}
+    with connect() as c:
+        for key, age in (("last24h", 5), ("previous24h", 30), ("older", 50)):
+            created_at = (now - timedelta(hours=age)).strftime("%Y-%m-%d %H:%M:%S")
+            contact_ids[key] = c.execute(
+                """INSERT INTO contacts(user_id, name, contact_key, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (user_id, key, f"{key}@example.com", created_at),
+            ).lastrowid
+
+        for key, status, days_ahead in (
+            ("previous24h", "confirmed", 1),
+            ("last24h", "pending", 2),
+            ("older", "pending", 8),
+        ):
+            c.execute(
+                """INSERT INTO conversion_requests
+                   (user_id, contact_id, request_type, details, status, scheduled_at)
+                   VALUES (?, ?, 'booking', 'Consulta', ?, ?)""",
+                (
+                    user_id,
+                    contact_ids[key],
+                    status,
+                    (now + timedelta(days=days_ahead)).isoformat(),
+                ),
+            )
+
+    _dashboard_cache.clear()
+    response = client.get("/api/dashboard", headers=headers)
+    assert response.status_code == 200
+    dashboard = response.json()
+    assert dashboard["today_contacts"] == 1
+    assert dashboard["yesterday_contacts"] == 1
+    assert dashboard["bookings_count"] == 2
+    assert [row["name"] for row in dashboard["confirmed_bookings"]] == [
+        "previous24h",
+        "last24h",
+    ]
+
+
 def test_business_info_cards_persist_and_keep_multiple_custom_cards():
     import time
 
@@ -389,3 +448,89 @@ def test_paywall_strict_enforcement():
     assert res_agent_ok.status_code == 200
 
 
+def test_conversation_reports_are_generated_on_demand_and_adopted_style_can_be_undone(monkeypatch):
+    import time
+    import backend.services.analytics as analytics
+
+    email = f"reports_{int(time.time() * 1000)}@example.com"
+    password = "SecurePassword123"
+    signup_and_verify(client, {
+        "name": "Relatórios",
+        "email": email,
+        "password": password,
+        "confirm_password": password,
+        "business_type": "Serviços e vendas",
+    })
+    auth = login_and_verify(client, email, password)
+    user_id = auth.json()["user_id"]
+    headers = {"Authorization": f"Bearer {auth.json()['token']}"}
+    _save_stored_subscription(user_id, {"status": "active", "plan_name": "Plano Business"})
+
+    with connect() as conn:
+        contact_id = conn.execute(
+            "INSERT INTO contacts(user_id, name, contact_key) VALUES (?, ?, ?)",
+            (user_id, "Cliente teste", f"{email}"),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'customer', ?)",
+            (user_id, contact_id, "Quero comprar a consulta inicial."),
+        )
+        conn.execute(
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+            (user_id, contact_id, "A consulta inicial custa 40 euros. Quer marcar?"),
+        )
+        conn.execute(
+            """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status)
+               VALUES (?, ?, 'booking', 'Consulta inicial', 'confirmed')""",
+            (user_id, contact_id),
+        )
+        conn.execute(
+            "UPDATE users SET agent_instructions=? WHERE id=?",
+            ("Postura personalizada", user_id),
+        )
+
+    async def fake_gemini(**kwargs):
+        prompt = kwargs["contents"][0]["parts"][0]["text"]
+        assert "consulta inicial" in prompt
+        if "identifique somente produtos" in prompt:
+            return '{"items":[{"name":"Consulta inicial","type":"Serviço","result":"Vendido","count":1}]}'
+        return (
+            '{"successful":[{"label":"Preço claro e pergunta de fecho",'
+            '"description":"Apresenta o valor e propõe marcação.",'
+            '"evidence":"O pedido foi confirmado."}],'
+            '"abandoned":[],"recommended_style":"Indique preços registados e proponha o próximo passo."}'
+        )
+
+    monkeypatch.setattr(analytics, "get_gemini_config", lambda: {
+        "api_key": "test-key", "model": "test-model", "base_url": "https://example.test",
+    })
+    monkeypatch.setattr(analytics, "call_gemini_api", fake_gemini)
+
+    before = client.get("/api/analytics", headers=headers).json()
+    assert "top_products" not in before
+    assert "best_approaches" not in before
+
+    products = client.post("/api/reports/products-services", json={}, headers=headers)
+    assert products.status_code == 200
+    assert products.json()["items"][0]["name"] == "Consulta inicial"
+
+    approaches = client.post("/api/reports/approaches", json={}, headers=headers)
+    assert approaches.status_code == 200
+    style = approaches.json()["recommended_style"]
+    assert style
+
+    adopted = client.post(
+        "/api/reports/adopted-approach",
+        json={"style": style},
+        headers=headers,
+    )
+    assert adopted.status_code == 200
+    profile = client.get("/api/me", headers=headers).json()
+    assert profile["agent_adopted_style"] == style
+    assert profile["agent_instructions"] == "Postura personalizada"
+
+    undone = client.delete("/api/reports/adopted-approach", headers=headers)
+    assert undone.status_code == 200
+    profile = client.get("/api/me", headers=headers).json()
+    assert profile["agent_adopted_style"] == ""
+    assert profile["agent_instructions"] == "Postura personalizada"

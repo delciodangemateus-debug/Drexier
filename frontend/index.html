@@ -780,17 +780,17 @@
           </div>
         </article>
 
-        <!-- 3: Novos clientes hoje -->
+        <!-- 3: Aquisições comparadas em janelas consecutivas de 24 horas -->
         <article class="kpi-card" id="card-metric-today">
           <div class="kpi-card-top">
-            <span class="kpi-card-label">Novos Clientes</span>
+            <span class="kpi-card-label">Novos Clientes (24h)</span>
             <div class="kpi-card-icon">
               <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
             </div>
           </div>
           <div class="kpi-card-value" id="metric-today">0</div>
           <div class="kpi-card-sub">
-            <span id="compare-yesterday" class="bento-compare-pill">Dia anterior: 0</span>
+            <span id="compare-yesterday" class="bento-compare-pill">24h anteriores: 0</span>
           </div>
         </article>
 
@@ -808,17 +808,17 @@
           </div>
         </article>
 
-        <!-- 5: Marcações Adquiridas (Clicável para ver lista de pessoas confirmadas) -->
-        <article class="kpi-card clickable" id="card-metric-bookings" title="Clique para ver lista de marcações confirmadas">
+        <!-- 5: Marcações e pedidos agendados para os próximos sete dias -->
+        <article class="kpi-card clickable" id="card-metric-bookings" title="Clique para ver as marcações desta semana">
           <div class="kpi-card-top">
-            <span class="kpi-card-label">Marcações Adquiridas</span>
+            <span class="kpi-card-label">Marcações da Semana</span>
             <div class="kpi-card-icon" style="color:var(--color-primary);">
               <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
             </div>
           </div>
           <div class="kpi-card-value" id="metric-bookings">0</div>
           <div class="kpi-card-sub">
-            <span class="kpi-trend-pill up">Confirmadas &bull; Ver lista</span>
+            <span class="kpi-trend-pill up">Pendentes e validadas &bull; Ver lista</span>
           </div>
         </article>
       </div>
@@ -1029,12 +1029,13 @@
         <div class="panel-heading">
           <div>
             <h2>Produtos &amp; Serviços Mais Vendidos</h2>
-            <p class="muted" style="margin:2px 0 0;">Informações recolhidas pela IA com base em pedidos confirmados e volume de procura</p>
+            <p class="muted" style="margin:2px 0 0;">Gere uma lista de produtos vendidos e serviços procurados a partir das conversas com clientes.</p>
           </div>
-          <span class="badge" style="background:#DCFCE7; color:#15803D; font-weight:700;">Top Vendas &bull; IA Analytics</span>
         </div>
-        <div id="reports-top-products" class="top-products-grid">
-          <div class="empty">A recolher dados de produtos mais vendidos...</div>
+        <div class="report-trigger-content">
+          <p class="muted report-retention-note">A análise é temporária e não será guardada. Depois de gerada, a lista ficará visível até ser descarregada em PDF.</p>
+          <button type="button" class="btn primary small" id="btn-generate-products-report">Gerar relatório de produtos e serviços</button>
+          <div id="reports-top-products" class="top-products-grid hidden" aria-live="polite"></div>
         </div>
       </div>
 
@@ -1045,10 +1046,11 @@
             <h2>Mensagens &amp; Abordagens com Maior Resultado</h2>
             <p class="muted" style="margin:2px 0 0;">Padrões de resposta que alcançaram a maior taxa de conversão e fecho de agendamentos</p>
           </div>
-          <span class="badge" style="background:var(--violet-subtle); color:var(--lavender); font-weight:700;">Maior Taxa de Fecho</span>
         </div>
-        <div id="reports-best-approaches" class="best-approaches-grid">
-          <div class="empty">A recolher mensagens com melhor taxa de conversão...</div>
+        <div class="report-trigger-content">
+          <p class="muted report-retention-note">A análise das conversas não será guardada. Poderá adotar a abordagem recomendada ou desfazê-la a qualquer momento.</p>
+          <button type="button" class="btn primary small" id="btn-generate-approaches-report">Analisar abordagens com IA</button>
+          <div id="reports-best-approaches" class="best-approaches-grid hidden" aria-live="polite"></div>
         </div>
       </div>
 
@@ -1556,7 +1558,6 @@
             <h2>Agent Studio — Centro de Controlo da IA</h2>
             <p class="muted">Centralize todas as diretrizes, personalidade, regras e respostas da inteligência artificial.</p>
           </div>
-          <span class="badge" style="background:var(--violet-subtle); color:var(--lavender);">Agent Engine v2.0</span>
         </div>
 
         <div class="agent-studio-shell">
@@ -1564,21 +1565,14 @@
           <div class="agent-studio-subnav">
             <button type="button" class="agent-studio-subtab active" data-agent-tab="overview">Visão Geral</button>
             <button type="button" class="agent-studio-subtab" data-agent-tab="personality">Personalidade &amp; Tom</button>
-            <button type="button" class="agent-studio-subtab" data-agent-tab="instructions">Instruções Gerais</button>
             <button type="button" class="agent-studio-subtab" data-agent-tab="mandatory">Respostas Obrigatórias</button>
-            <button type="button" class="agent-studio-subtab" data-agent-tab="rules">Regras &amp; Sigilo</button>
-            <button type="button" class="agent-studio-subtab" data-agent-tab="goals">Objetivos Comerciais</button>
           </div>
 
           <!-- SEÇÃO 1: VISÃO GERAL -->
           <div class="agent-studio-card" id="agent-tab-overview">
             <h3 style="margin:0 0 8px;">Estado do Agente</h3>
             <p class="muted" style="margin:0 0 16px;">O agente Drexier opera com base nos dados do negócio e nas diretrizes abaixo estabelecidas.</p>
-            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
-              <div class="wa-info-item">
-                <span class="wa-info-label">Motor de IA</span>
-                <strong>Google Gemini 2.0 Flash</strong>
-              </div>
+            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:16px;">
               <div class="wa-info-item">
                 <span class="wa-info-label">Contexto do Negócio</span>
                 <strong>Sincronização Contínua</strong>
@@ -1594,24 +1588,17 @@
           <div class="agent-studio-card hidden" id="agent-tab-personality">
             <h3 style="margin:0 0 8px;">Personalidade &amp; Postura Comunicacional</h3>
             <p class="muted" style="margin:0 0 16px;">Oriente a forma como a IA se apresenta aos clientes da sua marca.</p>
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              <div style="background:var(--surface-elevated); padding:14px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
-                <strong>Postura Oficial:</strong>
-                <p class="muted" style="margin:4px 0 0;">O agente adota um tom cordial, seguro, executivo e conciso. Foca-se em responder objetivamente às questões do cliente e em facilitar a conclusão do pedido ou marcação.</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- SEÇÃO 3: INSTRUÇÕES GERAIS -->
-          <div class="agent-studio-card hidden" id="agent-tab-instructions">
-            <h3 style="margin:0 0 8px;">Instruções Gerais de Atendimento</h3>
-            <p class="muted" style="margin:0 0 16px;">Defina regras livres de atendimento, formas de tratamento e diretrizes específicas da sua empresa.</p>
-            <form id="instructions-form" class="form">
+            <form id="personality-form" class="form">
               <label>
-                Instruções personalizadas ao agente
-                <textarea name="instructions" rows="8" placeholder="Escreva aqui diretrizes específicas... Ex: Cumprimentar sempre com 'Bom dia' ou 'Boa tarde', reforçar que temos envio gratuito acima de 50€, sugerir marcação prévia para atendimentos presenciais..."></textarea>
+                Postura oficial do agente
+                <textarea name="personality" rows="8" required maxlength="8000" placeholder="Descreva como o agente deve comunicar com os clientes."></textarea>
               </label>
-              <button class="btn primary small" type="submit">Guardar instruções</button>
+              <div class="personality-actions">
+                <button class="btn primary small" type="submit">Guardar postura</button>
+                <button class="btn outline small" type="button" id="btn-reset-personality">Repor postura predefinida</button>
+              </div>
+              <p class="muted" id="adopted-approach-status" aria-live="polite"></p>
+              <button class="btn outline small hidden" type="button" id="btn-undo-adopted-approach">Desfazer adoção do estilo</button>
             </form>
           </div>
 
@@ -1628,33 +1615,6 @@
             </form>
           </div>
 
-          <!-- SEÇÃO 5: REGRAS & SIGILO -->
-          <div class="agent-studio-card hidden" id="agent-tab-rules">
-            <h3 style="margin:0 0 8px;">Regras &amp; Sigilo de Inventário</h3>
-            <p class="muted" style="margin:0 0 16px;">Normas de proteção de dados sensíveis da sua empresa aplicadas a todas as conversas.</p>
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              <div style="background:var(--surface-elevated); padding:14px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
-                <strong style="color:var(--color-success);">Sigilo Absoluto de Quantidade de Stock</strong>
-                <p class="muted" style="margin:4px 0 0;">A IA está estritamente programada para nunca revelar a quantidade numérica de unidades em armazém. Apenas informa disponibilidade ("Temos disponível" ou "Está esgotado de momento").</p>
-              </div>
-              <div style="background:var(--surface-elevated); padding:14px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
-                <strong>Limites de Negociação</strong>
-                <p class="muted" style="margin:4px 0 0;">O agente aplica unicamente os preços e eventuais descontos registados nos Cards do Negócio, sem inventar promoções ou condições não autorizadas.</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- SEÇÃO 6: OBJETIVOS COMERCIAIS -->
-          <div class="agent-studio-card hidden" id="agent-tab-goals">
-            <h3 style="margin:0 0 8px;">Objetivos Comerciais da IA</h3>
-            <p class="muted" style="margin:0 0 16px;">Como o agente conduz cada interação comercial até ao desfecho pretendido.</p>
-            <div style="display:flex; flex-direction:column; gap:12px;">
-              <div style="background:var(--surface-elevated); padding:14px 16px; border-radius:var(--radius-sm); border:1px solid var(--border-subtle);">
-                <strong>Condução Orientada à Conversão</strong>
-                <p class="muted" style="margin:4px 0 0;">Ao esclarecer dúvidas, o agente finaliza com uma pergunta facilitadora (ex: "Deseja que prepare a sua encomenda?", "Gostaria de agendar para o período da manhã?"), evitando conversas estagnadas.</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -1743,8 +1703,8 @@
   <div class="modal-card modal-card-large">
     <div class="modal-header">
       <div>
-        <h2 id="bookings-modal-title" style="margin:0;">Marcações Adquiridas &amp; Confirmadas</h2>
-        <p class="muted" style="margin:3px 0 0; font-size:13px;">Lista de clientes confirmados (automaticamente com IA ou manualmente) e histórico de pedidos tratados.</p>
+        <h2 id="bookings-modal-title" style="margin:0;">Marcações e pedidos desta semana</h2>
+        <p class="muted" style="margin:3px 0 0; font-size:13px;">Pedidos com data e hora registadas, organizados pelo dia marcado. Use “Lembrar com IA” para enviar um lembrete contextual.</p>
       </div>
       <button class="modal-close-btn" id="close-bookings-modal" aria-label="Fechar">&times;</button>
     </div>

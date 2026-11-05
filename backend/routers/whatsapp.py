@@ -7,7 +7,12 @@ from pydantic import BaseModel, Field
 
 from backend.auth import decode_token
 from backend.database import connect
-from backend.services.agent import draft_reply
+from backend.services.agent import draft_reply, effective_agent_instructions
+from backend.services.email_service import (
+    capture_scheduled_request,
+    detect_booking_or_purchase_intent,
+    ensure_date_time_question,
+)
 from backend.services.whatsapp import (
     debug_token,
     exchange_code_for_token,
@@ -35,7 +40,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
         raise HTTPException(401, "Sessão inválida ou expirada.")
     with connect() as c:
         row = c.execute(
-            "SELECT id, name, email, business_type, business_description, language, agent_instructions, mandatory_responses FROM users WHERE id=?",
+            "SELECT id, name, email, business_type, business_description, language, agent_instructions, agent_adopted_style, mandatory_responses FROM users WHERE id=?",
             (uid,),
         ).fetchone()
     if not row:
@@ -481,24 +486,26 @@ async def receive_meta_webhook(request: Request):
                 (user_id, cid, content),
             )
 
-            # Detecção automática de intenção de marcação ou compra
-            try:
-                from backend.services.email_service import detect_booking_or_purchase_intent
-                intent = detect_booking_or_purchase_intent(content, "Mensagem WhatsApp")
-                if intent:
-                    has_pending = c.execute(
-                        "SELECT id FROM conversion_requests WHERE user_id = ? AND contact_id = ? AND status = 'pending'",
-                        (user_id, cid)
-                    ).fetchone()
-                    if not has_pending:
-                        c.execute(
-                            """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status)
-                               VALUES (?, ?, ?, ?, 'pending')""",
-                            (user_id, cid, intent["type"], intent["details"])
-                        )
-                        logger.info(f"[WhatsApp Conversão] Pedido de {intent['type']} detectado para {from_number}.")
-            except Exception as ex_intent:
-                logger.debug(f"Detecção de intenção: {ex_intent}")
+            intent = detect_booking_or_purchase_intent(content, "Mensagem WhatsApp")
+            scheduled_request = capture_scheduled_request(
+                c, user_id, cid, content, "Mensagem WhatsApp", intent
+            )
+            if scheduled_request and scheduled_request["status"] == "awaiting_schedule":
+                message_for_ai = (
+                    f"O cliente quer avançar com este pedido de {scheduled_request['request_type']}: "
+                    f"{scheduled_request['details']}. Ainda não informou uma data e hora específicas. "
+                    "Pergunte de forma cordial qual é a data e a hora pretendidas, explicando que precisa "
+                    "dessa informação para registar a marcação/pedido. Não diga que já foi confirmado."
+                )
+            elif scheduled_request:
+                message_for_ai = (
+                    f"O cliente enviou uma solicitação de {scheduled_request['request_type']} e indicou "
+                    f"data e hora: {scheduled_request['scheduled_at']}. A solicitação está registada e "
+                    "aguarda confirmação do proprietário. Confirme a receção sem afirmar que já foi "
+                    "confirmada ou concluída."
+                )
+            else:
+                message_for_ai = content
 
             # Histórico recente da conversa
             history_rows = c.execute(
@@ -533,9 +540,9 @@ async def receive_meta_webhook(request: Request):
         # Gerar resposta com a IA (Gemini ou fallback)
         try:
             reply = await draft_reply(
-                message=content,
+                message=message_for_ai,
                 info_rows=info,
-                instructions=user_dict.get("agent_instructions") or "",
+                instructions=effective_agent_instructions(user_dict),
                 language=user_dict.get("language") or "Português",
                 history=history,
                 business_name=user_dict.get("name") or integration["business_name"] or "nosso negócio",
@@ -546,6 +553,9 @@ async def receive_meta_webhook(request: Request):
         except Exception as e:
             logger.error(f"Erro ao gerar resposta com a IA: {e}")
             reply = "Agradecemos o seu contacto! Em breve responderemos à sua mensagem."
+
+        if scheduled_request and scheduled_request["status"] == "awaiting_schedule":
+            reply = ensure_date_time_question(reply)
 
         # Salvar a resposta da IA no banco de dados
         with connect() as c:

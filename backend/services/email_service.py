@@ -15,19 +15,20 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.parse
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import httpx
 
 from backend.database import connect
 from backend.services.billing_service import get_last_successful_payment_at
-from backend.services.agent import draft_reply, check_business_availability
+from backend.services.agent import draft_reply, check_business_availability, effective_agent_instructions
 
 load_dotenv()
 
 logger = logging.getLogger("drexier.email_service")
+BUSINESS_TIMEZONE = ZoneInfo("Europe/Lisbon")
 # Cache em memória e deduplicação de mensagens recebidas (Anti-Loop & Anti-Ping-Pong)
 _PROCESSED_MESSAGE_IDS = set()
-_LAST_PROCESSED_AT: Dict[str, float] = {}
 
 LOOP_ACKNOWLEDGMENT_PATTERNS = [
     r"^(obrigad[oa]|obrigad[oa]!|muito obrigad[oa]|valeu|ok|ok!|de acordo|perfeito|combinado|agradecido|obg|obg!|muito obrigado!)$",
@@ -709,6 +710,182 @@ def detect_booking_or_purchase_intent(incoming_content: str, subject: str) -> Op
     return None
 
 
+def extract_scheduled_at(message: str, now: Optional[datetime] = None) -> Optional[str]:
+    """Extract a customer-provided Portuguese date and time as a UTC ISO timestamp."""
+    local_now = (now or datetime.now(BUSINESS_TIMEZONE)).astimezone(BUSINESS_TIMEZONE)
+    text = message.casefold()
+
+    time_match = re.search(
+        r"\b(?:às|as|pelas?)?\s*(\d{1,2})\s*(?:h|:)\s*(\d{2})?\b",
+        text,
+    )
+    if not time_match:
+        return None
+    hour = int(time_match.group(1))
+    minute = int(time_match.group(2) or 0)
+    if hour > 23 or minute > 59:
+        return None
+
+    scheduled_date = None
+    iso_match = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", text)
+    numeric_match = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?\b", text)
+    month_names = {
+        "janeiro": 1, "fevereiro": 2, "marco": 3, "março": 3, "abril": 4,
+        "maio": 5, "junho": 6, "julho": 7, "agosto": 8, "setembro": 9,
+        "outubro": 10, "novembro": 11, "dezembro": 12,
+    }
+
+    try:
+        if iso_match:
+            scheduled_date = datetime(
+                int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))
+            ).date()
+        elif numeric_match:
+            day, month = int(numeric_match.group(1)), int(numeric_match.group(2))
+            year = int(numeric_match.group(3) or local_now.year)
+            scheduled_date = datetime(year, month, day).date()
+            if not numeric_match.group(3) and scheduled_date < local_now.date():
+                scheduled_date = scheduled_date.replace(year=year + 1)
+        else:
+            month_match = re.search(
+                r"\b(?:dia\s+)?(\d{1,2})\s+de\s+([a-zçã]+)(?:\s+de\s+(\d{4}))?\b",
+                text,
+            )
+            if month_match:
+                day = int(month_match.group(1))
+                month = month_names.get(month_match.group(2))
+                if month is None:
+                    return None
+                year = int(month_match.group(3) or local_now.year)
+                scheduled_date = datetime(year, month, day).date()
+                if not month_match.group(3) and scheduled_date < local_now.date():
+                    scheduled_date = scheduled_date.replace(year=year + 1)
+            elif "amanhã" in text or "amanha" in text:
+                from datetime import timedelta
+                scheduled_date = local_now.date() + timedelta(days=1)
+            elif re.search(r"\bhoje\b", text):
+                scheduled_date = local_now.date()
+            else:
+                weekdays = (
+                    (("segunda",), 0), (("terça", "terca"), 1), (("quarta",), 2),
+                    (("quinta",), 3), (("sexta",), 4), (("sábado", "sabado"), 5),
+                    (("domingo",), 6),
+                )
+                for names, weekday in weekdays:
+                    if any(re.search(rf"\b{re.escape(name)}(?:-feira)?\b", text) for name in names):
+                        from datetime import timedelta
+                        days_ahead = (weekday - local_now.weekday()) % 7
+                        scheduled_date = local_now.date() + timedelta(days=days_ahead or 7)
+                        break
+    except ValueError:
+        return None
+
+    if scheduled_date is None:
+        return None
+    local_scheduled = datetime(
+        scheduled_date.year, scheduled_date.month, scheduled_date.day,
+        hour, minute, tzinfo=BUSINESS_TIMEZONE,
+    )
+    if local_scheduled <= local_now:
+        return None
+    return local_scheduled.astimezone(timezone.utc).isoformat()
+
+
+def capture_scheduled_request(
+    conn,
+    user_id: int,
+    contact_id: int,
+    incoming_content: str,
+    subject: str,
+    intent: Optional[Dict[str, str]],
+) -> Optional[Dict[str, Any]]:
+    """Save a request as awaiting its date/time or pending with the supplied schedule."""
+    waiting = conn.execute(
+        """SELECT id, request_type, details FROM conversion_requests
+           WHERE user_id = ? AND contact_id = ? AND status = 'awaiting_schedule'
+           ORDER BY id DESC LIMIT 1""",
+        (user_id, contact_id),
+    ).fetchone()
+    request_type = intent["type"] if intent else (waiting["request_type"] if waiting else None)
+    if not request_type:
+        return None
+
+    scheduled_at = extract_scheduled_at(incoming_content)
+    if not waiting and intent and scheduled_at:
+        existing = conn.execute(
+            """SELECT id, request_type, details FROM conversion_requests
+               WHERE user_id = ? AND contact_id = ? AND request_type = ?
+                 AND scheduled_at = ? AND status = 'pending'
+               ORDER BY id DESC LIMIT 1""",
+            (user_id, contact_id, request_type, scheduled_at),
+        ).fetchone()
+        if existing:
+            return {
+                "id": existing["id"],
+                "request_type": existing["request_type"],
+                "status": "pending",
+                "scheduled_at": scheduled_at,
+                "details": existing["details"],
+            }
+
+    if waiting:
+        details = waiting["details"] or ""
+        if scheduled_at:
+            details = f"{details}\nData e hora escolhidas pelo cliente: {incoming_content[:200]}".strip()
+        conn.execute(
+            """UPDATE conversion_requests SET details = ?, scheduled_at = ?, status = ?
+               WHERE id = ? AND user_id = ?""",
+            (
+                details,
+                scheduled_at,
+                "pending" if scheduled_at else "awaiting_schedule",
+                waiting["id"],
+                user_id,
+            ),
+        )
+        return {
+            "id": waiting["id"],
+            "request_type": request_type,
+            "status": "pending" if scheduled_at else "awaiting_schedule",
+            "scheduled_at": scheduled_at,
+            "details": details,
+        }
+
+    details = f"Assunto: {subject}\n{incoming_content[:400]}".strip()
+    cursor = conn.execute(
+        """INSERT INTO conversion_requests
+           (user_id, contact_id, request_type, details, status, scheduled_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            user_id,
+            contact_id,
+            request_type,
+            details,
+            "pending" if scheduled_at else "awaiting_schedule",
+            scheduled_at,
+        ),
+    )
+    return {
+        "id": cursor.lastrowid,
+        "request_type": request_type,
+        "status": "pending" if scheduled_at else "awaiting_schedule",
+        "scheduled_at": scheduled_at,
+        "details": details,
+    }
+
+
+def ensure_date_time_question(reply: str) -> str:
+    """Keep the agent's reply focused on collecting both required schedule fields."""
+    has_date = re.search(r"\b(data|dia)\b", reply, re.IGNORECASE)
+    has_time = re.search(r"\b(hora|horário|horario)\b", reply, re.IGNORECASE)
+    if has_date and has_time:
+        return reply
+    return (
+        "Para registar o seu pedido, qual é a data e a hora que prefere? "
+        "Por favor, indique o dia, mês e horário."
+    )
+
+
 async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[str, Any]]:
     """
     Sincroniza e-mails não lidos da caixa de entrada do Gmail,
@@ -741,9 +918,13 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
             thread_id = m.get("threadId")
 
             # Deduplicação imediata contra repetição por eventual lag do índice Gmail
-            if msg_id in _PROCESSED_MESSAGE_IDS:
+            processed_key = (
+                "google",
+                str(integration.get("id") or integration.get("email_address")),
+                str(msg_id),
+            )
+            if processed_key in _PROCESSED_MESSAGE_IDS:
                 continue
-            _PROCESSED_MESSAGE_IDS.add(msg_id)
 
             msg_res = await client.get(f"{GMAIL_API_BASE}/messages/{msg_id}?format=full", headers=headers)
             if msg_res.status_code != 200:
@@ -819,6 +1000,7 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
                 message_id_header=message_id_header,
             )
 
+            _PROCESSED_MESSAGE_IDS.add(processed_key)
             # Remove a label UNREAD do Gmail para não responder repetidamente
             await client.post(
                 f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
@@ -863,6 +1045,13 @@ async def sync_microsoft_emails(user_dict: dict, integration: dict) -> List[Dict
         messages = res.json().get("value", [])
         for m in messages:
             msg_id = m.get("id")
+            processed_key = (
+                "microsoft",
+                str(integration.get("id") or integration.get("email_address")),
+                str(msg_id),
+            )
+            if processed_key in _PROCESSED_MESSAGE_IDS:
+                continue
             conversation_id = m.get("conversationId")
             subject = m.get("subject", "Sem assunto")
             sender_obj = m.get("from", {}).get("emailAddress", {})
@@ -931,6 +1120,7 @@ async def sync_microsoft_emails(user_dict: dict, integration: dict) -> List[Dict
                 message_id_header=msg_id,
             )
 
+            _PROCESSED_MESSAGE_IDS.add(processed_key)
             # Marca como lida na Microsoft Graph
             await client.patch(
                 f"{MICROSOFT_GRAPH_BASE}/me/messages/{msg_id}",
@@ -985,15 +1175,7 @@ async def process_and_reply_email(
             )
             cid = cur.lastrowid
 
-        # Verifica se é uma mensagem repetida idêntica à última recebida deste contacto
-        last_customer_msg = c.execute(
-            "SELECT content FROM messages WHERE contact_id = ? AND user_id = ? AND sender = 'customer' ORDER BY id DESC LIMIT 1",
-            (cid, user_id)
-        ).fetchone()
         full_current_content = f"Assunto: {subject}\n\n{incoming_content}"
-        if last_customer_msg and last_customer_msg["content"].strip() == full_current_content.strip():
-            logger.info(f"[Anti-Loop] Mensagem idêntica ignorada para {customer_email} para evitar ciclo repetitivo.")
-            return "(Mensagem duplicada já processada)"
 
         # Salva mensagem recebida do cliente
         c.execute(
@@ -1010,14 +1192,6 @@ async def process_and_reply_email(
         if last_agent_msg and any(re.search(pat, clean_stripped, re.IGNORECASE) for pat in LOOP_ACKNOWLEDGMENT_PATTERNS):
             logger.info(f"[Anti-Loop] Agradecimento ou confirmação breve de {customer_email} recebido após resposta da IA. Não requer nova resposta automática.")
             return "(Agradecimento registado - ciclo de atendimento concluído)"
-
-        # Cooldown de segurança por contacto (evita ping-pong rápido)
-        now_ts = time.time()
-        last_time = _LAST_PROCESSED_AT.get(customer_email, 0)
-        if (now_ts - last_time) < 10.0:
-            logger.info(f"[Anti-Loop] Cooldown ativo para {customer_email} ({now_ts - last_time:.1f}s). Ignorando resposta repetida.")
-            return "(Cooldown de segurança ativo)"
-        _LAST_PROCESSED_AT[customer_email] = now_ts
 
         # Histórico recente de mensagens desse cliente
         history_rows = c.execute(
@@ -1048,19 +1222,41 @@ async def process_and_reply_email(
             )
             return "(Resposta automática desativada pelo utilizador - Nível Desativado)"
 
-        # Detecção de intenção de marcação ou compra
+        # A marcação só avança para validação quando o cliente fornece data e hora.
         intent = detect_booking_or_purchase_intent(incoming_content, subject)
+        scheduled_request = capture_scheduled_request(
+            c, user_id, cid, incoming_content, subject, intent
+        )
+        waiting_for_schedule = bool(
+            scheduled_request and scheduled_request["status"] == "awaiting_schedule"
+        )
+        if scheduled_request and not waiting_for_schedule:
+            intent = {"type": scheduled_request["request_type"], "details": scheduled_request["details"]}
+        else:
+            intent = None
+
+        message_for_ai = incoming_content
+        if waiting_for_schedule:
+            message_for_ai = (
+                f"O cliente quer avançar com este pedido de {scheduled_request['request_type']}: "
+                f"{scheduled_request['details']}. Ainda não informou uma data e hora específicas. "
+                "Pergunte de forma cordial qual é a data e a hora pretendidas, explicando que precisa "
+                "dessa informação para registar a marcação/pedido. Não diga que já foi confirmado."
+            )
         if intent:
             if automation_level == "full":
                 # Nível Totalmente Automático: verifica disponibilidade nos dados registrados na aba Negócio
-                avail = check_business_availability(incoming_content, subject, info, user_dict.get("business_type") or "Serviços")
+                availability_context = (
+                    f"{scheduled_request['details']}\n{incoming_content}"
+                    if scheduled_request else incoming_content
+                )
+                avail = check_business_availability(
+                    availability_context,
+                    subject,
+                    info,
+                    user_dict.get("business_type") or "Serviços",
+                )
                 if avail["available"]:
-                    # Validação automática da marcação através dos dados do negócio
-                    c.execute(
-                        """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status, resolved_at)
-                           VALUES (?, ?, ?, ?, 'confirmed', CURRENT_TIMESTAMP)""",
-                        (user_id, cid, intent["type"], f"Assunto: {subject}\n{incoming_content[:400]}")
-                    )
                     confirm_instruction = (
                         f"Você é o atendente oficial de {user_dict.get('name') or 'nosso negócio'}. "
                         f"O cliente ({customer_name}) solicitou {intent['type']}: '{incoming_content[:200]}'. "
@@ -1070,7 +1266,7 @@ async def process_and_reply_email(
                     reply_text = await draft_reply(
                         message=confirm_instruction,
                         info_rows=info,
-                        instructions=user_dict.get("agent_instructions") or "",
+                        instructions=effective_agent_instructions(user_dict),
                         language=user_dict.get("language") or "Português",
                         history=history,
                         business_name=user_dict.get("name") or "nosso negócio",
@@ -1078,11 +1274,6 @@ async def process_and_reply_email(
                         business_description=user_dict.get("business_description") or "",
                         mandatory_responses=mandatory
                     )
-                    c.execute(
-                        "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-                        (user_id, cid, reply_text)
-                    )
-                    c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
                     reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
                     try:
                         await send_email(
@@ -1096,6 +1287,29 @@ async def process_and_reply_email(
                         )
                     except Exception as e_send:
                         logger.error(f"Erro ao enviar confirmação automática de e-mail: {e_send}")
+                        raise
+                    if scheduled_request:
+                        c.execute(
+                            """UPDATE conversion_requests SET status='confirmed', resolved_at=CURRENT_TIMESTAMP
+                               WHERE id=? AND user_id=?""",
+                            (scheduled_request["id"], user_id),
+                        )
+                    else:
+                        c.execute(
+                            """INSERT INTO conversion_requests
+                               (user_id, contact_id, request_type, details, status, scheduled_at, resolved_at)
+                               VALUES (?, ?, ?, ?, 'confirmed', ?, CURRENT_TIMESTAMP)""",
+                            (
+                                user_id, cid, intent["type"],
+                                f"Assunto: {subject}\n{incoming_content[:400]}",
+                                extract_scheduled_at(incoming_content),
+                            ),
+                        )
+                    c.execute(
+                        "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+                        (user_id, cid, reply_text)
+                    )
+                    c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
                     return f"(Marcação de {intent['type']} validada e confirmada automaticamente com IA - Nível Totalmente Automático)"
                 else:
                     # Fora de disponibilidade: propõe horários oficiais
@@ -1108,7 +1322,7 @@ async def process_and_reply_email(
                     reply_text = await draft_reply(
                         message=unavail_instruction,
                         info_rows=info,
-                        instructions=user_dict.get("agent_instructions") or "",
+                        instructions=effective_agent_instructions(user_dict),
                         language=user_dict.get("language") or "Português",
                         history=history,
                         business_name=user_dict.get("name") or "nosso negócio",
@@ -1116,16 +1330,6 @@ async def process_and_reply_email(
                         business_description=user_dict.get("business_description") or "",
                         mandatory_responses=mandatory
                     )
-                    c.execute(
-                        """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status, resolved_at)
-                           VALUES (?, ?, ?, ?, 'treated', CURRENT_TIMESTAMP)""",
-                        (user_id, cid, intent["type"], f"Assunto: {subject}\n{incoming_content[:400]}")
-                    )
-                    c.execute(
-                        "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-                        (user_id, cid, reply_text)
-                    )
-                    c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
                     reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
                     try:
                         await send_email(
@@ -1139,6 +1343,29 @@ async def process_and_reply_email(
                         )
                     except Exception as e_send:
                         logger.error(f"Erro ao enviar alternativa: {e_send}")
+                        raise
+                    if scheduled_request:
+                        c.execute(
+                            """UPDATE conversion_requests SET status='treated', resolved_at=CURRENT_TIMESTAMP
+                               WHERE id=? AND user_id=?""",
+                            (scheduled_request["id"], user_id),
+                        )
+                    else:
+                        c.execute(
+                            """INSERT INTO conversion_requests
+                               (user_id, contact_id, request_type, details, status, scheduled_at, resolved_at)
+                               VALUES (?, ?, ?, ?, 'treated', ?, CURRENT_TIMESTAMP)""",
+                            (
+                                user_id, cid, intent["type"],
+                                f"Assunto: {subject}\n{incoming_content[:400]}",
+                                extract_scheduled_at(incoming_content),
+                            ),
+                        )
+                    c.execute(
+                        "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+                        (user_id, cid, reply_text)
+                    )
+                    c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
                     return f"(Pedido de {intent['type']} tratado automaticamente com proposta de horários alternativos)"
             else:
                 # Nível Semi: a IA responde mas não valida de forma automática a marcação final, aguardando validação do usuário
@@ -1148,19 +1375,31 @@ async def process_and_reply_email(
                 ).fetchone()
                 if not has_pending:
                     c.execute(
-                        """INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status)
-                           VALUES (?, ?, ?, ?, 'pending')""",
-                        (user_id, cid, intent["type"], f"Assunto: {subject}\n{incoming_content[:400]}")
+                        """INSERT INTO conversion_requests
+                           (user_id, contact_id, request_type, details, status, scheduled_at)
+                           VALUES (?, ?, ?, ?, 'pending', ?)""",
+                        (
+                            user_id, cid, intent["type"],
+                            f"Assunto: {subject}\n{incoming_content[:400]}",
+                            extract_scheduled_at(incoming_content),
+                        )
                     )
                     logger.info(f"[Validação Pendente - Semi] Intenção de {intent['type']} de {customer_email} registada na Dashboard para validação.")
-                return f"(Pedido de {intent['type']} registrado. Aguardando validação do proprietário na Dashboard)"
+                if not waiting_for_schedule:
+                    message_for_ai = (
+                        f"O cliente enviou a seguinte solicitação de {intent['type']}: "
+                        f"'{incoming_content[:400]}'. A data e hora solicitadas foram registadas. "
+                        "Responda de forma acolhedora confirmando que a solicitação foi recebida e "
+                        "está aguardando a confirmação do proprietário. Não diga que o pedido, compra "
+                        "ou marcação já foi confirmado, reservado ou concluído."
+                    )
 
     # Gerar resposta com a IA Drexier (Gemini ou fallback)
     try:
         reply_text = await draft_reply(
-            message=incoming_content,
+            message=message_for_ai,
             info_rows=info,
-            instructions=user_dict.get("agent_instructions") or "",
+            instructions=effective_agent_instructions(user_dict),
             language=user_dict.get("language") or "Português",
             history=history,
             business_name=user_dict.get("name") or integration.get("display_name") or "nosso negócio",
@@ -1168,6 +1407,8 @@ async def process_and_reply_email(
             business_description=user_dict.get("business_description") or "",
             mandatory_responses=mandatory,
         )
+        if waiting_for_schedule:
+            reply_text = ensure_date_time_question(reply_text)
     except Exception as e:
         logger.error(f"Erro ao gerar resposta com a IA: {e}")
         reply_text = "Agradecemos o seu e-mail! Recebemos a sua mensagem e daremos retorno brevemente."
@@ -1353,6 +1594,13 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
     raw_emails = await loop.run_in_executor(None, _fetch_imap_messages)
 
     for item in raw_emails:
+        processed_key = (
+            "smtp_imap",
+            str(integration.get("id") or integration.get("email_address")),
+            item["uid"].decode() if isinstance(item["uid"], bytes) else str(item["uid"]),
+        )
+        if processed_key in _PROCESSED_MESSAGE_IDS:
+            continue
         reply_text = await process_and_reply_email(
             user_dict=user_dict,
             integration=integration,
@@ -1364,6 +1612,7 @@ async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str,
             message_id_header=item["message_id"],
         )
 
+        _PROCESSED_MESSAGE_IDS.add(processed_key)
         def _mark_imap_message_seen():
             mail = None
             try:
@@ -1476,7 +1725,8 @@ async def process_confirmation_action(
     """
     with connect() as c:
         req = c.execute(
-            """SELECT r.id, r.request_type, r.details, r.contact_id, ct.name, ct.contact_key
+            """SELECT r.id, r.request_type, r.details, r.contact_id, ct.name, ct.contact_key,
+                      r.scheduled_at
                FROM conversion_requests r
                JOIN contacts ct ON ct.id = r.contact_id
                WHERE r.id = ? AND r.user_id = ?""",
@@ -1484,6 +1734,16 @@ async def process_confirmation_action(
         ).fetchone()
         if not req:
             raise ValueError("Pedido de confirmação não encontrado.")
+        if action in ("confirm", "confirm_manual") and not req["scheduled_at"]:
+            scheduled_at = extract_scheduled_at(req["details"] or "")
+            if not scheduled_at:
+                raise ValueError(
+                    "Ainda falta registar a data e a hora escolhidas pelo cliente antes de validar este pedido."
+                )
+            c.execute(
+                "UPDATE conversion_requests SET scheduled_at = ? WHERE id = ? AND user_id = ?",
+                (scheduled_at, request_id, user_id),
+            )
 
         user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         integration = c.execute(
@@ -1493,6 +1753,11 @@ async def process_confirmation_action(
         wa_integration = c.execute(
             "SELECT * FROM whatsapp_integrations WHERE user_id = ? AND status = 'connected'",
             (user_id,)
+        ).fetchone()
+        email_thread = c.execute(
+            """SELECT subject, thread_id, last_message_id FROM email_threads
+               WHERE contact_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1""",
+            (req["contact_id"], user_id)
         ).fetchone()
 
         is_whatsapp = ("@" not in req["contact_key"]) or (not integration and wa_integration is not None)
@@ -1536,7 +1801,7 @@ async def process_confirmation_action(
         reply_text = await draft_reply(
             message=instruction,
             info_rows=info,
-            instructions=user_dict.get("agent_instructions") or "",
+            instructions=effective_agent_instructions(user_dict),
             language=user_dict.get("language") or "Português",
             history=history,
             business_name=business_name,
@@ -1580,7 +1845,7 @@ async def process_confirmation_action(
         reply_text = await draft_reply(
             message=instruction,
             info_rows=info,
-            instructions=user_dict.get("agent_instructions") or "",
+            instructions=effective_agent_instructions(user_dict),
             language=user_dict.get("language") or "Português",
             history=history,
             business_name=business_name,
@@ -1588,17 +1853,12 @@ async def process_confirmation_action(
             business_description=user_dict.get("business_description") or "",
         )
 
-    # Salva na base de dados
-    with connect() as c:
-        c.execute(
-            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, ?, ?)",
-            (user_id, req["contact_id"], sender_role, reply_text)
-        )
-        c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (req["contact_id"],))
-        c.execute(
-            "UPDATE conversion_requests SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
-            (new_status, request_id, user_id)
-        )
+    thread_id = email_thread["thread_id"] if email_thread and not is_whatsapp else None
+    last_message_id = email_thread["last_message_id"] if email_thread and not is_whatsapp else None
+    if email_thread and email_thread["subject"] and not is_whatsapp:
+        subject = email_thread["subject"]
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
 
     # Envia resposta oficial pelo canal correto
     try:
@@ -1617,10 +1877,25 @@ async def process_confirmation_action(
                 to_email=customer_email,
                 subject=subject,
                 body_text=reply_text,
+                thread_id=thread_id,
+                in_reply_to=last_message_id,
+                references=last_message_id,
             )
     except Exception as e:
         logger.error(f"Erro ao enviar confirmação ({channel_name}): {e}")
         raise RuntimeError(f"Mensagem gerada, mas falha no envio: {str(e)}")
+
+    # Só confirma o pedido no histórico depois de o canal aceitar a mensagem.
+    with connect() as c:
+        c.execute(
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, ?, ?)",
+            (user_id, req["contact_id"], sender_role, reply_text)
+        )
+        c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (req["contact_id"],))
+        c.execute(
+            "UPDATE conversion_requests SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+            (new_status, request_id, user_id)
+        )
 
     return {
         "ok": True,
@@ -1628,6 +1903,137 @@ async def process_confirmation_action(
         "status": new_status,
         "reply_text": reply_text,
         "customer_email": customer_email
+    }
+
+
+async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, Any]:
+    """Generate and send a contextual reminder for a future scheduled request."""
+    with connect() as c:
+        req = c.execute(
+            """SELECT r.id, r.request_type, r.details, r.status, r.scheduled_at,
+                      ct.id AS contact_id, ct.name, ct.contact_key
+               FROM conversion_requests r
+               JOIN contacts ct ON ct.id = r.contact_id
+               WHERE r.id = ? AND r.user_id = ?""",
+            (request_id, user_id),
+        ).fetchone()
+        if not req or not req["scheduled_at"]:
+            raise ValueError("Este pedido ainda não tem data e hora registadas.")
+        if req["status"] not in ("pending", "confirmed", "confirmed_manual", "resolved"):
+            raise ValueError("Este pedido não está disponível para envio de lembrete.")
+
+        scheduled_at = _parse_utc_datetime(req["scheduled_at"])
+        if scheduled_at is None or scheduled_at <= datetime.now(timezone.utc):
+            raise ValueError("Só é possível lembrar o cliente sobre uma marcação futura.")
+
+        user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        email_integration = c.execute(
+            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
+            (user_id,),
+        ).fetchone()
+        wa_integration = c.execute(
+            "SELECT * FROM whatsapp_integrations WHERE user_id = ? AND status = 'connected'",
+            (user_id,),
+        ).fetchone()
+        email_thread = c.execute(
+            """SELECT subject, thread_id, last_message_id FROM email_threads
+               WHERE contact_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1""",
+            (req["contact_id"], user_id),
+        ).fetchone()
+        history_rows = c.execute(
+            """SELECT sender, content FROM messages
+               WHERE contact_id = ? AND user_id = ? ORDER BY id DESC LIMIT 10""",
+            (req["contact_id"], user_id),
+        ).fetchall()
+        info = c.execute(
+            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+
+    customer_key = req["contact_key"]
+    is_whatsapp = ("@" not in customer_key) or (not email_integration and wa_integration is not None)
+    if is_whatsapp and not wa_integration:
+        raise ValueError("Não há WhatsApp conectado para enviar o lembrete deste cliente.")
+    if not is_whatsapp and not email_integration:
+        raise ValueError("Não há e-mail conectado para enviar o lembrete deste cliente.")
+
+    local_scheduled = scheduled_at.astimezone(BUSINESS_TIMEZONE)
+    days_remaining = (local_scheduled.date() - datetime.now(BUSINESS_TIMEZONE).date()).days
+    date_text = local_scheduled.strftime("%d/%m/%Y às %H:%M")
+    if days_remaining == 0:
+        countdown = "hoje"
+    elif days_remaining == 1:
+        countdown = "amanhã (falta 1 dia)"
+    else:
+        countdown = f"daqui a {days_remaining} dias (faltam {days_remaining} dias)"
+    user_dict = dict(user) if user else {}
+    business_name = user_dict.get("name") or "nosso negócio"
+    contact_name = req["name"] or customer_key
+    channel_name = "WhatsApp" if is_whatsapp else "e-mail"
+    instruction = (
+        f"Escreva um lembrete curto, simpático e personalizado para {contact_name}, "
+        f"como continuação da conversa com {business_name}. A {req['request_type']} "
+        f"está marcada para {date_text} ({countdown}). Contexto do pedido: "
+        f"{(req['details'] or '')[:500]}. Informe claramente quanto falta e o assunto "
+        f"da marcação. Não altere a data nem afirme informações que não estão no contexto. "
+        f"Esta mensagem será enviada por {channel_name}."
+    )
+    history = [
+        {"sender": row["sender"], "content": row["content"]}
+        for row in reversed(history_rows)
+    ]
+    reply_text = await draft_reply(
+        message=instruction,
+        info_rows=info,
+        instructions=effective_agent_instructions(user_dict),
+        language=user_dict.get("language") or "Português",
+        history=history,
+        business_name=business_name,
+        business_type=user_dict.get("business_type") or "Serviços",
+        business_description=user_dict.get("business_description") or "",
+    )
+
+    if is_whatsapp:
+        from backend.services.whatsapp import send_whatsapp_message
+        wa_dict = dict(wa_integration)
+        await send_whatsapp_message(
+            phone_number_id=wa_dict["phone_number_id"],
+            to=customer_key,
+            text=reply_text,
+            access_token=wa_dict.get("access_token") or None,
+        )
+    else:
+        integration_dict = dict(email_integration)
+        subject = email_thread["subject"] if email_thread and email_thread["subject"] else "Lembrete da sua marcação"
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+        last_message_id = email_thread["last_message_id"] if email_thread else None
+        await send_email(
+            integration=integration_dict,
+            to_email=customer_key,
+            subject=subject,
+            body_text=reply_text,
+            thread_id=email_thread["thread_id"] if email_thread else None,
+            in_reply_to=last_message_id,
+            references=last_message_id,
+        )
+
+    with connect() as c:
+        c.execute(
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+            (user_id, req["contact_id"], reply_text),
+        )
+        c.execute(
+            "UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (req["contact_id"],),
+        )
+
+    return {
+        "ok": True,
+        "channel": "whatsapp" if is_whatsapp else "email",
+        "reply_text": reply_text,
+        "scheduled_at": scheduled_at.isoformat(),
+        "days_remaining": days_remaining,
     }
 
 

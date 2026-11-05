@@ -1,6 +1,7 @@
 import asyncio, json, logging, re
 from pathlib import Path
 from typing import Optional
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,9 +16,20 @@ from backend.auth import (
     create_token,
     decode_token,
 )
-from backend.services.agent import draft_reply
-from backend.services.analytics import daily_acquisitions, get_top_products_data, get_best_approaches_data, generate_strategic_ai_report
-from backend.services.email_service import sync_emails_for_user, process_confirmation_action, send_owner_reply
+from backend.services.agent import DEFAULT_AGENT_PERSONALITY, draft_reply, effective_agent_instructions
+from backend.services.analytics import (
+    analyze_approaches,
+    analyze_products_and_services,
+    daily_acquisitions,
+    generate_strategic_ai_report,
+)
+from backend.services.email_service import (
+    sync_emails_for_user,
+    process_confirmation_action,
+    send_ai_booking_reminder,
+    send_owner_reply,
+    extract_scheduled_at,
+)
 from backend.services.resend_email import (
     get_resend_config,
     is_resend_test_sender,
@@ -127,7 +139,7 @@ def current_user(authorization: Optional[str] = Header(default=None)):
     if not uid:
         raise HTTPException(401, "Sessão inválida ou expirada.")
     with connect() as c:
-        row = c.execute("SELECT id,name,email,business_type,business_description,language,agent_instructions,mandatory_responses FROM users WHERE id=?", (uid,)).fetchone()
+        row = c.execute("SELECT id,name,email,business_type,business_description,language,agent_instructions,agent_adopted_style,mandatory_responses FROM users WHERE id=?", (uid,)).fetchone()
     if not row:
         raise HTTPException(401, "Conta não encontrada.")
     return dict(row)
@@ -197,6 +209,9 @@ class AutomationLevelIn(BaseModel):
 class AgentSettings(BaseModel):
     instructions: str = ""
     mandatory_responses: dict = {}
+
+class AdoptApproachIn(BaseModel):
+    style: str = Field(min_length=1, max_length=6000)
 
 class IncomingMessage(BaseModel):
     contact_key: str = Field(min_length=1, max_length=200)
@@ -418,6 +433,7 @@ def complete_password_reset(data: PasswordResetComplete):
 @app.get("/api/me")
 def me(user=Depends(current_user)):
     user["mandatory_responses"] = json.loads(user["mandatory_responses"] or "{}")
+    user["default_agent_personality"] = DEFAULT_AGENT_PERSONALITY
     return user
 
 @app.put("/api/account")
@@ -436,44 +452,115 @@ def invalidate_dashboard_cache(user_id: int):
 
 @app.get("/api/dashboard")
 def dashboard(user=Depends(current_user)):
-    import time
     uid = user["id"]
-    now = time.time()
+    now = datetime.now(timezone.utc)
+    now_timestamp = now.timestamp()
     cached = _dashboard_cache.get(uid)
-    if cached and (now - cached[0] < DASHBOARD_CACHE_TTL):
+    if cached and (now_timestamp - cached[0] < DASHBOARD_CACHE_TTL):
         return cached[1]
+    today_window_start = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    yesterday_window_start = (now - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+    window_end = now.strftime("%Y-%m-%d %H:%M:%S")
     with connect() as c:
         total_messages=c.execute("SELECT COUNT(*) n FROM messages WHERE user_id=? AND sender='agent'",(uid,)).fetchone()["n"]
         total_contacts=c.execute("SELECT COUNT(*) n FROM contacts WHERE user_id=?",(uid,)).fetchone()["n"]
-        today_contacts=c.execute("SELECT COUNT(*) n FROM contacts WHERE user_id=? AND date(created_at)=date('now','localtime')",(uid,)).fetchone()["n"]
-        yesterday_contacts=c.execute("SELECT COUNT(*) n FROM contacts WHERE user_id=? AND date(created_at)=date('now','localtime','-1 day')",(uid,)).fetchone()["n"]
+        today_contacts=c.execute(
+            "SELECT COUNT(*) n FROM contacts WHERE user_id=? AND created_at>=? AND created_at<?",
+            (uid, today_window_start, window_end),
+        ).fetchone()["n"]
+        yesterday_contacts=c.execute(
+            "SELECT COUNT(*) n FROM contacts WHERE user_id=? AND created_at>=? AND created_at<?",
+            (uid, yesterday_window_start, today_window_start),
+        ).fetchone()["n"]
         pending=c.execute("SELECT COUNT(*) n FROM conversion_requests WHERE user_id=? AND status='pending'",(uid,)).fetchone()["n"]
         pending_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,ct.name,ct.contact_key
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
           WHERE r.user_id=? AND r.status='pending' ORDER BY r.created_at DESC""",(uid,)).fetchall()
-        bookings_count=c.execute("SELECT COUNT(*) n FROM conversion_requests WHERE user_id=? AND status IN ('confirmed', 'confirmed_manual', 'resolved')", (uid,)).fetchone()["n"]
-        bookings_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,r.resolved_at,r.status,ct.name,ct.contact_key
+        booking_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,r.resolved_at,r.status,r.scheduled_at,ct.name,ct.contact_key
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
-          WHERE r.user_id=? AND r.status IN ('confirmed', 'confirmed_manual', 'resolved', 'treated')
-          ORDER BY COALESCE(r.resolved_at, r.created_at) DESC""",(uid,)).fetchall()
+          WHERE r.user_id=? AND r.status IN ('pending', 'confirmed', 'confirmed_manual', 'resolved')
+          ORDER BY r.scheduled_at ASC""",(uid,)).fetchall()
+    week_end = now + timedelta(days=7)
+    bookings_rows = []
+    for row in booking_rows:
+        item = dict(row)
+        if not item["scheduled_at"]:
+            item["scheduled_at"] = extract_scheduled_at(item.get("details") or "")
+            if item["scheduled_at"]:
+                with connect() as c:
+                    c.execute(
+                        "UPDATE conversion_requests SET scheduled_at=? WHERE id=? AND user_id=?",
+                        (item["scheduled_at"], item["id"], uid),
+                    )
+        try:
+            scheduled_at = datetime.fromisoformat(str(item["scheduled_at"]).replace("Z", "+00:00"))
+            if scheduled_at.tzinfo is None:
+                scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if now <= scheduled_at.astimezone(timezone.utc) < week_end:
+            bookings_rows.append(item)
+    bookings_count = len(bookings_rows)
     res = {"messages_answered":total_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
             "yesterday_contacts":yesterday_contacts,"pending_count":pending,"pending_requests":[dict(x) for x in pending_rows],
             "bookings_count":bookings_count,"confirmed_bookings":[dict(x) for x in bookings_rows]}
-    _dashboard_cache[uid] = (now, res)
+    _dashboard_cache[uid] = (now_timestamp, res)
     return res
+
+
+@app.post("/api/conversions/{request_id}/remind")
+async def remind_conversion(request_id: int, user=Depends(current_user)):
+    try:
+        return await send_ai_booking_reminder(user["id"], request_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        logger.error(f"Erro ao enviar lembrete do pedido {request_id}: {exc}")
+        raise HTTPException(500, "Não foi possível enviar o lembrete. Tente novamente.")
 @app.get("/api/analytics")
 def analytics(user=Depends(current_user)):
     with connect() as c:
         series = daily_acquisitions(c, user["id"], 14)
         variants = [dict(x) for x in c.execute("SELECT id,label,response_text,sent_count,conversions FROM response_variants WHERE user_id=? ORDER BY id", (user["id"],)).fetchall()]
-        top_products = get_top_products_data(c, user["id"])
-        best_approaches = get_best_approaches_data(c, user["id"])
     return {
         "acquisitions": series,
-        "variants": variants,
-        "top_products": top_products,
-        "best_approaches": best_approaches
+        "variants": variants
     }
+
+@app.post("/api/reports/products-services")
+async def generate_products_services_report(user=Depends(current_user)):
+    try:
+        with connect() as c:
+            return await analyze_products_and_services(c, user["id"])
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    except ValueError as exc:
+        raise HTTPException(502, str(exc))
+
+@app.post("/api/reports/approaches")
+async def generate_approaches_report(user=Depends(current_user)):
+    try:
+        with connect() as c:
+            return await analyze_approaches(c, user["id"])
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    except ValueError as exc:
+        raise HTTPException(502, str(exc))
+
+@app.post("/api/reports/adopted-approach")
+def adopt_approach(data: AdoptApproachIn, user=Depends(current_user), _sub=Depends(require_active_subscription)):
+    with connect() as c:
+        c.execute(
+            "UPDATE users SET agent_adopted_style=? WHERE id=?",
+            (data.style.strip(), user["id"]),
+        )
+    return {"ok": True}
+
+@app.delete("/api/reports/adopted-approach")
+def undo_adopted_approach(user=Depends(current_user), _sub=Depends(require_active_subscription)):
+    with connect() as c:
+        c.execute("UPDATE users SET agent_adopted_style='' WHERE id=?", (user["id"],))
+    return {"ok": True}
 
 @app.post("/api/reports/generate-ai-report")
 async def generate_ai_report(user=Depends(current_user)):
@@ -698,7 +785,7 @@ async def incoming(data:IncomingMessage,user=Depends(current_user),_sub=Depends(
         reply = await draft_reply(
             message=data.message,
             info_rows=info,
-            instructions=user.get("agent_instructions") or "",
+            instructions=effective_agent_instructions(user),
             language=user.get("language") or "Português",
             history=history,
             business_name=user.get("name") or "nosso negócio",
@@ -726,8 +813,9 @@ def create_conversion(contact_id:int,data:ConversionIn,user=Depends(current_user
     with connect() as c:
         contact=c.execute("SELECT id FROM contacts WHERE id=? AND user_id=?",(contact_id,user["id"])).fetchone()
         if not contact: raise HTTPException(404,"Cliente não encontrado.")
-        cur=c.execute("INSERT INTO conversion_requests(user_id,contact_id,request_type,details) VALUES(?,?,?,?)",
-          (user["id"],contact_id,data.request_type,data.details))
+        scheduled_at = extract_scheduled_at(data.details)
+        cur=c.execute("INSERT INTO conversion_requests(user_id,contact_id,request_type,details,scheduled_at) VALUES(?,?,?,?,?)",
+          (user["id"],contact_id,data.request_type,data.details,scheduled_at))
     return {"id":cur.lastrowid,"status":"pending"}
 
 @app.post("/api/conversions/{request_id}/action")
