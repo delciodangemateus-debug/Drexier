@@ -315,3 +315,138 @@ def test_webhook_customer_subscription_deleted(auth_client):
         status = get_user_subscription_status(user_id)
         assert status["status"] == "canceled"
         assert status["has_active_subscription"] is False
+
+
+def test_delete_account_schedules_end_of_period_cancellation_then_deletes_user(auth_client):
+    client, token, user_id = auth_client
+    _save_stored_subscription(user_id, {
+        "stripe_customer_id": "cus_delete_account",
+        "stripe_subscription_id": "sub_delete_account",
+        "status": "active",
+        "current_period_end": "2027-01-15T00:00:00+00:00",
+    })
+    period_end = int(datetime(2027, 1, 15, tzinfo=timezone.utc).timestamp())
+    subscription = MagicMock()
+    subscription.get.side_effect = lambda key, default=None: {
+        "customer": "cus_delete_account",
+        "status": "active",
+        "cancel_at_period_end": False,
+        "current_period_end": period_end,
+    }.get(key, default)
+    scheduled = MagicMock()
+    scheduled.get.side_effect = lambda key, default=None: {
+        "customer": "cus_delete_account",
+        "status": "active",
+        "cancel_at_period_end": True,
+        "current_period_end": period_end,
+    }.get(key, default)
+
+    with patch("stripe.Subscription.retrieve", return_value=subscription), patch(
+        "stripe.Subscription.modify", return_value=scheduled
+    ) as modify:
+        response = client.request(
+            "DELETE",
+            "/api/account",
+            json={"password": "Password123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["subscription_cancellation_scheduled"] is True
+    assert response.json()["current_period_end"] == "2027-01-15T00:00:00+00:00"
+    assert "Não foi emitido reembolso" in response.json()["message"]
+    modify.assert_called_once_with(
+        "sub_delete_account",
+        cancel_at_period_end=True,
+    )
+    with connect() as c:
+        assert c.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone() is None
+        assert c.execute(
+            "SELECT id FROM subscriptions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone() is None
+
+
+def test_delete_account_preserves_account_when_stripe_cancellation_fails(auth_client):
+    client, token, user_id = auth_client
+    _save_stored_subscription(user_id, {
+        "stripe_customer_id": "cus_delete_retry",
+        "stripe_subscription_id": "sub_delete_retry",
+        "status": "active",
+    })
+
+    with patch(
+        "stripe.Subscription.retrieve",
+        side_effect=RuntimeError("Stripe indisponível"),
+    ):
+        response = client.request(
+            "DELETE",
+            "/api/account",
+            json={"password": "Password123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 502
+    with connect() as c:
+        assert c.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        assert c.execute(
+            "SELECT id FROM subscriptions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+
+def test_delete_account_requires_password(auth_client):
+    client, token, user_id = auth_client
+
+    with patch("stripe.Subscription.modify") as modify:
+        response = client.request(
+            "DELETE",
+            "/api/account",
+            json={"password": "WrongPassword123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 401
+    modify.assert_not_called()
+    with connect() as c:
+        assert c.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+
+
+def test_delete_account_without_subscription_does_not_call_stripe(auth_client):
+    client, token, user_id = auth_client
+
+    with patch("stripe.Subscription.retrieve") as retrieve, patch(
+        "stripe.Subscription.modify"
+    ) as modify:
+        response = client.request(
+            "DELETE",
+            "/api/account",
+            json={"password": "Password123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["subscription_cancellation_scheduled"] is False
+    retrieve.assert_not_called()
+    modify.assert_not_called()
+    with connect() as c:
+        assert c.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone() is None
+
+
+def test_delete_account_fails_closed_for_active_subscription_without_stripe_id(auth_client):
+    client, token, user_id = auth_client
+    _save_stored_subscription(user_id, {
+        "status": "active",
+        "stripe_customer_id": "cus_missing_subscription_id",
+    })
+
+    response = client.request(
+        "DELETE",
+        "/api/account",
+        json={"password": "Password123"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 502
+    with connect() as c:
+        assert c.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()

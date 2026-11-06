@@ -4283,6 +4283,34 @@ $("#account-form").addEventListener("submit", async e => {
   }
 });
 
+$("#delete-account-form")?.addEventListener("submit", async e => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const passwordInput = form.elements.password;
+  const password = passwordInput.value;
+  if (!confirm(
+    "Eliminar a conta e os dados agora? A assinatura não será renovada, " +
+    "mas continuará ativa até ao fim do período já pago. Não haverá reembolso."
+  )) return;
+
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const result = await api("/api/account", {
+      method: "DELETE",
+      body: JSON.stringify({ password })
+    });
+    alert(result.message);
+    logoutNow();
+  } catch (err) {
+    showNotice(err.message, true);
+    passwordInput.value = "";
+    passwordInput.focus();
+  } finally {
+    button.disabled = false;
+  }
+});
+
 /* ════════════════════════════════════════════════════════════
    CANAL DE ATENDIMENTO OFICIAL ATIVO (E-MAIL GOOGLE GMAIL)
    As integrações com WhatsApp, Microsoft Outlook e SMTP

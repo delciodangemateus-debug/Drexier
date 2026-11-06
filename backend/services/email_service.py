@@ -29,6 +29,7 @@ logger = logging.getLogger("drexier.email_service")
 BUSINESS_TIMEZONE = ZoneInfo("Europe/Lisbon")
 # Cache em memória e deduplicação de mensagens recebidas (Anti-Loop & Anti-Ping-Pong)
 _PROCESSED_MESSAGE_IDS = set()
+_GOOGLE_SYNC_LOCKS: Dict[str, asyncio.Lock] = {}
 
 LOOP_ACKNOWLEDGMENT_PATTERNS = [
     r"^(obrigad[oa]|obrigad[oa]!|muito obrigad[oa]|valeu|ok|ok!|de acordo|perfeito|combinado|agradecido|obg|obg!|muito obrigado!)$",
@@ -172,11 +173,17 @@ async def refresh_google_token_if_needed(integration: dict) -> str:
     expires_at = integration.get("token_expires_at")
 
     now = time.time()
+    try:
+        expires_timestamp = float(expires_at) if expires_at else None
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Data de expiração do token Google inválida; reconecte a conta Gmail.") from exc
     # Se ainda tem validade (com margem de 60s), usa o atual
-    if expires_at and float(expires_at) > (now + 60) and access_token:
+    if expires_timestamp and expires_timestamp > (now + 60) and access_token:
         return access_token
 
     if not refresh_token:
+        if expires_timestamp and expires_timestamp <= now:
+            raise RuntimeError("Token Google expirado e sem refresh token; reconecte a conta Gmail.")
         return access_token
 
     config = get_email_config()["google"]
@@ -191,6 +198,8 @@ async def refresh_google_token_if_needed(integration: dict) -> str:
         if res.status_code == 200:
             data = res.json()
             new_access_token = data.get("access_token")
+            if not new_access_token:
+                raise RuntimeError("Google não retornou um access token válido.")
             expires_in = data.get("expires_in", 3600)
             new_expires_at = str(now + expires_in)
             with connect() as c:
@@ -200,8 +209,10 @@ async def refresh_google_token_if_needed(integration: dict) -> str:
                 )
             return new_access_token
         else:
-            logger.warning(f"Erro ao renovar token Google: {res.text}")
-            return access_token
+            logger.warning("Falha ao renovar token Google (HTTP %s).", res.status_code)
+            raise RuntimeError(
+                "Não foi possível renovar a autorização Gmail. Reconecte a conta Google."
+            )
 
 
 async def fetch_google_user_profile(access_token: str) -> Tuple[str, str]:
@@ -887,6 +898,14 @@ def ensure_date_time_question(reply: str) -> str:
 
 
 async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[str, Any]]:
+    """Serializa sincronizações da mesma conta neste processo."""
+    lock_key = str(integration.get("id") or integration.get("user_id"))
+    lock = _GOOGLE_SYNC_LOCKS.setdefault(lock_key, asyncio.Lock())
+    async with lock:
+        return await _sync_google_emails(user_dict, integration)
+
+
+async def _sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[str, Any]]:
     """
     Sincroniza e-mails não lidos da caixa de entrada do Gmail,
     filtrando rigorosamente apenas mensagens principais de clientes reais.
@@ -904,13 +923,26 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
     processed_items = []
 
     async with httpx.AsyncClient(timeout=30.0) as client:
+        async def mark_message_read(message_id: str) -> None:
+            response = await client.post(
+                f"{GMAIL_API_BASE}/messages/{message_id}/modify",
+                headers=headers,
+                json={"removeLabelIds": ["UNREAD"]},
+            )
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Falha ao atualizar estado da mensagem Gmail (HTTP {response.status_code})."
+                )
+
         # Busca mensagens não lidas apenas da categoria principal, ignorando spam e promoções
         query = "label:INBOX is:unread -category:promotions -category:social -category:updates -category:forums -label:spam -label:trash"
         list_url = f"{GMAIL_API_BASE}/messages?q={urllib.parse.quote(query)}&maxResults=15"
         res = await client.get(list_url, headers=headers)
         if res.status_code != 200:
-            logger.warning(f"Falha ao listar mensagens do Gmail: {res.text}")
-            return []
+            logger.warning("Falha ao listar mensagens do Gmail (HTTP %s).", res.status_code)
+            raise RuntimeError(
+                f"Falha ao consultar a caixa Gmail (HTTP {res.status_code})."
+            )
 
         messages_list = res.json().get("messages", [])
         for m in messages_list:
@@ -924,11 +956,27 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
                 str(msg_id),
             )
             if processed_key in _PROCESSED_MESSAGE_IDS:
+                await mark_message_read(str(msg_id))
+                continue
+
+            with connect() as c:
+                previously_processed = c.execute(
+                    """SELECT id FROM processed_email_messages
+                       WHERE user_id = ? AND provider = 'google' AND provider_message_id = ?""",
+                    (user_dict["id"], str(msg_id)),
+                ).fetchone()
+            if previously_processed:
+                _PROCESSED_MESSAGE_IDS.add(processed_key)
+                await mark_message_read(str(msg_id))
                 continue
 
             msg_res = await client.get(f"{GMAIL_API_BASE}/messages/{msg_id}?format=full", headers=headers)
             if msg_res.status_code != 200:
-                continue
+                if msg_res.status_code == 404:
+                    continue
+                raise RuntimeError(
+                    f"Falha ao obter mensagem Gmail (HTTP {msg_res.status_code})."
+                )
 
             msg_data = msg_res.json()
             label_ids = msg_data.get("labelIds", [])
@@ -939,11 +987,7 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
                     internal_date = msg_data.get("internalDate")
                     if internal_date is None or int(internal_date) < cutoff_ts:
                         if internal_date is not None:
-                            await client.post(
-                                f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
-                                headers=headers,
-                                json={"removeLabelIds": ["UNREAD"]}
-                            )
+                            await mark_message_read(str(msg_id))
                             logger.info(f"E-mail Gmail {msg_id} anterior ao início da cobertura paga ignorado.")
                         continue
                 except (TypeError, ValueError):
@@ -981,11 +1025,7 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
             if not is_valid:
                 logger.info(f"[Filtro Anti-Spam] E-mail de {sender_email} ('{subject}') ignorado: {reject_reason}")
                 # Remove unread para não verificar repetidamente
-                await client.post(
-                    f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
-                    headers=headers,
-                    json={"removeLabelIds": ["UNREAD"]}
-                )
+                await mark_message_read(str(msg_id))
                 continue
 
             # Processa e responde com a IA
@@ -1000,13 +1040,16 @@ async def sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[st
                 message_id_header=message_id_header,
             )
 
+            with connect() as c:
+                c.execute(
+                    """INSERT INTO processed_email_messages
+                       (user_id, provider, provider_message_id)
+                       VALUES (?, 'google', ?)""",
+                    (user_dict["id"], str(msg_id)),
+                )
             _PROCESSED_MESSAGE_IDS.add(processed_key)
             # Remove a label UNREAD do Gmail para não responder repetidamente
-            await client.post(
-                f"{GMAIL_API_BASE}/messages/{msg_id}/modify",
-                headers=headers,
-                json={"removeLabelIds": ["UNREAD"]}
-            )
+            await mark_message_read(str(msg_id))
 
             processed_items.append({
                 "message_id": msg_id,

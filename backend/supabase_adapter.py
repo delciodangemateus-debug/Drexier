@@ -418,8 +418,8 @@ class SupabaseCursor:
             if where_clause:
                 query, _ = _apply_where_conditions(query, where_clause, p, param_idx)
 
-            res = query.execute()
-            self.rowcount = len(res.data) if res.data else 1
+            res = query.select("*").execute()
+            self.rowcount = len(res.data or [])
             return self
 
         # =========================================================================
@@ -436,8 +436,8 @@ class SupabaseCursor:
             if where_clause:
                 query, _ = _apply_where_conditions(query, where_clause, p, 0)
 
-            res = query.execute()
-            self.rowcount = len(res.data) if res.data else 1
+            res = query.select("*").execute()
+            self.rowcount = len(res.data or [])
             return self
 
         # =========================================================================

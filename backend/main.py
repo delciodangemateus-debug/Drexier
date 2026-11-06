@@ -45,7 +45,11 @@ from backend.services.auth_challenge import (
     get_auth_code_lockout_seconds,
     invalidate_auth_challenge,
 )
-from backend.services.billing_service import is_subscription_active, get_user_subscription_status
+from backend.services.billing_service import (
+    is_subscription_active,
+    get_user_subscription_status,
+    schedule_subscription_cancellation,
+)
 from backend.routers.whatsapp import router as whatsapp_router
 from backend.routers.email import router as email_router
 from backend.routers.billing import router as billing_router
@@ -202,6 +206,9 @@ class ProfileUpdate(BaseModel):
     business_type: str
     business_description: str = ""
     language: str = "Português"
+
+class DeleteAccountIn(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
 
 class AutomationLevelIn(BaseModel):
     level: str = Field(pattern="^(full|semi|disabled)$")
@@ -442,6 +449,54 @@ def update_account(data: ProfileUpdate, user=Depends(current_user), _sub=Depends
         c.execute("UPDATE users SET name=?,business_type=?,business_description=?,language=? WHERE id=?",
                   (data.name.strip(), data.business_type, data.business_description, data.language, user["id"]))
     return {"ok": True}
+
+@app.delete("/api/account")
+def delete_account(data: DeleteAccountIn, user=Depends(current_user)):
+    """Agenda o fim da assinatura Stripe e só então remove a conta e os seus dados."""
+    with connect() as c:
+        row = c.execute(
+            "SELECT password_hash FROM users WHERE id = ?",
+            (user["id"],),
+        ).fetchone()
+    if not row or not verify_password(data.password, row["password_hash"]):
+        raise HTTPException(401, "Senha incorreta.")
+
+    try:
+        cancellation = schedule_subscription_cancellation(user["id"])
+    except RuntimeError as exc:
+        logger.error("Exclusão de conta interrompida antes da remoção local: %s", exc)
+        raise HTTPException(502, str(exc)) from exc
+
+    try:
+        with connect() as c:
+            deleted = c.execute(
+                "DELETE FROM users WHERE id = ?",
+                (user["id"],),
+            )
+        if not deleted.rowcount:
+            raise HTTPException(404, "Conta não encontrada.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Stripe cancelou a renovação, mas falhou a remoção local da conta %s",
+            user["id"],
+        )
+        raise HTTPException(
+            503,
+            "A renovação foi cancelada, mas não foi possível concluir a remoção da conta. "
+            "Tente novamente; não haverá nova cobrança.",
+        ) from exc
+
+    return {
+        "ok": True,
+        "subscription_cancellation_scheduled": cancellation["scheduled"],
+        "current_period_end": cancellation["current_period_end"],
+        "message": (
+            "Conta eliminada. A assinatura não será renovada e continuará válida até ao fim "
+            "do período pago. Não foi emitido reembolso."
+        ),
+    }
 
 _dashboard_cache = {}  # uid -> (timestamp, data)
 DASHBOARD_CACHE_TTL = 3.0

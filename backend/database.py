@@ -143,6 +143,15 @@ CREATE TABLE IF NOT EXISTS email_threads (
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY(contact_id) REFERENCES contacts(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS processed_email_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  provider TEXT NOT NULL CHECK(provider IN ('google', 'microsoft', 'smtp_imap')),
+  provider_message_id TEXT NOT NULL CHECK(length(trim(provider_message_id)) > 0),
+  processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, provider, provider_message_id),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS subscriptions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL UNIQUE,
@@ -178,6 +187,10 @@ def _local_sqlite_path() -> str:
     return str(ROOT / "data" / "drexier.db")
 
 
+def _local_database_enabled() -> bool:
+    return bool(DB_PATH or os.getenv("ALLOW_LOCAL_DATABASE", "").strip().lower() == "true")
+
+
 def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
     has_users = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
@@ -199,6 +212,17 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE subscriptions ADD COLUMN last_successful_payment_at TEXT DEFAULT ''")
         except Exception:
             pass
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS processed_email_messages (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               user_id INTEGER NOT NULL,
+               provider TEXT NOT NULL CHECK(provider IN ('google', 'microsoft', 'smtp_imap')),
+               provider_message_id TEXT NOT NULL CHECK(length(trim(provider_message_id)) > 0),
+               processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+               UNIQUE(user_id, provider, provider_message_id),
+               FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+           )"""
+    )
 
 
 def connect():
@@ -216,11 +240,18 @@ def connect():
         _ensure_sqlite_schema(conn)
         return conn
 
-    # Supabase como banco de dados principal e único
+    # Supabase é obrigatório por padrão fora dos testes. Um SQLite local não
+    # persistente pode parecer funcionar e depois perder dados ao reiniciar o host.
     if is_supabase_configured():
         return SupabaseConnection()
 
-    # Fallback exclusivo se credenciais não existirem
+    if not _local_database_enabled():
+        raise RuntimeError(
+            "Supabase indisponível: configure SUPABASE_URL e "
+            "SUPABASE_SERVICE_ROLE_KEY. Para desenvolvimento local, defina "
+            "DATABASE_PATH ou ALLOW_LOCAL_DATABASE=true."
+        )
+
     local_path = _local_sqlite_path()
     Path(local_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(local_path)
@@ -233,7 +264,7 @@ def connect():
 def init_db():
     """
     Inicializa o banco de dados:
-    - Em produção/desenvolvimento: valida Supabase e elimina qualquer banco local legado.
+    - Em produção: valida Supabase e preserva qualquer banco local legado.
     - Em testes unitários isolados: inicializa a estrutura na base temporária de teste.
     """
     if is_test_environment():
@@ -248,26 +279,24 @@ def init_db():
         else:
             logger.warning(f"Supabase conectado com aviso: {status.get('details')}")
 
-        # Elimina banco local legado drexier.db caso ainda exista
+        # Preserva bancos locais legados: apagá-los automaticamente pode destruir
+        # dados que ainda não foram migrados para o Supabase.
         legacy_db = ROOT / "data" / "drexier.db"
         if legacy_db.exists():
-            try:
-                legacy_db.unlink()
-                logger.info("Banco de dados local legado drexier.db eliminado com sucesso.")
-            except Exception as e:
-                logger.warning(f"Aviso ao remover banco local legado: {e}")
-
-        data_dir = ROOT / "data"
-        if data_dir.exists():
-            for item in data_dir.iterdir():
-                if item.suffix == ".db":
-                    try:
-                        item.unlink()
-                    except Exception:
-                        pass
+            logger.warning(
+                "Foi preservado um banco SQLite legado em %s. "
+                "Migre e confira os dados antes de removê-lo.",
+                legacy_db,
+            )
         return
 
-    # Fallback para ambiente local sem Supabase
+    if not _local_database_enabled():
+        raise RuntimeError(
+            "Supabase indisponível: configure SUPABASE_URL e "
+            "SUPABASE_SERVICE_ROLE_KEY. Para desenvolvimento local, defina "
+            "DATABASE_PATH ou ALLOW_LOCAL_DATABASE=true."
+        )
+
     local_path = _local_sqlite_path()
     Path(local_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(local_path) as c:

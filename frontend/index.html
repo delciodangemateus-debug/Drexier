@@ -1648,6 +1648,23 @@
           <button class="btn primary small" type="submit" style="align-self:flex-start;">Guardar alterações da conta</button>
         </form>
         <hr>
+        <div class="account-delete-section">
+          <h3>Eliminar conta</h3>
+          <p class="muted">
+            A sua conta e os dados associados serão eliminados imediatamente.
+            A assinatura não será renovada e continuará válida até ao fim do período pago.
+            Não será emitido reembolso.
+          </p>
+          <form id="delete-account-form" class="form" style="max-width:600px;">
+            <label>Confirme a sua senha
+              <input name="password" type="password" autocomplete="current-password" required minlength="8">
+            </label>
+            <button class="btn outline small danger" type="submit">
+              Eliminar conta e cancelar renovação
+            </button>
+          </form>
+        </div>
+        <hr>
         <button class="btn outline small danger" id="logout-account">Terminar sessão na conta</button>
       </div>
     </section>

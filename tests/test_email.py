@@ -18,6 +18,7 @@ from backend.services.email_service import (
     process_confirmation_action,
     send_ai_booking_reminder,
     send_email,
+    sync_google_emails,
     sync_emails_for_user,
 )
 from tests.auth_helpers import signup_and_verify
@@ -809,6 +810,64 @@ async def test_email_sync_does_not_run_without_successful_payment(auth_client):
     with patch("backend.services.email_service.sync_google_emails", new_callable=AsyncMock) as mock_sync:
         assert await sync_emails_for_user(user_id) == []
         mock_sync.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_gmail_list_failure_is_reported_instead_of_successful_empty_sync():
+    response = type("Response", (), {"status_code": 503, "text": "temporary provider error"})()
+
+    with patch(
+        "backend.services.email_service.refresh_google_token_if_needed",
+        new_callable=AsyncMock,
+        return_value="access-token",
+    ), patch(
+        "backend.services.email_service.httpx.AsyncClient.get",
+        new_callable=AsyncMock,
+        return_value=response,
+    ):
+        with pytest.raises(RuntimeError, match="HTTP 503"):
+            await sync_google_emails(
+                {"id": 7, "email": "owner@example.com"},
+                {
+                    "id": 11,
+                    "user_id": 7,
+                    "provider": "google",
+                    "email_address": "owner@gmail.com",
+                    "last_successful_payment_at": "2026-10-01T10:00:00+00:00",
+                    "created_at": "2026-10-01T10:00:00+00:00",
+                },
+            )
+
+
+@pytest.mark.anyio
+async def test_failed_gmail_sync_does_not_advance_last_sync_at(auth_client):
+    _, _, user_id = auth_client
+    with connect() as c:
+        integration_id = c.execute(
+            """INSERT INTO email_integrations
+               (user_id, provider, email_address, status)
+               VALUES (?, 'google', 'empresa@gmail.com', 'connected')""",
+            (user_id,),
+        ).lastrowid
+    _save_stored_subscription(user_id, {
+        "status": "active",
+        "last_successful_payment_at": "2026-10-01T10:00:00+00:00",
+    })
+
+    with patch(
+        "backend.services.email_service.sync_google_emails",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("Gmail indisponível"),
+    ):
+        with pytest.raises(RuntimeError, match="Gmail indisponível"):
+            await sync_emails_for_user(user_id)
+
+    with connect() as c:
+        row = c.execute(
+            "SELECT last_sync_at FROM email_integrations WHERE id = ?",
+            (integration_id,),
+        ).fetchone()
+    assert row["last_sync_at"] is None
 
 
 def test_toggle_auto_reply(auth_client):

@@ -5,6 +5,7 @@ A documentação interativa gerada pelo FastAPI estará em `/docs` quando o serv
 - `POST /api/auth/signup` — criar conta
 - `POST /api/auth/login` — iniciar sessão
 - `GET /api/dashboard` — métricas reais e pedidos pendentes
+- `DELETE /api/account` — elimina a conta após validar a senha e confirmar na Stripe que a assinatura não será renovada; o período pago permanece, sem reembolso
 - `GET /api/contacts` — clientes/conversas
 - `POST /api/simulate/incoming` — registar mensagem e gerar resposta (endpoint de teste autenticado)
 - `GET/POST /api/business-info` — consultar/adicionar informação do negócio

@@ -27,11 +27,10 @@ def get_supabase_credentials() -> Dict[str, str]:
     }
 
 def is_supabase_configured() -> bool:
-    """Verifica se o projeto Supabase possui URL e ao menos uma chave válida configurada."""
+    """Verifica se o backend tem URL e chave privada para operar no Supabase."""
     creds = get_supabase_credentials()
     has_url = bool(creds["url"] and creds["url"].startswith("http"))
-    has_key = bool(creds["service_role_key"] or creds["anon_key"])
-    return has_url and has_key
+    return has_url and bool(creds["service_role_key"])
 
 def get_supabase_client(use_service_role: bool = True) -> Optional[Any]:
     """
@@ -41,7 +40,11 @@ def get_supabase_client(use_service_role: bool = True) -> Optional[Any]:
     """
     creds = get_supabase_credentials()
     url = creds["url"]
-    role = "service_role" if use_service_role and creds["service_role_key"] else "anon"
+    if use_service_role and not creds["service_role_key"]:
+        logger.error("SUPABASE_SERVICE_ROLE_KEY é obrigatória para operações do backend.")
+        return None
+
+    role = "service_role" if use_service_role else "anon"
     key = creds["service_role_key"] if role == "service_role" else creds["anon_key"]
 
     if not url or not key:
@@ -91,6 +94,9 @@ def get_supabase_status() -> Dict[str, Any]:
             status["connected"] = False
             status["details"] = f"Supabase configurado, mas retornou erro de consulta: {str(ex)}"
     else:
-        status["details"] = "Configure SUPABASE_URL e SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY no seu arquivo .env"
+        status["details"] = (
+            "Configure SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no ambiente do backend. "
+            "A chave anon não tem permissão para aceder aos dados da aplicação."
+        )
 
     return status

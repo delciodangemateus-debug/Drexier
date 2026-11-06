@@ -415,6 +415,120 @@ def is_subscription_active(user_id: int) -> bool:
     return status["has_active_subscription"]
 
 
+def schedule_subscription_cancellation(user_id: int) -> Dict[str, Any]:
+    """Agenda o cancelamento no fim do período pago sem emitir reembolso."""
+    with connect() as c:
+        row = c.execute(
+            """SELECT stripe_customer_id, stripe_subscription_id, status,
+                      current_period_end, cancel_at_period_end
+               FROM subscriptions WHERE user_id = ?""",
+            (user_id,),
+        ).fetchone()
+        if row:
+            row = dict(row)
+
+        if not row:
+            legacy = c.execute(
+                """SELECT metadata FROM business_info
+                   WHERE user_id = ? AND kind IN ('subscription', 'assinatura')
+                   ORDER BY id DESC LIMIT 1""",
+                (user_id,),
+            ).fetchone()
+            if legacy:
+                raw_metadata = legacy["metadata"]
+                data = (
+                    json.loads(raw_metadata)
+                    if isinstance(raw_metadata, str)
+                    else raw_metadata
+                )
+                row = data or {}
+
+    if not row:
+        return {"scheduled": False, "current_period_end": None}
+
+    subscription_id = str(row.get("stripe_subscription_id") or "").strip()
+    status = str(row.get("status") or "inactive")
+    if not subscription_id:
+        if status in ("active", "trialing", "past_due", "unpaid", "incomplete"):
+            raise RuntimeError(
+                "A assinatura está ativa, mas o identificador Stripe não está salvo. "
+                "A conta foi preservada; contate o suporte para cancelar a cobrança."
+            )
+        return {"scheduled": False, "current_period_end": row.get("current_period_end")}
+
+    if not is_stripe_configured():
+        raise RuntimeError(
+            "A Stripe não está configurada. A conta foi preservada e a assinatura "
+            "não foi cancelada; configure a integração e tente novamente."
+        )
+
+    stripe.api_key = get_stripe_secret_key()
+    try:
+        subscription = stripe.Subscription.retrieve(subscription_id)
+        actual_customer_id = subscription.get("customer")
+        if hasattr(actual_customer_id, "id"):
+            actual_customer_id = actual_customer_id.id
+        expected_customer_id = str(row.get("stripe_customer_id") or "").strip()
+        if expected_customer_id and str(actual_customer_id or "") != expected_customer_id:
+            raise RuntimeError(
+                "A assinatura Stripe não corresponde ao cliente salvo. "
+                "A conta foi preservada por segurança."
+            )
+
+        remote_status = str(subscription.get("status") or status)
+        if remote_status not in ("canceled", "incomplete_expired"):
+            if not subscription.get("cancel_at_period_end"):
+                subscription = stripe.Subscription.modify(
+                    subscription_id,
+                    cancel_at_period_end=True,
+                )
+            if not subscription.get("cancel_at_period_end"):
+                raise RuntimeError(
+                    "A Stripe não confirmou o cancelamento no fim do período."
+                )
+
+        period_end = subscription.get("current_period_end")
+        if isinstance(period_end, (int, float)):
+            period_end = datetime.fromtimestamp(
+                period_end, tz=timezone.utc
+            ).isoformat()
+        elif period_end is not None:
+            period_end = str(period_end)
+
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        logger.exception("Falha ao agendar cancelamento Stripe para user_id=%s", user_id)
+        raise RuntimeError(
+            "A Stripe não confirmou o cancelamento. A conta foi preservada; "
+            "verifique a integração e tente novamente."
+        ) from exc
+
+    try:
+        with connect() as c:
+            c.execute(
+                """UPDATE subscriptions
+                   SET cancel_at_period_end = ?, current_period_end = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ?""",
+                (1, period_end, user_id),
+            )
+    except Exception as exc:
+        logger.exception(
+            "Stripe confirmou cancelamento, mas falhou atualizar o registro local user_id=%s",
+            user_id,
+        )
+        raise RuntimeError(
+            "A Stripe confirmou que a assinatura não será renovada, mas não foi possível "
+            "atualizar o registro local. A conta foi preservada; tente novamente."
+        ) from exc
+
+    return {
+        "scheduled": remote_status not in ("canceled", "incomplete_expired"),
+        "current_period_end": period_end or row.get("current_period_end"),
+    }
+
+
 async def create_checkout_session(user_id: int, user_email: str, user_name: str, base_url: str) -> Dict[str, Any]:
     """
     Cria uma sessão oficial do Stripe Checkout em modo 'subscription' (Plano Business 59€/mês).

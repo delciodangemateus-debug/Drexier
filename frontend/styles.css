@@ -852,6 +852,7 @@ textarea {
 }
 
 .lp-dialogue-mockup {
+  position: relative;
   background: var(--bg-main);
   border: 2px solid var(--border-arcade);
   border-radius: var(--radius-md);
@@ -1070,6 +1071,55 @@ textarea {
   border-radius: var(--radius-xl);
   padding: 36px;
   box-shadow: var(--shadow-lg);
+}
+
+.auth-card .form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-card .form .btn {
+  width: 100%;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  margin-bottom: 24px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-arcade);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+}
+
+.tab {
+  flex: 1;
+  min-height: 38px;
+  padding: 8px 14px;
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition), color var(--transition);
+}
+
+.tab:hover {
+  background: var(--surface-interaction);
+  color: var(--text-primary);
+}
+
+.tab.active {
+  background: var(--purple-arcade);
+  border-color: var(--border-arcade);
+  box-shadow: 2px 2px 0 var(--border-arcade);
+  color: #FFFDF7;
+  transform: translate(-1px, -1px);
 }
 
 .auth-header {
@@ -3838,33 +3888,61 @@ textarea {
 
 /* ---- FLOW LINE & PULSE ---- */
 .lp-flow-line {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: linear-gradient(to bottom, #7657E8, #C9F36A);
-  transform: translateX(-50%);
-  opacity: 0.3;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 0;
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #6B7280;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
   pointer-events: none;
 }
 
+.lp-flow-line::before,
+.lp-flow-line::after {
+  content: "";
+  flex: 1 1 auto;
+  min-width: 12px;
+  height: 2px;
+  border-radius: 2px;
+}
+
+.lp-flow-line::before {
+  background: linear-gradient(to right, rgba(118, 87, 232, 0), #7657E8);
+}
+
+.lp-flow-line::after {
+  background: linear-gradient(to right, #C9F36A, rgba(201, 243, 106, 0));
+}
+
+.lp-flow-line span {
+  flex: 0 1 auto;
+  max-width: 72%;
+  overflow-wrap: anywhere;
+}
+
 .lp-flow-pulse {
-  position: absolute;
-  left: 50%;
+  position: static;
+  flex-shrink: 0;
   width: 10px;
   height: 10px;
   background: #7657E8;
   border-radius: 50%;
   border: 2px solid #171923;
-  transform: translateX(-50%);
-  animation: lp-flow-move 3s ease-in-out infinite;
+  animation: lp-flow-pulse 1.8s ease-in-out infinite;
 }
-@keyframes lp-flow-move {
-  0%   { top: 0%; opacity: 0; }
-  20%  { opacity: 1; }
-  80%  { opacity: 1; }
-  100% { top: 100%; opacity: 0; }
+
+@keyframes lp-flow-pulse {
+  0%, 100% { transform: scale(0.85); box-shadow: 0 0 0 0 rgba(118, 87, 232, 0.35); }
+  50%      { transform: scale(1); box-shadow: 0 0 0 5px rgba(118, 87, 232, 0); }
 }
 
 /* ---- DIALOGUE MOCKUP BUBBLES ---- */

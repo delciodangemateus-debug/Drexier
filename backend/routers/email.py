@@ -385,7 +385,11 @@ async def trigger_email_sync(user: dict = Depends(require_email_subscription)):
         }
     except Exception as e:
         logger.error(f"Erro ao sincronizar e-mails: {e}")
-        raise HTTPException(400, f"Falha na sincronização de e-mails: {str(e)}")
+        raise HTTPException(
+            502,
+            "Falha temporária ao sincronizar a caixa de e-mail. "
+            "A sincronização não foi marcada como concluída; verifique a autorização e tente novamente.",
+        ) from e
 
 
 @router.post("/test-send")
