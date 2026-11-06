@@ -182,7 +182,10 @@ button.is-click-loading {
   padding-right: 34px !important;
 }
 
-button.is-click-loading::after {
+button.is-click-loading::after,
+a.is-click-loading::after,
+[role="button"].is-click-loading:not(button)::after,
+.clickable-card.is-click-loading::after {
   content: "";
   position: absolute;
   right: 11px;
@@ -193,6 +196,18 @@ button.is-click-loading::after {
   border-right-color: transparent;
   border-radius: 50%;
   animation: button-click-spinner 650ms linear infinite;
+}
+
+.clickable-card.is-click-loading::after,
+[role="button"].is-click-loading:not(button)::after {
+  top: 12px;
+  right: 12px;
+}
+
+.clickable-card.is-click-loading,
+[role="button"].is-click-loading:not(button),
+a.is-click-loading {
+  position: relative;
 }
 
 @keyframes button-click-spinner {

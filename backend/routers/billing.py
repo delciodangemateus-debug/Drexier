@@ -50,7 +50,10 @@ def get_billing_config():
 @router.get("/status")
 def get_subscription_status(user=Depends(get_current_user), force: bool = False):
     """Retorna o estado detalhado da assinatura e acesso do utilizador autenticado."""
-    return get_user_subscription_status(user["id"], force_refresh=force)
+    try:
+        return get_user_subscription_status(user["id"], force_refresh=force)
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @router.get("/verify-session")
@@ -61,7 +64,14 @@ def verify_session(session_id: str, user=Depends(get_current_user)):
     """
     if not session_id:
         raise HTTPException(400, "session_id obrigatório.")
-    return verify_checkout_session(session_id=session_id.strip(), user_id=user["id"])
+    try:
+        return verify_checkout_session(session_id=session_id.strip(), user_id=user["id"])
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 class CheckoutRequestPayload(BaseModel):

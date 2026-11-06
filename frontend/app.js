@@ -1,17 +1,79 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
+const controlProcessingStates = new WeakMap();
+let activeActionControl = null;
+let recentActionControl = null;
+const CONTROL_PROCESSING_MIN_MS = 180;
+const CONTROL_PROCESSING_SETTLE_MS = 120;
+
+function finishControlProcessing(control, state) {
+  if (state.pendingRequests > 0) return;
+  clearTimeout(state.finishTimer);
+  const elapsed = performance.now() - state.startedAt;
+  const delay = Math.max(
+    CONTROL_PROCESSING_MIN_MS - elapsed,
+    elapsed >= CONTROL_PROCESSING_MIN_MS ? CONTROL_PROCESSING_SETTLE_MS : 0
+  );
+  state.finishTimer = setTimeout(() => {
+    if (controlProcessingStates.get(control) !== state || state.pendingRequests > 0) return;
+    control.classList.remove("is-click-loading");
+    if (state.previousAriaBusy === null) control.removeAttribute("aria-busy");
+    else control.setAttribute("aria-busy", state.previousAriaBusy);
+    controlProcessingStates.delete(control);
+    if (recentActionControl === control) recentActionControl = null;
+  }, delay);
+}
+
+function beginControlProcessing(control) {
+  if (!control || controlProcessingStates.has(control)) return null;
+  const state = {
+    startedAt: performance.now(),
+    pendingRequests: 0,
+    finishTimer: null,
+    previousAriaBusy: control.getAttribute("aria-busy")
+  };
+  controlProcessingStates.set(control, state);
+  control.setAttribute("aria-busy", "true");
+  requestAnimationFrame(() => {
+    if (controlProcessingStates.get(control) === state) {
+      control.classList.add("is-click-loading");
+    }
+  });
+  return state;
+}
+
+function trackControlRequest(request, control = activeActionControl || recentActionControl) {
+  const state = control ? controlProcessingStates.get(control) : null;
+  if (!state) return request;
+
+  clearTimeout(state.finishTimer);
+  state.pendingRequests += 1;
+  return Promise.resolve(request).finally(() => {
+    state.pendingRequests = Math.max(0, state.pendingRequests - 1);
+    finishControlProcessing(control, state);
+  });
+}
+
 document.addEventListener("click", event => {
-  const button = event.target instanceof Element ? event.target.closest("button") : null;
-  if (!button || button.disabled) return;
-  button.classList.remove("is-click-loading");
-  button.setAttribute("aria-busy", "true");
-  requestAnimationFrame(() => button.classList.add("is-click-loading"));
-  clearTimeout(button._clickLoadingTimer);
-  button._clickLoadingTimer = setTimeout(() => {
-    button.classList.remove("is-click-loading");
-    button.removeAttribute("aria-busy");
-  }, 750);
+  const control = event.target instanceof Element
+    ? event.target.closest("button, a[href], [role='button'], .clickable-card")
+    : null;
+  if (!control || control.disabled) return;
+  if (controlProcessingStates.has(control)) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+
+  const state = beginControlProcessing(control);
+  if (!state) return;
+  activeActionControl = control;
+  recentActionControl = control;
+  queueMicrotask(() => {
+    if (activeActionControl === control) activeActionControl = null;
+    finishControlProcessing(control, state);
+  });
 }, true);
 // Debounce helper para melhorar responsividade
 function debounce(fn, delay = 250) {
@@ -510,11 +572,11 @@ async function api(url, options = {}) {
     }
 
     try {
-      const res = await fetch(url, {
+      const res = await trackControlRequest(fetch(url, {
         ...options,
         signal,
         headers: { ...authHeaders(options.body !== undefined), ...(options.headers || {}) }
-      });
+      }));
       let data = {};
       try { data = await res.json(); } catch {}
       if (!res.ok) {
@@ -964,38 +1026,43 @@ async function boot() {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("billing") === "success") {
       const sessionId = urlParams.get("session_id");
+      let paymentConfirmed = false;
       window.history.replaceState({}, document.title, window.location.pathname);
 
       if (sessionId) {
         try {
           const verified = await api(`/api/billing/verify-session?session_id=${encodeURIComponent(sessionId)}`);
-          if (verified) {
-            if (verified.has_active_subscription) {
-              hasActiveSub = true;
-              applyPaywallState(true);
-            } else {
-              try {
-                const st = await api("/api/billing/status");
-                hasActiveSub = !!(st && st.has_active_subscription);
-                if (hasActiveSub) applyPaywallState(true);
-              } catch (_) {}
-            }
+          paymentConfirmed = !!verified?.has_active_subscription;
+          if (paymentConfirmed) {
+            hasActiveSub = true;
+            applyPaywallState(true);
+          } else {
+            showNotice(
+              "A Stripe ainda não confirmou a ativação. Atualize o estado na aba Faturação antes de tentar pagar novamente.",
+              true
+            );
           }
         } catch (e) {
-          console.warn("verify-session falhou, a recorrer a loadBillingStatus:", e);
-          try {
-            const st = await api("/api/billing/status");
-            hasActiveSub = !!(st && st.has_active_subscription);
-            if (hasActiveSub) applyPaywallState(true);
-          } catch (_) {}
+          console.error("Falha ao confirmar o pagamento na Stripe:", e);
+          showNotice(
+            `O pagamento ainda não foi confirmado pela aplicação: ${e.message} Abra Faturação e atualize o estado antes de tentar pagar novamente.`,
+            true
+          );
         }
+      } else {
+        showNotice(
+          "Não recebemos o identificador da sessão de pagamento. Abra Faturação e atualize o estado com a Stripe.",
+          true
+        );
       }
 
-      showNotice("Pagamento efetuado com sucesso! O seu Plano Business (59€/mês) está ativo e o acesso total está desbloqueado.");
       await navigate("settings");
       $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "billing"));
       $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-billing"));
       await loadBillingStatus();
+      if (paymentConfirmed) {
+        showNotice("Pagamento confirmado pela Stripe. O seu Plano Business está ativo.");
+      }
       return;
     } else if (urlParams.get("billing") === "cancel") {
       showNotice("O processo de subscrição foi interrompido. Pode aderir ao Plano Business a qualquer momento na aba Faturação.");
@@ -3613,6 +3680,8 @@ function editTrainingTopic(topic) {
 
 async function handleTrainingFileUpload(file) {
   if (!file) return;
+  const uploadControl = $("#btn-trigger-file-picker") || $("#training-drop-zone");
+  beginControlProcessing(uploadControl);
   const notice = $("#training-file-notice");
   if (notice) {
     notice.className = "upload-feedback";
@@ -3624,11 +3693,11 @@ async function handleTrainingFileUpload(file) {
   formData.append("file", file);
 
   try {
-    const res = await fetch("/api/business-info/upload-document", {
+    const res = await trackControlRequest(fetch("/api/business-info/upload-document", {
       method: "POST",
       headers: authHeaders(false),
       body: formData
-    });
+    }), uploadControl);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "Erro ao carregar documento." }));
       throw new Error(err.detail || "Erro ao carregar documento.");
@@ -3654,6 +3723,9 @@ async function handleTrainingFileUpload(file) {
       notice.textContent = `Erro no carregamento: ${err.message}`;
     }
     showNotice(err.message, true);
+  } finally {
+    const state = uploadControl ? controlProcessingStates.get(uploadControl) : null;
+    if (state) finishControlProcessing(uploadControl, state);
   }
 }
 
@@ -4162,7 +4234,7 @@ $("#btn-sync-billing-status")?.addEventListener("click", async () => {
   const originalText = btn?.innerHTML;
   if (btn) { btn.disabled = true; btn.textContent = "A verificar com Stripe…"; }
   try {
-    const status = await api("/api/billing/status");
+    const status = await api("/api/billing/status?force=true", { cache: "no-store" });
     hasActiveSub = !!(status && status.has_active_subscription);
     applyPaywallState(hasActiveSub);
     if (hasActiveSub) {

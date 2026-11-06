@@ -419,9 +419,13 @@ CREATE TABLE IF NOT EXISTS public.subscriptions (
     status TEXT NOT NULL DEFAULT 'inactive', -- active, past_due, canceled, trialing, inactive
     current_period_end TIMESTAMPTZ,
     cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+    last_successful_payment_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW())
 );
+
+ALTER TABLE public.subscriptions
+    ADD COLUMN IF NOT EXISTS last_successful_payment_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON public.subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_stripe_customer ON public.subscriptions(stripe_customer_id);

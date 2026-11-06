@@ -133,67 +133,66 @@ def _get_latest_successful_payment_at(subscription_id: str) -> Optional[str]:
 
 def _save_stored_subscription(user_id: int, data: Dict[str, Any]):
     """Salva os dados da assinatura com persistência no banco de dados."""
-    if not data.get("last_successful_payment_at"):
-        existing_subscription = _get_stored_subscription(user_id) or {}
-        data["last_successful_payment_at"] = existing_subscription.get("last_successful_payment_at")
-    data["user_id"] = user_id
-    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    existing_subscription = _get_stored_subscription(user_id) or {}
+    merged = dict(existing_subscription)
+    for key, value in data.items():
+        if value is not None and not (
+            key in ("stripe_customer_id", "stripe_subscription_id", "stripe_price_id")
+            and value == ""
+        ):
+            merged[key] = value
+    merged["user_id"] = user_id
+    merged["updated_at"] = datetime.now(timezone.utc).isoformat()
 
+    fields = (
+        "stripe_customer_id",
+        "stripe_subscription_id",
+        "stripe_price_id",
+        "plan_name",
+        "amount",
+        "currency",
+        "status",
+        "current_period_end",
+        "cancel_at_period_end",
+        "last_successful_payment_at",
+    )
+    values = (
+        str(merged.get("stripe_customer_id") or ""),
+        str(merged.get("stripe_subscription_id") or ""),
+        str(merged.get("stripe_price_id") or ""),
+        str(merged.get("plan_name") or PLAN_NAME),
+        int(merged.get("amount") or PLAN_AMOUNT_CENTS),
+        str(merged.get("currency") or PLAN_CURRENCY),
+        str(merged.get("status") or "inactive"),
+        str(merged.get("current_period_end") or "") or None,
+        bool(merged.get("cancel_at_period_end", False)),
+        merged.get("last_successful_payment_at"),
+    )
     with connect() as c:
-        # Tenta salvar na tabela subscriptions se ela existir
-        saved_in_table = False
-        try:
-            existing = c.execute("SELECT id FROM subscriptions WHERE user_id = ?", (user_id,)).fetchone()
-            if existing:
-                c.execute(
-                    """UPDATE subscriptions SET
-                       stripe_customer_id = ?, stripe_subscription_id = ?, stripe_price_id = ?,
-                       plan_name = ?, amount = ?, currency = ?, status = ?,
-                       current_period_end = ?, cancel_at_period_end = ?, last_successful_payment_at = ?, updated_at = CURRENT_TIMESTAMP
-                       WHERE user_id = ?""",
-                    (
-                        str(data.get("stripe_customer_id") or ""),
-                        str(data.get("stripe_subscription_id") or ""),
-                        str(data.get("stripe_price_id") or ""),
-                        str(data.get("plan_name") or PLAN_NAME),
-                        int(data.get("amount") or PLAN_AMOUNT_CENTS),
-                        str(data.get("currency") or PLAN_CURRENCY),
-                        str(data.get("status") or "inactive"),
-                        str(data.get("current_period_end") or ""),
-                        1 if data.get("cancel_at_period_end") else 0,
-                        str(data.get("last_successful_payment_at") or ""),
-                        user_id,
-                    )
-                )
-            else:
-                c.execute(
-                    """INSERT INTO subscriptions (
-                       user_id, stripe_customer_id, stripe_subscription_id, stripe_price_id,
-                       plan_name, amount, currency, status, current_period_end, cancel_at_period_end, last_successful_payment_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        user_id,
-                        str(data.get("stripe_customer_id") or ""),
-                        str(data.get("stripe_subscription_id") or ""),
-                        str(data.get("stripe_price_id") or ""),
-                        str(data.get("plan_name") or PLAN_NAME),
-                        int(data.get("amount") or PLAN_AMOUNT_CENTS),
-                        str(data.get("currency") or PLAN_CURRENCY),
-                        str(data.get("status") or "inactive"),
-                        str(data.get("current_period_end") or ""),
-                        1 if data.get("cancel_at_period_end") else 0,
-                        str(data.get("last_successful_payment_at") or ""),
-                    )
-                )
-            saved_in_table = True
-        except Exception as ex:
-            logger.debug(f"Tabela subscriptions não disponível, utilizando fallback business_info: {ex}")
-
-        # Limpeza preventiva: garante que a tabela business_info não seja poluída com cards de assinatura
-        try:
-            c.execute("DELETE FROM business_info WHERE user_id = ? AND kind IN ('subscription', 'assinatura')", (user_id,))
-        except Exception:
-            pass
+        existing = c.execute(
+            "SELECT id FROM subscriptions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if existing:
+            c.execute(
+                """UPDATE subscriptions SET
+                   stripe_customer_id = ?, stripe_subscription_id = ?, stripe_price_id = ?,
+                   plan_name = ?, amount = ?, currency = ?, status = ?,
+                   current_period_end = ?, cancel_at_period_end = ?,
+                   last_successful_payment_at = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ?""",
+                (*values, user_id),
+            )
+        else:
+            c.execute(
+                """INSERT INTO subscriptions (
+                   stripe_customer_id, stripe_subscription_id, stripe_price_id,
+                   plan_name, amount, currency, status, current_period_end,
+                   cancel_at_period_end, last_successful_payment_at, user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (*values, user_id),
+            )
+    _stripe_reconcile_cache.pop(user_id, None)
 
 
 # Cache em memória para evitar chamadas bloqueantes repetitivas à API da Stripe
@@ -225,20 +224,25 @@ def get_user_subscription_status(user_id: int, force_refresh: bool = False) -> D
                     end_dt = datetime.fromisoformat(pe_str)
                 has_active_access = datetime.now(timezone.utc) <= (end_dt + timedelta(days=1))
             except Exception:
-                has_active_access = True
+                logger.warning(
+                    "[Stripe] Data de renovação inválida na subscrição do utilizador %s.",
+                    user_id,
+                )
+                has_active_access = False
         else:
             has_active_access = True
     elif status in ("past_due", "unpaid", "incomplete"):
         has_active_access = False
 
-    # Se já tem acesso ativo ou se foi checado recentemente na Stripe, não bloqueia com HTTP call externa
+    # Evita chamadas externas repetidas, exceto quando a reconciliação é solicitada explicitamente.
     now = time.time()
     cached_reconcile = _stripe_reconcile_cache.get(user_id)
     recently_checked = cached_reconcile and (now - cached_reconcile[0] < RECONCILE_CACHE_TTL)
 
-    # AUTO-RECONCILIAÇÃO COM A STRIPE (apenas se não ativo e não checado recentemente, ou se forçado)
-    if is_stripe_configured() and not has_active_access and (not recently_checked or force_refresh):
-        _stripe_reconcile_cache[user_id] = (now, sub_data)
+    # A atualização manual sempre consulta a Stripe, inclusive para corrigir estados locais ativos obsoletos.
+    if is_stripe_configured() and (
+        force_refresh or (not has_active_access and not recently_checked)
+    ):
         try:
             stripe.api_key = get_stripe_secret_key()
             customer_id = sub_data.get("stripe_customer_id")
@@ -255,48 +259,117 @@ def get_user_subscription_status(user_id: int, force_refresh: bool = False) -> D
                     if cust_res and len(cust_res.data) > 0:
                         customer_id = cust_res.data[0].id
                         sub_data["stripe_customer_id"] = customer_id
-                except Exception:
-                    pass
+                except Exception as exc:
+                    if force_refresh:
+                        raise RuntimeError(
+                            "Não foi possível localizar o cliente na Stripe."
+                        ) from exc
+                    logger.warning("[Auto-Reconciliação Stripe] Falha ao localizar cliente: %s", exc)
 
             if customer_id:
                 try:
                     subs_list = stripe.Subscription.list(customer=customer_id, status="all", limit=5)
-                    for s in subs_list.data:
-                        if getattr(s, "status", None) in ("active", "trialing"):
-                            try:
-                                period_end_dt = datetime.fromtimestamp(s.current_period_end, tz=timezone.utc).isoformat()
-                            except Exception:
-                                period_end_dt = sub_data.get("current_period_end") or (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
-                            price_id = get_stripe_price_id()
-                            try:
-                                if s.items and s.items.data:
-                                    price_id = s.items.data[0].price.id
-                            except Exception:
-                                pass
-                            sub_data.update({
-                                "stripe_customer_id": customer_id,
-                                "stripe_subscription_id": getattr(s, "id", sub_data.get("stripe_subscription_id") or ""),
-                                "stripe_price_id": price_id,
-                                "plan_name": PLAN_NAME,
-                                "amount": PLAN_AMOUNT_CENTS,
-                                "currency": PLAN_CURRENCY,
-                                "status": s.status,
-                                "current_period_end": period_end_dt,
-                                "cancel_at_period_end": bool(getattr(s, "cancel_at_period_end", False))
-                            })
-                            if not sub_data.get("last_successful_payment_at"):
-                                paid_at = _get_latest_successful_payment_at(str(getattr(s, "id", "")))
-                                if paid_at:
-                                    sub_data["last_successful_payment_at"] = paid_at
-                            _save_stored_subscription(user_id, sub_data)
-                            status = s.status
-                            has_active_access = True
-                            logger.info(f"[Auto-Reconciliação Stripe] Assinatura {getattr(s,'id','')} ativa confirmada e salva para user {user_id}!")
-                            break
-                except Exception:
-                    pass
+                    subscriptions = list(subs_list.data)
+                    active_subscription = next(
+                        (
+                            item for item in subscriptions
+                            if getattr(item, "status", None) in ("active", "trialing")
+                        ),
+                        None,
+                    )
+                    selected_subscription = active_subscription or next(
+                        (
+                            item for item in subscriptions
+                            if getattr(item, "id", None)
+                            == sub_data.get("stripe_subscription_id")
+                        ),
+                        subscriptions[0] if subscriptions else None,
+                    )
+                    if selected_subscription:
+                        selected_status = getattr(selected_subscription, "status", "inactive")
+                        period_end_dt = datetime.fromtimestamp(
+                            selected_subscription.current_period_end,
+                            tz=timezone.utc,
+                        ).isoformat()
+                        price_id = get_stripe_price_id()
+                        try:
+                            if selected_subscription.items and selected_subscription.items.data:
+                                price_id = selected_subscription.items.data[0].price.id
+                        except Exception as exc:
+                            logger.warning(
+                                "[Stripe] Não foi possível ler o preço da assinatura %s: %s",
+                                getattr(selected_subscription, "id", ""),
+                                exc,
+                            )
+                        sub_data.update({
+                            "stripe_customer_id": customer_id,
+                            "stripe_subscription_id": getattr(
+                                selected_subscription,
+                                "id",
+                                sub_data.get("stripe_subscription_id") or "",
+                            ),
+                            "stripe_price_id": price_id,
+                            "plan_name": PLAN_NAME,
+                            "amount": PLAN_AMOUNT_CENTS,
+                            "currency": PLAN_CURRENCY,
+                            "status": selected_status,
+                            "current_period_end": period_end_dt,
+                            "cancel_at_period_end": bool(
+                                getattr(selected_subscription, "cancel_at_period_end", False)
+                            ),
+                        })
+                        subscription_id = str(
+                            getattr(selected_subscription, "id", "")
+                        )
+                        if (
+                            selected_status in ("active", "trialing")
+                            and not sub_data.get("last_successful_payment_at")
+                        ):
+                            paid_at = _get_latest_successful_payment_at(subscription_id)
+                            if paid_at:
+                                sub_data["last_successful_payment_at"] = paid_at
+                        _save_stored_subscription(user_id, sub_data)
+                        status = selected_status
+                        has_active_access = selected_status in ("active", "trialing")
+                        try:
+                            period_end = datetime.fromisoformat(
+                                period_end_dt.replace("Z", "+00:00")
+                            )
+                            has_active_access = has_active_access and (
+                                datetime.now(timezone.utc)
+                                <= period_end + timedelta(days=1)
+                            )
+                        except (TypeError, ValueError):
+                            has_active_access = False
+                        logger.info(
+                            "[Auto-Reconciliação Stripe] Assinatura %s reconciliada para user %s (status=%s).",
+                            subscription_id,
+                            user_id,
+                            selected_status,
+                        )
+                    else:
+                        if force_refresh:
+                            _save_stored_subscription(user_id, {"status": "inactive"})
+                            status = "inactive"
+                            has_active_access = False
+                except Exception as exc:
+                    if force_refresh:
+                        raise RuntimeError(
+                            "Não foi possível consultar as assinaturas na Stripe."
+                        ) from exc
+                    logger.warning("[Auto-Reconciliação Stripe] Falha ao consultar assinaturas: %s", exc)
+            elif force_refresh:
+                _save_stored_subscription(user_id, {"status": "inactive"})
+                status = "inactive"
+                has_active_access = False
+            _stripe_reconcile_cache[user_id] = (time.time(), sub_data)
         except Exception as ex:
+            _stripe_reconcile_cache.pop(user_id, None)
             logger.debug(f"[Auto-Reconciliação Stripe] Verificação ignorada: {ex}")
+            if force_refresh:
+                raise RuntimeError(
+                    "Não foi possível atualizar o estado do pagamento com a Stripe."
+                ) from ex
 
     return {
         "configured": is_stripe_configured(),
@@ -329,80 +402,102 @@ def verify_checkout_session(session_id: str, user_id: int) -> Dict[str, Any]:
     Elimina qualquer latência de webhook e desbloqueia o utilizador instantaneamente.
     """
     if not is_stripe_configured():
-        return get_user_subscription_status(user_id)
+        raise RuntimeError("A integração Stripe não está configurada.")
 
     stripe.api_key = get_stripe_secret_key()
     try:
         session = stripe.checkout.Session.retrieve(session_id, expand=["subscription", "customer"])
-        customer = session.get("customer")
-        customer_id = customer.id if hasattr(customer, "id") else (customer if isinstance(customer, str) else None)
-        sub = session.get("subscription")
-        sub_id = sub.id if hasattr(sub, "id") else (sub if isinstance(sub, str) else None)
+    except Exception as exc:
+        logger.exception("[Stripe Checkout] Falha ao consultar sessão %s", session_id)
+        raise RuntimeError("Não foi possível confirmar o pagamento com a Stripe.") from exc
 
-        payment_status = session.get("payment_status")
-        session_status = session.get("status")
+    client_reference_id = session.get("client_reference_id")
+    metadata = session.get("metadata") or {}
+    metadata_user_id = metadata.get("user_id") if hasattr(metadata, "get") else None
+    session_user_id = client_reference_id or metadata_user_id
+    if str(session_user_id or "") != str(user_id):
+        raise PermissionError("Esta sessão de pagamento não pertence a esta conta.")
 
-        if payment_status in ("paid", "no_payment_required") or session_status == "complete" or sub_id:
-            status = "active"
-            period_end_dt = ""
-            cancel_at = False
-            price_id = get_stripe_price_id()
+    session_status = session.get("status")
+    payment_status = session.get("payment_status")
+    if session_status != "complete" or payment_status not in ("paid", "no_payment_required"):
+        raise ValueError("A Stripe ainda não confirmou a conclusão do pagamento.")
 
-            if hasattr(sub, "status"):
-                try:
-                    status = sub.status or "active"
-                    if getattr(sub, "current_period_end", None):
-                        period_end_dt = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc).isoformat()
-                    cancel_at = bool(getattr(sub, "cancel_at_period_end", False))
-                    if getattr(sub, "items", None) and sub.items.data:
-                        try:
-                            price_id = sub.items.data[0].price.id
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-            elif sub_id:
-                try:
-                    s_obj = stripe.Subscription.retrieve(sub_id)
-                    status = getattr(s_obj, "status", None) or "active"
-                    if getattr(s_obj, "current_period_end", None):
-                        period_end_dt = datetime.fromtimestamp(s_obj.current_period_end, tz=timezone.utc).isoformat()
-                    cancel_at = bool(getattr(s_obj, "cancel_at_period_end", False))
-                    if getattr(s_obj, "items", None) and s_obj.items.data:
-                        try:
-                            price_id = s_obj.items.data[0].price.id
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+    customer = session.get("customer")
+    customer_id = (
+        customer.id if hasattr(customer, "id")
+        else customer.get("id") if hasattr(customer, "get")
+        else customer if isinstance(customer, str)
+        else None
+    )
+    sub = session.get("subscription")
+    sub_id = (
+        sub.id if hasattr(sub, "id")
+        else sub.get("id") if hasattr(sub, "get")
+        else sub if isinstance(sub, str)
+        else None
+    )
+    if not sub_id:
+        raise ValueError("A sessão concluída não contém uma assinatura Stripe.")
 
-            # Se ainda não temos período, definir para 30 dias a partir de agora para garantir acesso imediato
-            if not period_end_dt:
-                try:
-                    period_end_dt = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
-                except Exception:
-                    period_end_dt = ""
+    try:
+        if isinstance(sub, str):
+            sub = stripe.Subscription.retrieve(sub_id)
+        sub_status = getattr(sub, "status", None) or sub.get("status")
+        if sub_status not in ("active", "trialing"):
+            raise ValueError(
+                f"A assinatura Stripe ainda não está ativa (status: {sub_status or 'desconhecido'})."
+            )
+        current_period_end = getattr(sub, "current_period_end", None)
+        if current_period_end is None:
+            current_period_end = sub.get("current_period_end")
+        period_end_dt = (
+            datetime.fromtimestamp(current_period_end, tz=timezone.utc).isoformat()
+            if isinstance(current_period_end, (int, float))
+            else str(current_period_end or "")
+        )
+        cancel_at = getattr(sub, "cancel_at_period_end", None)
+        if cancel_at is None:
+            cancel_at = sub.get("cancel_at_period_end", False)
+        price_id = get_stripe_price_id()
+        items = sub.get("items") if isinstance(sub, dict) else getattr(sub, "items", None)
+        item_data = getattr(items, "data", None) if items is not None else None
+        if item_data is None and hasattr(items, "get"):
+            item_data = items.get("data")
+        if item_data:
+            first_item = item_data[0]
+            price = getattr(first_item, "price", None) or first_item.get("price")
+            stripe_price_id = getattr(price, "id", None) if price is not None else None
+            if stripe_price_id is None and hasattr(price, "get"):
+                stripe_price_id = price.get("id")
+            if stripe_price_id:
+                price_id = stripe_price_id
+    except (ValueError, PermissionError):
+        raise
+    except Exception as exc:
+        logger.exception("[Stripe Checkout] Falha ao consultar assinatura %s", sub_id)
+        raise RuntimeError("Não foi possível confirmar a assinatura com a Stripe.") from exc
 
-            record = {
-                "stripe_customer_id": str(customer_id or ""),
-                "stripe_subscription_id": str(sub_id or ""),
-                "stripe_price_id": str(price_id or get_stripe_price_id() or ""),
-                "plan_name": PLAN_NAME,
-                "amount": PLAN_AMOUNT_CENTS,
-                "currency": PLAN_CURRENCY,
-                "status": status if status in ("active", "trialing", "past_due") else "active",
-                "current_period_end": period_end_dt,
-                "cancel_at_period_end": bool(cancel_at)
-            }
-            if payment_status == "paid":
-                record["last_successful_payment_at"] = _stripe_timestamp_to_iso(
-                    session.get("created")
-                )
-            _save_stored_subscription(user_id, record)
-            logger.info(f"[Stripe Checkout] Sessão {session_id} verificada com sucesso! User {user_id} ativo (status={record['status']}).")
-    except Exception as ex:
-        logger.error(f"[Stripe Checkout] Falha ao verificar sessão {session_id}: {ex}")
-
+    record = {
+        "stripe_customer_id": str(customer_id or ""),
+        "stripe_subscription_id": str(sub_id),
+        "stripe_price_id": str(price_id or get_stripe_price_id() or ""),
+        "plan_name": PLAN_NAME,
+        "amount": PLAN_AMOUNT_CENTS,
+        "currency": PLAN_CURRENCY,
+        "status": sub_status,
+        "current_period_end": period_end_dt or None,
+        "cancel_at_period_end": bool(cancel_at),
+    }
+    if payment_status == "paid":
+        record["last_successful_payment_at"] = _get_latest_successful_payment_at(str(sub_id))
+    _save_stored_subscription(user_id, record)
+    logger.info(
+        "[Stripe Checkout] Sessão %s confirmada para user %s (status=%s).",
+        session_id,
+        user_id,
+        sub_status,
+    )
     return get_user_subscription_status(user_id)
 
 
@@ -717,7 +812,14 @@ def handle_stripe_webhook(payload_bytes: bytes, sig_header: str) -> Dict[str, An
                 })
                 logger.info(f"[Stripe Webhook] Assinatura do utilizador {user_id} ativada com sucesso: {sub.status}")
             except Exception as ex:
-                logger.error(f"Erro ao sincronizar assinatura no checkout.session.completed: {ex}")
+                logger.exception("Falha ao persistir assinatura do checkout concluído.")
+                raise RuntimeError(
+                    "Não foi possível persistir o estado da assinatura do checkout."
+                ) from ex
+        else:
+            raise RuntimeError(
+                "O evento de checkout concluído não contém o utilizador ou a assinatura."
+            )
 
     # 2. Evento: Fatura cobrada com sucesso no cartão (renovação confirmada)
     elif event_type in ("invoice.payment_succeeded", "invoice.paid"):
@@ -733,13 +835,18 @@ def handle_stripe_webhook(payload_bytes: bytes, sig_header: str) -> Dict[str, An
                     user_id = int(sub["metadata"]["user_id"])
                 else:
                     # Busca pelo customer_id no banco
-                    sub_record = None
                     with connect() as c:
-                        try:
-                            r = c.execute("SELECT user_id FROM subscriptions WHERE stripe_customer_id = ?", (customer_id,)).fetchone()
-                            if r: user_id = r["user_id"]
-                        except Exception:
-                            pass
+                        r = c.execute(
+                            "SELECT user_id FROM subscriptions WHERE stripe_customer_id = ?",
+                            (customer_id,),
+                        ).fetchone()
+                        if not r and subscription_id:
+                            r = c.execute(
+                                "SELECT user_id FROM subscriptions WHERE stripe_subscription_id = ?",
+                                (subscription_id,),
+                            ).fetchone()
+                    if r:
+                        user_id = r["user_id"]
 
                 if user_id:
                     period_end_dt = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc).isoformat()
@@ -760,8 +867,15 @@ def handle_stripe_webhook(payload_bytes: bytes, sig_header: str) -> Dict[str, An
                         payment_data["last_successful_payment_at"] = payment_timestamp
                     _save_stored_subscription(user_id, payment_data)
                     logger.info(f"[Stripe Webhook] Pagamento confirmado com sucesso para utilizador {user_id}.")
+                else:
+                    raise RuntimeError(
+                        "Não foi possível associar a fatura paga a uma conta Drexier."
+                    )
             except Exception as ex:
-                logger.error(f"Erro ao processar invoice.payment_succeeded: {ex}")
+                logger.exception("Falha ao processar fatura paga.")
+                raise RuntimeError(
+                    "Não foi possível persistir o pagamento confirmado."
+                ) from ex
 
     # 3. Evento: Pagamento recusado no cartão do cliente
     elif event_type == "invoice.payment_failed":
@@ -770,14 +884,22 @@ def handle_stripe_webhook(payload_bytes: bytes, sig_header: str) -> Dict[str, An
         subscription_id = invoice.get("subscription")
 
         logger.warning(f"[Stripe Webhook] Cobrança recusada no cartão para customer {customer_id}.")
-        with connect() as c:
-            try:
+        try:
+            with connect() as c:
                 r = c.execute("SELECT user_id FROM subscriptions WHERE stripe_customer_id = ?", (customer_id,)).fetchone()
-                if r:
-                    uid = r["user_id"]
-                    _save_stored_subscription(uid, {"status": "past_due"})
-            except Exception:
-                pass
+                if not r and subscription_id:
+                    r = c.execute(
+                        "SELECT user_id FROM subscriptions WHERE stripe_subscription_id = ?",
+                        (subscription_id,),
+                    ).fetchone()
+            if not r:
+                raise RuntimeError(
+                    "Não foi possível associar a cobrança recusada a uma conta Drexier."
+                )
+            _save_stored_subscription(r["user_id"], {"status": "past_due"})
+        except Exception as ex:
+            logger.exception("Falha ao persistir cobrança recusada.")
+            raise RuntimeError("Não foi possível atualizar o estado do pagamento.") from ex
 
     # 4. Evento: Atualização de assinatura (troca de cartão, cancelamento agendado)
     elif event_type == "customer.subscription.updated":
@@ -786,33 +908,56 @@ def handle_stripe_webhook(payload_bytes: bytes, sig_header: str) -> Dict[str, An
         customer_id = sub.get("customer")
         status = sub.get("status")
 
-        with connect() as c:
-            try:
+        try:
+            with connect() as c:
                 r = c.execute("SELECT user_id FROM subscriptions WHERE stripe_customer_id = ?", (customer_id,)).fetchone()
-                if r:
-                    uid = r["user_id"]
-                    period_end_dt = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc).isoformat()
-                    _save_stored_subscription(uid, {
-                        "status": status,
-                        "current_period_end": period_end_dt,
-                        "cancel_at_period_end": sub.get("cancel_at_period_end", False)
-                    })
-                    logger.info(f"[Stripe Webhook] Assinatura do utilizador {uid} atualizada para {status}.")
-            except Exception:
-                pass
+                if not r:
+                    r = c.execute(
+                        "SELECT user_id FROM subscriptions WHERE stripe_subscription_id = ?",
+                        (subscription_id,),
+                    ).fetchone()
+            if not r:
+                raise RuntimeError(
+                    "Não foi possível associar a assinatura atualizada a uma conta Drexier."
+                )
+            period_end_dt = datetime.fromtimestamp(sub["current_period_end"], tz=timezone.utc).isoformat()
+            _save_stored_subscription(r["user_id"], {
+                "stripe_customer_id": str(customer_id or ""),
+                "stripe_subscription_id": str(subscription_id or ""),
+                "status": status,
+                "current_period_end": period_end_dt,
+                "cancel_at_period_end": sub.get("cancel_at_period_end", False)
+            })
+            logger.info(f"[Stripe Webhook] Assinatura do utilizador {r['user_id']} atualizada para {status}.")
+        except Exception as ex:
+            logger.exception("Falha ao persistir atualização de assinatura.")
+            raise RuntimeError("Não foi possível atualizar o estado da assinatura.") from ex
 
     # 5. Evento: Assinatura cancelada definitivamente
     elif event_type == "customer.subscription.deleted":
         sub = event_data
         customer_id = sub.get("customer")
-        with connect() as c:
-            try:
+        subscription_id = sub.get("id")
+        try:
+            with connect() as c:
                 r = c.execute("SELECT user_id FROM subscriptions WHERE stripe_customer_id = ?", (customer_id,)).fetchone()
-                if r:
-                    uid = r["user_id"]
-                    _save_stored_subscription(uid, {"status": "canceled"})
-                    logger.info(f"[Stripe Webhook] Assinatura do utilizador {uid} cancelada.")
-            except Exception:
-                pass
+                if not r:
+                    r = c.execute(
+                        "SELECT user_id FROM subscriptions WHERE stripe_subscription_id = ?",
+                        (subscription_id,),
+                    ).fetchone()
+            if not r:
+                raise RuntimeError(
+                    "Não foi possível associar a assinatura cancelada a uma conta Drexier."
+                )
+            _save_stored_subscription(r["user_id"], {
+                "stripe_customer_id": str(customer_id or ""),
+                "stripe_subscription_id": str(subscription_id or ""),
+                "status": "canceled",
+            })
+            logger.info(f"[Stripe Webhook] Assinatura do utilizador {r['user_id']} cancelada.")
+        except Exception as ex:
+            logger.exception("Falha ao persistir cancelamento de assinatura.")
+            raise RuntimeError("Não foi possível atualizar o estado da assinatura.") from ex
 
     return {"received": True, "event_type": event_type}

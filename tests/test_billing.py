@@ -18,6 +18,7 @@ from backend.services.billing_service import (
     get_last_successful_payment_at,
     is_subscription_active,
     _save_stored_subscription,
+    verify_checkout_session,
     handle_stripe_webhook,
     PLAN_NAME,
     PLAN_AMOUNT_CENTS,
@@ -29,6 +30,8 @@ from tests.auth_helpers import signup_and_verify
 def setup_test_db(tmp_path, monkeypatch):
     test_db = tmp_path / "test_billing.db"
     monkeypatch.setattr("backend.database.DB_PATH", str(test_db))
+    monkeypatch.setattr("stripe.Customer.list", lambda **kwargs: MagicMock(data=[]))
+    monkeypatch.setattr("stripe.Subscription.list", lambda **kwargs: MagicMock(data=[]))
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_mock_1234567890abcdef")
     monkeypatch.setenv("STRIPE_PUBLISHABLE_KEY", "pk_test_mock_1234567890abcdef")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_secret_abc123")
@@ -74,6 +77,20 @@ def test_billing_status_unsubscribed(auth_client):
     assert data["status"] in ("none", "inactive")
     assert data["plan_name"] == "Plano Business"
     assert data["amount_display"] == "59,00 €"
+
+
+def test_forced_billing_status_surfaces_stripe_failures(auth_client):
+    client, token, _ = auth_client
+    with patch(
+        "backend.routers.billing.get_user_subscription_status",
+        side_effect=RuntimeError("Não foi possível consultar a Stripe."),
+    ):
+        response = client.get(
+            "/api/billing/status?force=true",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Não foi possível consultar a Stripe."
 
 
 def test_start_checkout_session(auth_client):
@@ -201,6 +218,39 @@ def test_webhook_checkout_session_completed(auth_client):
         assert is_subscription_active(user_id) is True
 
 
+def test_webhook_does_not_acknowledge_subscription_persistence_failure(auth_client):
+    client, token, user_id = auth_client
+    event = {
+        "id": "evt_checkout_persist_failure",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "client_reference_id": str(user_id),
+                "customer": "cus_checkout_failure",
+                "subscription": "sub_checkout_failure",
+            }
+        },
+    }
+    subscription = MagicMock()
+    subscription.status = "active"
+    subscription.current_period_end = int(time.time()) + 30 * 86400
+    subscription.cancel_at_period_end = False
+
+    with patch("stripe.Webhook.construct_event", return_value=event), \
+         patch("stripe.Subscription.retrieve", return_value=subscription), \
+         patch(
+             "backend.services.billing_service._save_stored_subscription",
+             side_effect=RuntimeError("database unavailable"),
+         ):
+        response = client.post(
+            "/api/billing/webhook",
+            content=b"dummy_payload",
+            headers={"Stripe-Signature": "valid_mock_sig"},
+        )
+
+    assert response.status_code == 500
+
+
 def test_webhook_invoice_payment_failed(auth_client):
     client, token, user_id = auth_client
 
@@ -282,6 +332,161 @@ def test_subscription_updates_preserve_last_successful_payment(auth_client):
     _save_stored_subscription(user_id, {"status": "past_due"})
 
     assert get_last_successful_payment_at(user_id) == paid_at
+
+
+def test_partial_subscription_updates_preserve_stripe_identifiers(auth_client):
+    _, _, user_id = auth_client
+    _save_stored_subscription(user_id, {
+        "stripe_customer_id": "cus_preserved",
+        "stripe_subscription_id": "sub_preserved",
+        "stripe_price_id": "price_preserved",
+        "status": "active",
+        "current_period_end": "2027-01-15T00:00:00+00:00",
+    })
+
+    _save_stored_subscription(user_id, {"status": "past_due"})
+
+    with connect() as c:
+        row = c.execute(
+            """SELECT stripe_customer_id, stripe_subscription_id, stripe_price_id,
+                      status, current_period_end
+               FROM subscriptions WHERE user_id = ?""",
+            (user_id,),
+        ).fetchone()
+    assert row["stripe_customer_id"] == "cus_preserved"
+    assert row["stripe_subscription_id"] == "sub_preserved"
+    assert row["stripe_price_id"] == "price_preserved"
+    assert row["status"] == "past_due"
+    assert row["current_period_end"] == "2027-01-15T00:00:00+00:00"
+
+
+def test_forced_reconciliation_corrects_stale_active_status(auth_client):
+    _, _, user_id = auth_client
+    _save_stored_subscription(user_id, {
+        "stripe_customer_id": "cus_stale_status",
+        "stripe_subscription_id": "sub_stale_status",
+        "status": "active",
+        "current_period_end": datetime.fromtimestamp(
+            time.time() + 30 * 86400,
+            tz=timezone.utc,
+        ).isoformat(),
+    })
+    canceled_subscription = MagicMock()
+    canceled_subscription.id = "sub_stale_status"
+    canceled_subscription.status = "canceled"
+    canceled_subscription.current_period_end = int(time.time()) + 30 * 86400
+    canceled_subscription.cancel_at_period_end = False
+    canceled_subscription.items = MagicMock(data=[])
+
+    with patch(
+        "stripe.Subscription.list",
+        return_value=MagicMock(data=[canceled_subscription]),
+    ) as list_subscriptions:
+        status = get_user_subscription_status(user_id, force_refresh=True)
+
+    list_subscriptions.assert_called_once_with(
+        customer="cus_stale_status",
+        status="all",
+        limit=5,
+    )
+    assert status["status"] == "canceled"
+    assert status["has_active_subscription"] is False
+    with connect() as c:
+        row = c.execute(
+            "SELECT status FROM subscriptions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    assert row["status"] == "canceled"
+
+
+def test_verify_checkout_session_persists_only_stripe_confirmed_active_subscription(auth_client):
+    _, _, user_id = auth_client
+    period_end = int(time.time()) + 30 * 86400
+    session = {
+        "client_reference_id": str(user_id),
+        "metadata": {"user_id": str(user_id)},
+        "customer": "cus_checkout_confirmed",
+        "subscription": {
+            "id": "sub_checkout_confirmed",
+            "status": "active",
+            "current_period_end": period_end,
+            "cancel_at_period_end": False,
+            "items": {"data": [{"price": {"id": "price_checkout"}}]},
+        },
+        "payment_status": "paid",
+        "status": "complete",
+    }
+
+    with patch(
+        "stripe.checkout.Session.retrieve",
+        return_value=session,
+    ) as retrieve, patch(
+        "backend.services.billing_service._get_latest_successful_payment_at",
+        return_value="2026-11-06T14:00:00+00:00",
+    ):
+        result = verify_checkout_session("cs_confirmed", user_id)
+
+    retrieve.assert_called_once_with(
+        "cs_confirmed",
+        expand=["subscription", "customer"],
+    )
+    assert result["has_active_subscription"] is True
+    assert result["status"] == "active"
+    assert result["stripe_customer_id"] == "cus_checkout_confirmed"
+    with connect() as c:
+        row = c.execute(
+            """SELECT stripe_subscription_id, stripe_price_id,
+                      last_successful_payment_at
+               FROM subscriptions WHERE user_id = ?""",
+            (user_id,),
+        ).fetchone()
+    assert row["stripe_subscription_id"] == "sub_checkout_confirmed"
+    assert row["stripe_price_id"] == "price_checkout"
+    assert row["last_successful_payment_at"] == "2026-11-06T14:00:00+00:00"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": "complete", "payment_status": "unpaid"},
+        {"status": "open", "payment_status": "paid"},
+    ],
+)
+def test_verify_checkout_session_rejects_unconfirmed_payment(auth_client, overrides):
+    _, _, user_id = auth_client
+    session = {
+        "client_reference_id": str(user_id),
+        "metadata": {"user_id": str(user_id)},
+        "customer": "cus_not_confirmed",
+        "subscription": {"id": "sub_not_confirmed", "status": "active"},
+        "payment_status": "paid",
+        "status": "complete",
+        **overrides,
+    }
+
+    with patch("stripe.checkout.Session.retrieve", return_value=session):
+        with pytest.raises(ValueError, match="ainda não confirmou"):
+            verify_checkout_session("cs_not_confirmed", user_id)
+
+    with connect() as c:
+        assert c.execute(
+            "SELECT id FROM subscriptions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone() is None
+
+
+def test_verify_checkout_session_rejects_another_users_session(auth_client):
+    _, _, user_id = auth_client
+    session = {
+        "client_reference_id": str(user_id + 1),
+        "metadata": {"user_id": str(user_id + 1)},
+        "status": "complete",
+        "payment_status": "paid",
+        "subscription": "sub_other_user",
+    }
+    with patch("stripe.checkout.Session.retrieve", return_value=session):
+        with pytest.raises(PermissionError, match="não pertence"):
+            verify_checkout_session("cs_other_user", user_id)
 
 
 def test_webhook_customer_subscription_deleted(auth_client):
