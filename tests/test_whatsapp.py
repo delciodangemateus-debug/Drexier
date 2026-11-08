@@ -21,6 +21,7 @@ def setup_test_db(tmp_path, monkeypatch):
     monkeypatch.setenv("WHATSAPP_VERIFY_TOKEN", "test_verify_token_123")
     monkeypatch.setenv("META_APP_SECRET", "test_app_secret_abc")
     monkeypatch.setenv("META_APP_ID", "1234567890")
+    monkeypatch.setenv("META_CONFIG_ID", "meta_config_test")
     init_db()
     yield
 
@@ -54,6 +55,8 @@ def test_whatsapp_public_config(auth_client):
     data = res.json()
     assert data["app_id"] == "1234567890"
     assert data["configured"] is True
+    assert data["config_id"] == "meta_config_test"
+    assert "verify_token" not in data
 
 
 def test_whatsapp_status_when_disconnected(auth_client):
@@ -96,7 +99,7 @@ def test_whatsapp_connect_and_status(auth_client):
 
 
 def test_whatsapp_disconnect(auth_client):
-    client, token, _ = auth_client
+    client, token, user_id = auth_client
 
     # Conecta
     with patch("backend.routers.whatsapp.subscribe_waba_webhook", new_callable=AsyncMock) as mock_sub:
@@ -107,6 +110,9 @@ def test_whatsapp_disconnect(auth_client):
             json={
                 "phone_number_id": "phone_id_disconnect_test",
                 "waba_id": "waba_id_disc",
+                "phone_number": "+351912000111",
+                "business_name": "Loja de Teste",
+                "access_token": "test-token",
             },
         )
 
@@ -118,6 +124,37 @@ def test_whatsapp_disconnect(auth_client):
     # Status deve estar desconectado
     status_res = client.get("/api/whatsapp/status", headers={"Authorization": f"Bearer {token}"})
     assert status_res.json()["connected"] is False
+    with connect() as c:
+        integration = c.execute(
+            "SELECT status, access_token FROM whatsapp_integrations WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    assert integration["status"] == "disconnected"
+    assert integration["access_token"] == ""
+
+
+def test_whatsapp_connect_requires_successful_meta_webhook_subscription(auth_client):
+    client, token, user_id = auth_client
+    with patch("backend.routers.whatsapp.subscribe_waba_webhook", new_callable=AsyncMock) as mock_sub:
+        mock_sub.return_value = False
+        response = client.post(
+            "/api/whatsapp/connect",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "phone_number_id": "phone_subscription_failed",
+                "waba_id": "waba_subscription_failed",
+                "phone_number": "+351912000222",
+                "business_name": "Loja de Teste",
+                "access_token": "test-token",
+            },
+        )
+
+    assert response.status_code == 502
+    with connect() as c:
+        assert c.execute(
+            "SELECT id FROM whatsapp_integrations WHERE user_id = ?",
+            (user_id,),
+        ).fetchone() is None
 
 
 def test_meta_webhook_verification(auth_client):
@@ -214,6 +251,8 @@ async def test_meta_webhook_incoming_message_triggers_ai_and_reply(auth_client):
         res = client.post("/api/webhooks/whatsapp", content=body_bytes, headers=headers)
         assert res.status_code == 200
         assert res.json() == {"status": "ok"}
+        duplicate_res = client.post("/api/webhooks/whatsapp", content=body_bytes, headers=headers)
+        assert duplicate_res.status_code == 200
 
         # Confirma que a mensagem de resposta foi enviada via WhatsApp Cloud API
         assert mock_send.call_count == 1
@@ -357,12 +396,120 @@ def test_verify_webhook_signature():
     assert verify_webhook_signature(body, bad_sig) is False
 
 
+def test_verify_webhook_signature_fails_closed_without_app_secret(monkeypatch):
+    monkeypatch.delenv("META_APP_SECRET", raising=False)
+    body = b'{"hello": "world"}'
+    assert verify_webhook_signature(body, "sha256=anything") is False
+
+
+@pytest.mark.anyio
+async def test_meta_webhook_does_not_route_unknown_phone_to_another_account(auth_client):
+    client, _, user_id = auth_client
+    with connect() as c:
+        c.execute(
+            """INSERT INTO whatsapp_integrations
+               (user_id, waba_id, phone_number_id, access_token, status)
+               VALUES (?, 'waba_registered', 'phone_registered', 'test-token', 'connected')""",
+            (user_id,),
+        )
+
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [{
+            "id": "waba_registered",
+            "changes": [{
+                "value": {
+                    "metadata": {"phone_number_id": "phone_not_registered"},
+                    "messages": [{
+                        "from": "351988888888",
+                        "id": "wamid.unknown-phone",
+                        "type": "text",
+                        "text": {"body": "Esta mensagem não pode ser encaminhada."},
+                    }],
+                },
+                "field": "messages",
+            }],
+        }],
+    }
+    body = json.dumps(payload).encode("utf-8")
+    signature = hmac.new(b"test_app_secret_abc", body, hashlib.sha256).hexdigest()
+
+    with patch("backend.routers.whatsapp.send_whatsapp_message", new_callable=AsyncMock) as mock_send:
+        response = client.post(
+            "/api/webhooks/whatsapp",
+            content=body,
+            headers={"X-Hub-Signature-256": f"sha256={signature}"},
+        )
+
+    assert response.status_code == 200
+    mock_send.assert_not_awaited()
+    with connect() as c:
+        assert c.execute(
+            "SELECT COUNT(*) FROM contacts WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.anyio
+async def test_whatsapp_automation_setting_can_pause_ai_replies(auth_client):
+    client, _, user_id = auth_client
+    with connect() as c:
+        c.execute(
+            """INSERT INTO whatsapp_integrations
+               (user_id, waba_id, phone_number_id, access_token, status)
+               VALUES (?, 'waba_paused', 'phone_paused', 'test-token', 'connected')""",
+            (user_id,),
+        )
+        c.execute(
+            "UPDATE users SET mandatory_responses = ? WHERE id = ?",
+            (json.dumps({"automation_level": "disabled"}), user_id),
+        )
+
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [{
+            "id": "waba_paused",
+            "changes": [{
+                "value": {
+                    "metadata": {"phone_number_id": "phone_paused"},
+                    "contacts": [{"wa_id": "351911111111", "profile": {"name": "Cliente"}}],
+                    "messages": [{
+                        "from": "351911111111",
+                        "id": "wamid.paused-reply",
+                        "type": "text",
+                        "text": {"body": "Olá"},
+                    }],
+                },
+                "field": "messages",
+            }],
+        }],
+    }
+    body = json.dumps(payload).encode("utf-8")
+    signature = hmac.new(b"test_app_secret_abc", body, hashlib.sha256).hexdigest()
+
+    with patch("backend.routers.whatsapp.draft_reply", new_callable=AsyncMock) as mock_draft, \
+         patch("backend.routers.whatsapp.send_whatsapp_message", new_callable=AsyncMock) as mock_send:
+        response = client.post(
+            "/api/webhooks/whatsapp",
+            content=body,
+            headers={"X-Hub-Signature-256": f"sha256={signature}"},
+        )
+
+    assert response.status_code == 200
+    mock_draft.assert_not_awaited()
+    mock_send.assert_not_awaited()
+    with connect() as c:
+        assert c.execute("SELECT COUNT(*) FROM messages WHERE user_id = ?", (user_id,)).fetchone()[0] == 1
+
+
 def test_whatsapp_connect_use_env(auth_client, monkeypatch):
     client, token, user_id = auth_client
     monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "phone_env_123")
     monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "token_env_abc")
+    monkeypatch.setenv("META_WABA_ID", "waba_env_123")
 
-    with patch("backend.routers.whatsapp.subscribe_waba_webhook", new_callable=AsyncMock) as mock_sub:
+    with patch("backend.routers.whatsapp.subscribe_waba_webhook", new_callable=AsyncMock) as mock_sub, \
+         patch("backend.routers.whatsapp.fetch_phone_number_details", new_callable=AsyncMock, return_value={}):
         mock_sub.return_value = True
 
         res = client.post(

@@ -107,8 +107,40 @@ O Drexier atende clientes, tira dúvidas e conduz conversas por e-mail utilizand
    - **Controlo de Respostas Automáticas**: O utilizador pode a qualquer momento pausar ou reativar as respostas automáticas da IA tanto na aba **Mensagens** (botão direto `Respostas IA: Ativas / Pausadas`) quanto em **Configurações > Integração**. Quando pausado, as mensagens continuam a ser recebidas e organizadas no painel, mas a IA não envia e-mails automaticamente.
    - **Gestão e Eliminação de Mensagens**: Na aba **Mensagens**, é possível eliminar mensagens individuais (botão `🗑️` em cada balão de mensagem) ou eliminar conversas inteiras com um clique (`Eliminar Conversa`).
 
-## Integração WhatsApp (Removida da Interface do Cliente)
-- A opção de integração com WhatsApp foi **completamente eliminada da interface do cliente**. O atendimento oficial e ativo da plataforma é focado exclusivamente em e-mail (Gmail & Outlook). O backend mantém suporte legado e webhooks de contingência.
+## Integração Oficial WhatsApp Business (Meta Cloud API)
+
+O WhatsApp é ligado pelo Embedded Signup oficial da Meta, envia mensagens pela
+Cloud API e recebe mensagens no webhook autenticado pela assinatura
+`X-Hub-Signature-256`. Para ativar:
+
+1. Configure um app Meta com o produto WhatsApp, Embedded Signup e as permissões
+   aprovadas pela Meta (`whatsapp_business_management` e
+   `whatsapp_business_messaging`). O app precisa estar habilitado como Tech
+   Provider ou Solution Partner segundo os requisitos da Meta e deve usar a
+   configuração Embedded Signup v4.
+2. No `.env` do backend, defina `META_APP_ID`, `META_APP_SECRET`,
+   `META_CONFIG_ID`, `WHATSAPP_VERIFY_TOKEN` e `PUBLIC_URL`. `PUBLIC_URL` deve
+   ser HTTPS e apontar para o backend; em desenvolvimento, utilize um túnel
+   HTTPS público. Nunca coloque o App Secret ou tokens no frontend.
+3. Configure em Meta > WhatsApp > Webhooks a URL
+   `PUBLIC_URL/api/webhooks/whatsapp`, usando o mesmo
+   `WHATSAPP_VERIFY_TOKEN`, e subscreva o campo `messages`.
+4. Execute o `schema.sql` no Supabase se ainda não o fez, inicie o backend e
+   aceda a **Configurações > Integração > WhatsApp Oficial da Meta**.
+5. Selecione **Conectar WhatsApp pela Meta** e conclua o fluxo oficial. A
+   conexão só é guardada quando a Meta confirma a subscrição do webhook.
+
+Para instalações que utilizam credenciais próprias no servidor, configure
+também `META_WABA_ID`, `WHATSAPP_PHONE_NUMBER_ID` e
+`META_SYSTEM_USER_TOKEN` (ou `WHATSAPP_ACCESS_TOKEN`). O token nunca é
+devolvido ao navegador. O painel permite enviar uma mensagem de teste e
+desconectar o número. O webhook rejeita assinaturas inválidas, associa eventos
+apenas ao `phone_number_id` registado e deduplica as mensagens entregues mais
+de uma vez pela Meta.
+
+As respostas automáticas usam as instruções, o idioma e o conhecimento de
+negócio do agente. A opção **Respostas IA: Pausadas** impede respostas
+automáticas WhatsApp, e uma subscrição inativa também suspende o envio.
 
 ## Notas importantes
 - A base de dados isola as ligações de e-mail, contactos, mensagens e informações de negócio por utilizador (`user_id`).

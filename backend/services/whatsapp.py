@@ -12,7 +12,7 @@ load_dotenv()
 logger = logging.getLogger("drexier.whatsapp")
 
 GRAPH_API_BASE = "https://graph.facebook.com"
-DEFAULT_GRAPH_VERSION = "v21.0"
+DEFAULT_GRAPH_VERSION = "v27.0"
 
 
 def get_meta_config() -> Dict[str, Any]:
@@ -21,11 +21,15 @@ def get_meta_config() -> Dict[str, Any]:
     app_id = os.getenv("META_APP_ID", "").strip()
     app_secret = os.getenv("META_APP_SECRET", "").strip()
     config_id = os.getenv("META_CONFIG_ID", "").strip()
+    waba_id = (
+        os.getenv("META_WABA_ID", "").strip()
+        or os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID", "").strip()
+    )
     system_user_token = (
         os.getenv("META_SYSTEM_USER_TOKEN", "").strip()
         or os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
     )
-    verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN", "").strip() or "drexier_webhook_secret_token"
+    verify_token = os.getenv("WHATSAPP_VERIFY_TOKEN", "").strip()
     version = os.getenv("WHATSAPP_GRAPH_VERSION", "").strip() or DEFAULT_GRAPH_VERSION
     phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     # URL público HTTPS para redirect OAuth (obrigatório para Meta - usar ngrok/localtunnel em dev)
@@ -35,28 +39,25 @@ def get_meta_config() -> Dict[str, Any]:
         "app_id": app_id,
         "app_secret": app_secret,
         "config_id": config_id,
+        "waba_id": waba_id,
         "system_user_token": system_user_token,
         "verify_token": verify_token,
         "version": version,
         "phone_number_id": phone_number_id,
         "public_url": public_url,
         "is_configured": bool(app_id and app_secret),
-        "has_env_credentials": bool(phone_number_id and system_user_token),
+        "has_env_credentials": bool(waba_id and phone_number_id and system_user_token),
     }
 
 
 def verify_webhook_signature(payload_bytes: bytes, signature_header: Optional[str]) -> bool:
     """
     Valida a assinatura HMAC-SHA256 enviada pela Meta no cabeçalho X-Hub-Signature-256.
-    Se META_APP_SECRET não estiver definido (modo de testes/desenvolvimento), permite a passagem.
+    A ausência do segredo da aplicação não permite validar webhooks com segurança.
     """
     config = get_meta_config()
     secret = config["app_secret"]
-    if not secret:
-        # Se o segredo não estiver configurado ainda, não bloqueia em ambiente de dev
-        return True
-
-    if not signature_header or not signature_header.startswith("sha256="):
+    if not secret or not signature_header or not signature_header.startswith("sha256="):
         logger.warning("Cabeçalho X-Hub-Signature-256 em falta ou com formato inválido.")
         return False
 
@@ -130,6 +131,8 @@ async def subscribe_waba_webhook(waba_id: str, access_token: str) -> bool:
     url = f"{GRAPH_API_BASE}/{version}/{waba_id}/subscribed_apps"
 
     token_to_use = access_token or config["system_user_token"]
+    if not token_to_use:
+        return False
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:

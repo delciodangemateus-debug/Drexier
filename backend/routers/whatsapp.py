@@ -1,5 +1,6 @@
 import json
 import logging
+import html
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -13,6 +14,7 @@ from backend.services.email_service import (
     detect_booking_or_purchase_intent,
     ensure_date_time_question,
 )
+from backend.services.billing_service import is_subscription_active
 from backend.services.whatsapp import (
     debug_token,
     exchange_code_for_token,
@@ -48,6 +50,17 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
     return dict(row)
 
 
+def require_whatsapp_subscription(user: dict) -> None:
+    if not is_subscription_active(user["id"]):
+        raise HTTPException(
+            402,
+            detail={
+                "code": "SUBSCRIPTION_REQUIRED",
+                "message": "Ative uma subscrição para utilizar a integração WhatsApp.",
+            },
+        )
+
+
 class WhatsAppConnectPayload(BaseModel):
     code: Optional[str] = None
     redirect_uri: Optional[str] = None
@@ -72,10 +85,9 @@ def get_whatsapp_public_config():
         "app_id": config["app_id"],
         "config_id": config["config_id"],
         "version": config["version"],
-        "configured": bool(config["app_id"] and config["app_secret"]),
+        "configured": bool(config["app_id"] and config["app_secret"] and config["config_id"]),
         "has_env_credentials": bool(config.get("has_env_credentials")),
-        "verify_token": config.get("verify_token", ""),
-        "public_url": config.get("public_url", ""),
+        "webhook_url": f"{config['public_url']}/api/webhooks/whatsapp" if config.get("public_url") else "",
     }
 
 
@@ -97,7 +109,6 @@ def get_whatsapp_status(user: dict = Depends(get_current_user)):
             "connected": False,
             "integration": None,
             "can_connect_env": bool(config.get("has_env_credentials")),
-            "env_phone_id": config.get("phone_number_id", ""),
         }
 
     return {
@@ -112,6 +123,7 @@ def get_whatsapp_status(user: dict = Depends(get_current_user)):
             "webhook_subscribed": bool(row["webhook_subscribed"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "auto_reply_enabled": _user_auto_reply_enabled(user),
         },
         "can_connect_env": bool(config.get("has_env_credentials")),
     }
@@ -130,26 +142,28 @@ def whatsapp_oauth_callback(
     """
     if error:
         err_msg = error_description or error
+        safe_error_json = json.dumps(err_msg).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
         html = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:40px;">
             <h3 style="color:#dc2626;">Erro na autorização da Meta</h3>
-            <p>{err_msg}</p>
+            <p>{html_escape(err_msg)}</p>
             <script>
                 if (window.opener) {{
-                    window.opener.postMessage({{ type: 'WA_OAUTH_ERROR', error: {json.dumps(err_msg)} }}, '*');
+                    window.opener.postMessage({{ type: 'WA_OAUTH_ERROR', error: {safe_error_json} }}, window.location.origin);
                     window.close();
                 }} else {{
-                    localStorage.setItem('drexier_wa_oauth_error', {json.dumps(err_msg)});
+                    localStorage.setItem('drexier_wa_oauth_error', {safe_error_json});
                     window.location.href = '/';
                 }}
             </script></body></html>"""
         return HTMLResponse(content=html, status_code=200)
 
+    safe_code_json = json.dumps(code or "").replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     html = f"""<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:40px;">
         <h3 style="color:#059669;">✅ Ligação com a Meta autorizada!</h3>
         <p>A concluir a ligação com o Drexier...</p>
         <p style="color:#64748b;font-size:13px;">Esta janela fechará automaticamente ou será redirecionado.</p>
         <script>
-            var code = {json.dumps(code or '')};
+            var code = {safe_code_json};
             if (window.opener) {{
                 // Modo popup: envia código para a janela principal e fecha
                 window.opener.postMessage({{ type: 'WA_OAUTH_CODE', code: code }}, '*');
@@ -175,6 +189,7 @@ async def connect_whatsapp(
     Conclui o Embedded Signup da Meta ou a ligação com credenciais.
     Troca o código pelo token, subscreve os webhooks e armazena os identificadores no banco.
     """
+    require_whatsapp_subscription(user)
     config = get_meta_config()
     token = (payload.access_token or "").strip()
     waba_id = (payload.waba_id or "").strip()
@@ -188,6 +203,8 @@ async def connect_whatsapp(
             token = token or config["system_user_token"]
         if config.get("phone_number_id"):
             phone_number_id = phone_number_id or config["phone_number_id"]
+        if config.get("waba_id"):
+            waba_id = waba_id or config["waba_id"]
 
     # Se ainda não temos token mas temos system_user_token global
     if not token and config.get("system_user_token"):
@@ -196,6 +213,8 @@ async def connect_whatsapp(
     # Se ainda não temos phone_number_id mas temos no config global
     if not phone_number_id and config.get("phone_number_id"):
         phone_number_id = config["phone_number_id"]
+    if not waba_id and config.get("waba_id"):
+        waba_id = config["waba_id"]
 
     # Se recebemos um código OAuth do Embedded Signup, efetuamos a troca na Graph API
     if payload.code:
@@ -242,16 +261,40 @@ async def connect_whatsapp(
         )
 
     if not waba_id:
-        waba_id = f"waba_{phone_number_id}"
+        raise HTTPException(
+            400,
+            "Não foi possível identificar o ID da conta WhatsApp Business (WABA). "
+            "Conclua o Embedded Signup da Meta ou configure META_WABA_ID.",
+        )
+
+    if not token:
+        raise HTTPException(400, "A Meta não forneceu um token de acesso para esta conta WhatsApp.")
+
+    with connect() as c:
+        existing = c.execute(
+            "SELECT user_id FROM whatsapp_integrations WHERE phone_number_id = ? AND user_id != ?",
+            (phone_number_id, user["id"]),
+        ).fetchone()
+    if existing:
+        raise HTTPException(
+            409,
+            "Este número de WhatsApp já se encontra ligado a outra conta no sistema.",
+        )
 
     # Subscrever a WABA aos webhooks da nossa aplicação
     subscribed = False
     if waba_id and token:
         subscribed = await subscribe_waba_webhook(waba_id, token)
+    if not subscribed:
+        raise HTTPException(
+            502,
+            "A Meta não confirmou a subscrição do webhook desta conta. "
+            "Verifique as permissões whatsapp_business_management e a configuração do app.",
+        )
 
     # Gravar na base de dados (upsert por user_id)
     with connect() as c:
-        # Verifica se este phone_number_id já está em uso por outro utilizador
+        # Revalida o número para cobrir conexões concorrentes.
         existing = c.execute(
             "SELECT user_id FROM whatsapp_integrations WHERE phone_number_id = ? AND user_id != ?",
             (phone_number_id, user["id"]),
@@ -306,9 +349,12 @@ async def connect_whatsapp(
 @router.post("/whatsapp/disconnect")
 def disconnect_whatsapp(user: dict = Depends(get_current_user)):
     """Desconecta a integração do WhatsApp do utilizador autenticado."""
+    require_whatsapp_subscription(user)
     with connect() as c:
         c.execute(
-            "UPDATE whatsapp_integrations SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+            """UPDATE whatsapp_integrations
+               SET status = 'disconnected', access_token = '', updated_at = CURRENT_TIMESTAMP
+               WHERE user_id = ?""",
             (user["id"],),
         )
     return {"ok": True, "message": "WhatsApp desconectado com sucesso."}
@@ -320,6 +366,7 @@ async def test_send_message(
     user: dict = Depends(get_current_user),
 ):
     """Envia uma mensagem de teste para verificar a ligação com a Meta Cloud API."""
+    require_whatsapp_subscription(user)
     with connect() as c:
         integration = c.execute(
             "SELECT * FROM whatsapp_integrations WHERE user_id = ? AND status = 'connected'",
@@ -360,14 +407,11 @@ def verify_meta_webhook(
     config = get_meta_config()
     expected_token = config["verify_token"]
 
-    if hub_mode == "subscribe" and hub_verify_token == expected_token:
+    if expected_token and hub_mode == "subscribe" and hub_verify_token == expected_token:
         logger.info("Webhook da Meta verificado com sucesso.")
         return PlainTextResponse(content=hub_challenge or "", status_code=200)
 
-    logger.warning(
-        f"Tentativa de verificação do Webhook da Meta falhou. "
-        f"Recebido: {hub_verify_token}, Esperado: {expected_token}"
-    )
+    logger.warning("A verificação do webhook falhou ou WHATSAPP_VERIFY_TOKEN não está configurado.")
     raise HTTPException(status_code=403, detail="Token de verificação inválido.")
 
 
@@ -381,7 +425,7 @@ async def receive_meta_webhook(request: Request):
     body_bytes = await request.body()
     signature_header = request.headers.get("X-Hub-Signature-256")
 
-    # 1. Validar assinatura de segurança se o segredo estiver configurado
+    # 1. Validar assinatura de segurança da aplicação Meta
     if not verify_webhook_signature(body_bytes, signature_header):
         logger.warning("Rejeitado webhook da Meta por assinatura inválida.")
         raise HTTPException(status_code=403, detail="Assinatura inválida.")
@@ -411,38 +455,12 @@ async def receive_meta_webhook(request: Request):
         )
 
         with connect() as c:
-            # Localiza a integração correspondente
+            # O identificador do número é a chave de roteamento da Meta; não
+            # encaminhar mensagens para outra conta quando não houver correspondência.
             integration = c.execute(
                 "SELECT * FROM whatsapp_integrations WHERE phone_number_id = ? AND status = 'connected'",
                 (phone_number_id,),
             ).fetchone()
-
-            if not integration:
-                # Tenta buscar por waba_id como contingência
-                integration = c.execute(
-                    "SELECT * FROM whatsapp_integrations WHERE waba_id = ? AND status = 'connected'",
-                    (msg["waba_id"],),
-                ).fetchone()
-
-            if not integration:
-                # Contingência 3: Se houver apenas 1 integração conectada no sistema
-                integration = c.execute(
-                    "SELECT * FROM whatsapp_integrations WHERE status = 'connected' ORDER BY id ASC LIMIT 1"
-                ).fetchone()
-
-            if not integration:
-                # Contingência 4: Associa ao utilizador primário do sistema para não perder mensagem
-                first_user = c.execute("SELECT * FROM users ORDER BY id ASC LIMIT 1").fetchone()
-                if first_user:
-                    cfg = get_meta_config()
-                    token_to_save = cfg.get("system_user_token", "")
-                    c.execute(
-                        """INSERT INTO whatsapp_integrations (user_id, waba_id, phone_number_id, phone_number, business_name, access_token, status, webhook_subscribed)
-                           VALUES (?, ?, ?, ?, ?, ?, 'connected', 1)
-                           ON CONFLICT(user_id) DO UPDATE SET phone_number_id=excluded.phone_number_id, status='connected'""",
-                        (first_user["id"], msg.get("waba_id") or f"waba_{phone_number_id}", phone_number_id, phone_number_id, first_user["name"], token_to_save)
-                    )
-                    integration = c.execute("SELECT * FROM whatsapp_integrations WHERE user_id = ?", (first_user["id"],)).fetchone()
 
             if not integration:
                 logger.warning(
@@ -452,6 +470,18 @@ async def receive_meta_webhook(request: Request):
                 continue
 
             user_id = integration["user_id"]
+            if message_id:
+                try:
+                    c.execute(
+                        "INSERT INTO processed_whatsapp_messages (user_id, message_id) VALUES (?, ?)",
+                        (user_id, message_id),
+                    )
+                except Exception as exc:
+                    if "UNIQUE constraint failed" in str(exc) or "duplicate key" in str(exc).lower():
+                        logger.info("Evento WhatsApp repetido ignorado: %s", message_id)
+                        continue
+                    raise
+
             user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
             if not user:
                 logger.warning(f"Utilizador {user_id} não encontrado na base de dados.")
@@ -537,6 +567,10 @@ async def receive_meta_webhook(request: Request):
             except Exception as e:
                 logger.debug(f"Falha ao marcar como lida: {e}")
 
+        if not is_subscription_active(user_id) or not _user_auto_reply_enabled(user_dict):
+            logger.info("Resposta automática WhatsApp pausada para user_id=%s.", user_id)
+            continue
+
         # Gerar resposta com a IA (Gemini ou fallback)
         try:
             reply = await draft_reply(
@@ -557,14 +591,6 @@ async def receive_meta_webhook(request: Request):
         if scheduled_request and scheduled_request["status"] == "awaiting_schedule":
             reply = ensure_date_time_question(reply)
 
-        # Salvar a resposta da IA no banco de dados
-        with connect() as c:
-            c.execute(
-                "INSERT INTO messages(user_id, contact_id, sender, content) VALUES(?, ?, 'agent', ?)",
-                (user_id, cid, reply),
-            )
-            c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
-
         # Enviar a resposta via WhatsApp Cloud API
         try:
             await send_whatsapp_message(
@@ -573,8 +599,28 @@ async def receive_meta_webhook(request: Request):
                 text=reply,
                 access_token=integration["access_token"] or None,
             )
+            with connect() as c:
+                c.execute(
+                    "INSERT INTO messages(user_id, contact_id, sender, content) VALUES(?, ?, 'agent', ?)",
+                    (user_id, cid, reply),
+                )
+                c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
             logger.info(f"Resposta enviada com sucesso para o WhatsApp {from_number}")
         except Exception as e:
             logger.error(f"Erro ao enviar resposta via WhatsApp Cloud API: {e}")
 
     return {"status": "ok"}
+
+
+def _user_auto_reply_enabled(user: dict) -> bool:
+    mandatory = user.get("mandatory_responses") or {}
+    if isinstance(mandatory, str):
+        try:
+            mandatory = json.loads(mandatory)
+        except (TypeError, json.JSONDecodeError):
+            mandatory = {}
+    return mandatory.get("automation_level", "semi") != "disabled"
+
+
+def html_escape(value: str) -> str:
+    return html.escape(value, quote=True)

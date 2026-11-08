@@ -2498,7 +2498,22 @@ textarea {
 
 /* 1. INTEGRAÇÃO GMAIL */
 .channel-selector-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 20px;
+}
+
+.channel-selector-bar > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.channel-selector-bar > button.is-channel-active {
+  background: var(--surface-elevated);
+  border-color: var(--border-active);
+  box-shadow: var(--shadow-sm);
 }
 
 .wa-alert-box {

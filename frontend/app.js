@@ -1184,7 +1184,7 @@ async function navigate(page) {
       loadInfo().catch((e) => showNotice(e.message, true));
     } else if (page === "settings") {
       fillSettings();
-      Promise.allSettled([loadMe(), loadEmailStatus(), loadBillingStatus()]).catch(() => {});
+      Promise.allSettled([loadMe(), loadEmailStatus(), loadWhatsAppStatus(), loadBillingStatus()]).catch(() => {});
     }
   } catch (e) {
     showNotice(e.message, true);
@@ -3965,6 +3965,7 @@ $$("[data-setting]").forEach(b => b.addEventListener("click", () => {
   $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== `setting-${b.dataset.setting}`));
   if (b.dataset.setting === "integration") {
     loadEmailStatus();
+    loadWhatsAppStatus();
   }
   if (b.dataset.setting === "billing") {
     loadBillingStatus();
@@ -4384,17 +4385,254 @@ $("#delete-account-form")?.addEventListener("submit", async e => {
 });
 
 /* ════════════════════════════════════════════════════════════
-   CANAL DE ATENDIMENTO OFICIAL ATIVO (E-MAIL GOOGLE GMAIL)
-   As integrações com WhatsApp, Microsoft Outlook e SMTP
-   foram desativadas no software (com tabelas preservadas no banco).
+   SELEÇÃO DOS CANAIS DE INTEGRAÇÃO
    ════════════════════════════════════════════════════════════ */
 function switchIntegrationChannel(channel) {
-  loadEmailStatus();
+  const isWhatsApp = channel === "whatsapp";
+  $("#channel-email-section")?.classList.toggle("hidden", isWhatsApp);
+  $("#channel-whatsapp-section")?.classList.toggle("hidden", !isWhatsApp);
+  $("#tab-channel-email")?.classList.toggle("is-channel-active", !isWhatsApp);
+  $("#tab-channel-whatsapp")?.classList.toggle("is-channel-active", isWhatsApp);
+  if (isWhatsApp) loadWhatsAppStatus();
+  else loadEmailStatus();
 }
 
 $("#tab-channel-email")?.addEventListener("click", () => switchIntegrationChannel("email"));
+$("#tab-channel-whatsapp")?.addEventListener("click", () => switchIntegrationChannel("whatsapp"));
 
-// Módulo WhatsApp desativado no software
+let whatsappConfig = null;
+let facebookSdkPromise = null;
+let facebookSdkConfigKey = "";
+let whatsappSignupSession = null;
+let resolveWhatsappSignupSession = null;
+let rejectWhatsappSignupSession = null;
+
+function initializeFacebookSdk(config) {
+  const configKey = `${config.app_id}:${config.version}`;
+  if (window.FB && facebookSdkConfigKey === configKey) {
+    return Promise.resolve(window.FB);
+  }
+  if (window.FB) {
+    window.FB.init({ appId: config.app_id, cookie: true, xfbml: false, version: config.version });
+    facebookSdkConfigKey = configKey;
+    return Promise.resolve(window.FB);
+  }
+  if (facebookSdkPromise) return facebookSdkPromise;
+
+  facebookSdkPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.async = true;
+    script.defer = true;
+    script.crossOrigin = "anonymous";
+    script.src = "https://connect.facebook.net/en_US/sdk.js";
+    script.onload = () => {
+      if (!window.FB) {
+        reject(new Error("O SDK oficial de login da Meta não ficou disponível."));
+        return;
+      }
+      window.FB.init({ appId: config.app_id, cookie: true, xfbml: false, version: config.version });
+      facebookSdkConfigKey = configKey;
+      resolve(window.FB);
+    };
+    script.onerror = () => reject(new Error("Não foi possível carregar o SDK oficial da Meta."));
+    document.head.appendChild(script);
+  }).catch(error => {
+    facebookSdkPromise = null;
+    throw error;
+  });
+  return facebookSdkPromise;
+}
+
+window.addEventListener("message", event => {
+  const isMetaOrigin = event.origin.startsWith("https://")
+    && /(^|\.)facebook\.com$/.test(new URL(event.origin).hostname);
+  if (!isMetaOrigin) return;
+  let payload = event.data;
+  if (typeof payload === "string") {
+    try { payload = JSON.parse(payload); } catch (_) { return; }
+  }
+  if (!payload || payload.type !== "WA_EMBEDDED_SIGNUP") return;
+  if (payload.event === "FINISH") {
+    whatsappSignupSession = payload.data || {};
+    resolveWhatsappSignupSession?.(whatsappSignupSession);
+  } else if (payload.event === "CANCEL" || payload.event === "ERROR") {
+    rejectWhatsappSignupSession?.(new Error("O fluxo de conexão do WhatsApp foi cancelado ou falhou na Meta."));
+  }
+});
+
+function waitForWhatsappSignupSession() {
+  if (whatsappSignupSession) return Promise.resolve(whatsappSignupSession);
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      resolveWhatsappSignupSession = null;
+      rejectWhatsappSignupSession = null;
+      reject(new Error("A Meta não enviou os dados da conta WhatsApp. Tente novamente."));
+    }, 90000);
+    resolveWhatsappSignupSession = session => {
+      clearTimeout(timeout);
+      resolveWhatsappSignupSession = null;
+      rejectWhatsappSignupSession = null;
+      resolve(session);
+    };
+    rejectWhatsappSignupSession = error => {
+      clearTimeout(timeout);
+      resolveWhatsappSignupSession = null;
+      rejectWhatsappSignupSession = null;
+      reject(error);
+    };
+  });
+}
+
+async function loadWhatsAppStatus() {
+  const loading = $("#whatsapp-loading-state");
+  const disconnectedView = $("#whatsapp-disconnected-view");
+  const connectedView = $("#whatsapp-connected-view");
+  const configWarning = $("#whatsapp-config-warning");
+  if (!loading || !disconnectedView || !connectedView) return;
+
+  loading.classList.remove("hidden");
+  disconnectedView.classList.add("hidden");
+  connectedView.classList.add("hidden");
+  try {
+    const [config, status] = await Promise.all([
+      api("/api/whatsapp/config"),
+      api("/api/whatsapp/status")
+    ]);
+    whatsappConfig = config;
+    $("#whatsapp-webhook-url").textContent = config.webhook_url
+      ? `Webhook: ${config.webhook_url}`
+      : "Defina PUBLIC_URL com o endereço HTTPS público do servidor.";
+    configWarning?.classList.toggle("hidden", Boolean(config.configured));
+    $("#btn-connect-whatsapp")?.toggleAttribute("disabled", !config.configured);
+    $("#btn-connect-whatsapp-env")?.classList.toggle("hidden", !status.can_connect_env);
+
+    const badge = $("#whatsapp-status-badge");
+    const pill = $("#pill-whatsapp-status");
+    if (status.connected && status.integration) {
+      const integration = status.integration;
+      badge.textContent = "Conectado";
+      badge.className = "badge badge-connected";
+      pill.textContent = "Conectado";
+      pill.className = "badge badge-connected";
+      $("#whatsapp-display-name").textContent = integration.business_name || "WhatsApp conectado";
+      $("#whatsapp-display-number").textContent = integration.phone_number || "";
+      $("#whatsapp-info-waba").textContent = integration.waba_id || "-";
+      $("#whatsapp-info-webhook").textContent = integration.webhook_subscribed ? "Ativo" : "Não subscrito";
+      $("#whatsapp-info-auto-reply").textContent = integration.auto_reply_enabled ? "Ativas" : "Pausadas";
+      $("#whatsapp-info-created").textContent = integration.created_at
+        ? new Date(integration.created_at).toLocaleString("pt-PT")
+        : "-";
+      connectedView.classList.remove("hidden");
+    } else {
+      badge.textContent = "Desconectado";
+      badge.className = "badge badge-disconnected";
+      pill.textContent = "Desconectado";
+      pill.className = "badge";
+      disconnectedView.classList.remove("hidden");
+    }
+
+    if (config.configured) {
+      try { await initializeFacebookSdk(config); }
+      catch (error) { console.warn("[Drexier] SDK Meta indisponível:", error); }
+    }
+  } catch (error) {
+    $("#whatsapp-status-badge").textContent = "Erro ao verificar";
+    disconnectedView.classList.remove("hidden");
+    showNotice(`Não foi possível carregar o estado do WhatsApp: ${error.message}`, true);
+  } finally {
+    loading.classList.add("hidden");
+  }
+}
+
+async function finishWhatsappConnection(payload) {
+  const result = await api("/api/whatsapp/connect", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  await loadWhatsAppStatus();
+  showNotice(result.message || "WhatsApp conectado com sucesso.");
+}
+
+$("#btn-connect-whatsapp")?.addEventListener("click", async () => {
+  if (!paywallCheck()) return;
+  const status = $("#whatsapp-connect-status");
+  const config = whatsappConfig;
+  if (!config?.configured) {
+    showNotice("A configuração do aplicativo da Meta está incompleta no servidor.", true);
+    return;
+  }
+
+  try {
+    const fb = await initializeFacebookSdk(config);
+    whatsappSignupSession = null;
+    status.textContent = "A abrir o fluxo seguro de autorização da Meta...";
+    const auth = await new Promise((resolve, reject) => {
+      fb.login(response => {
+        if (response?.authResponse?.code) resolve(response.authResponse.code);
+        else reject(new Error("A autorização foi cancelada ou a Meta não devolveu o código de acesso."));
+      }, {
+        config_id: config.config_id,
+        response_type: "code",
+        extras: {
+          setup: {}
+        },
+        override_default_response_type: true
+      });
+    });
+    status.textContent = "Autorização concluída; a validar o número e ativar o webhook...";
+    const session = await waitForWhatsappSignupSession();
+    await finishWhatsappConnection({
+      code: auth,
+      waba_id: session.waba_id || "",
+      phone_number_id: session.phone_number_id || "",
+      business_name: session.business_name || ""
+    });
+    status.textContent = "";
+  } catch (error) {
+    status.textContent = "";
+    showNotice(`Não foi possível conectar o WhatsApp: ${error.message}`, true);
+  }
+});
+
+$("#btn-connect-whatsapp-env")?.addEventListener("click", async () => {
+  if (!paywallCheck()) return;
+  try {
+    await finishWhatsappConnection({ use_env: true });
+  } catch (error) {
+    showNotice(`Não foi possível conectar o número configurado no servidor: ${error.message}`, true);
+  }
+});
+
+$("#btn-whatsapp-disconnect")?.addEventListener("click", async () => {
+  if (!confirm("Desconectar este número WhatsApp? O agente deixará de responder às mensagens recebidas.")) return;
+  try {
+    await api("/api/whatsapp/disconnect", { method: "POST" });
+    showNotice("WhatsApp desconectado.");
+    await loadWhatsAppStatus();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+});
+
+$("#whatsapp-test-send-form")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!paywallCheck()) return;
+  const form = event.currentTarget;
+  const button = $("#btn-whatsapp-test-send");
+  button.disabled = true;
+  try {
+    const values = Object.fromEntries(new FormData(form));
+    await api("/api/whatsapp/test-send", {
+      method: "POST",
+      body: JSON.stringify(values)
+    });
+    showNotice("Mensagem de teste enviada pela Cloud API oficial.");
+  } catch (error) {
+    showNotice(`Falha ao enviar mensagem de teste: ${error.message}`, true);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 /* ════════════════════════════════════════════════════════════
    INTEGRAÇÃO DE E-MAIL OFICIAL (GOOGLE GMAIL & MICROSOFT OUTLOOK)

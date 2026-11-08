@@ -106,6 +106,14 @@ CREATE TABLE IF NOT EXISTS whatsapp_integrations (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS processed_whatsapp_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  message_id TEXT NOT NULL,
+  processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, message_id),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS email_integrations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL UNIQUE,
@@ -220,6 +228,16 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
                provider_message_id TEXT NOT NULL CHECK(length(trim(provider_message_id)) > 0),
                processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                UNIQUE(user_id, provider, provider_message_id),
+               FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+           )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS processed_whatsapp_messages (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               user_id INTEGER NOT NULL,
+               message_id TEXT NOT NULL,
+               processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+               UNIQUE(user_id, message_id),
                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
            )"""
     )

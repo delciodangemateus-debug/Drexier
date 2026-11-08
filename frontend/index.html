@@ -1313,13 +1313,17 @@
         <button class="settings-tab" data-setting="account">Conta</button>
       </div>
 
-      <!-- 1. INTEGRAÇÃO GMAIL -->
+      <!-- 1. CANAIS DE INTEGRAÇÃO -->
       <div id="setting-integration" class="panel setting-panel">
         <div class="channel-selector-bar" style="margin-bottom:20px;">
           <button type="button" class="btn outline" id="tab-channel-email" data-channel="email" style="background:var(--surface-elevated); border-color:var(--border-active);">
             <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
             <strong>Google Gmail Oficial</strong>
             <span class="badge" id="pill-email-status" style="background:var(--surface-interaction); color:var(--text-tertiary); margin-left:8px;">Desconectado</span>
+          </button>
+          <button type="button" class="btn outline" id="tab-channel-whatsapp" data-channel="whatsapp">
+            <strong>WhatsApp Oficial da Meta</strong>
+            <span class="badge" id="pill-whatsapp-status" style="margin-left:8px;">A verificar</span>
           </button>
         </div>
 
@@ -1344,6 +1348,7 @@
               <strong>Configuração de Credenciais Google no ficheiro .env</strong>
               <p class="muted">Adicione GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET para permitir autorização direta.</p>
             </div>
+
           </div>
 
           <!-- DESCONECTADO -->
@@ -1433,6 +1438,71 @@
             </div>
           </div>
         </div>
+
+      <div id="channel-whatsapp-section" class="hidden">
+        <div class="panel-heading">
+          <div>
+            <h2>Integração Oficial WhatsApp Business</h2>
+            <p class="muted">Ligue o seu número pela Cloud API oficial da Meta. As mensagens recebidas serão atendidas pelo agente de IA.</p>
+          </div>
+          <div id="whatsapp-status-badge" class="badge badge-disconnected">A verificar...</div>
+        </div>
+
+        <div id="whatsapp-loading-state" class="empty-state hidden">
+          <p class="muted">A verificar a ligação do WhatsApp...</p>
+        </div>
+
+        <div id="whatsapp-config-warning" class="wa-alert-box hidden">
+          <div class="wa-alert-icon">!</div>
+          <div class="wa-alert-content">
+            <strong>Configure o aplicativo da Meta no backend</strong>
+            <p class="muted">Defina META_APP_ID, META_APP_SECRET, META_CONFIG_ID, WHATSAPP_VERIFY_TOKEN e PUBLIC_URL. O endpoint HTTPS mostrado no painel deve estar registado nos Webhooks da Meta, com o campo <code>messages</code> subscrito.</p>
+            <p class="muted">Nunca coloque o App Secret nem tokens no navegador.</p>
+            <p id="whatsapp-webhook-url" class="muted"></p>
+          </div>
+        </div>
+
+        <div id="whatsapp-disconnected-view" class="wa-view">
+          <div class="wa-hero-card">
+            <h3>Conecte com o Embedded Signup oficial da Meta</h3>
+            <p class="muted">A autorização acontece diretamente na Meta. O Drexier não pede a sua senha do WhatsApp e utiliza apenas a Cloud API oficial.</p>
+            <div class="wa-steps-grid">
+              <div class="wa-step-item"><span class="wa-step-num">1</span><div><strong>Inicie a conexão</strong><p class="muted">Entre na sua conta Meta e escolha a conta WhatsApp Business e o número.</p></div></div>
+              <div class="wa-step-item"><span class="wa-step-num">2</span><div><strong>Autorize a integração</strong><p class="muted">Confirme as permissões solicitadas no fluxo oficial da Meta.</p></div></div>
+              <div class="wa-step-item"><span class="wa-step-num">3</span><div><strong>Atenda com a IA</strong><p class="muted">A IA usa as informações do negócio e as instruções configuradas no Agent Studio.</p></div></div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:20px;">
+              <button id="btn-connect-whatsapp" class="btn primary" type="button">Conectar WhatsApp pela Meta</button>
+              <button id="btn-connect-whatsapp-env" class="btn outline hidden" type="button">Usar número configurado no servidor</button>
+            </div>
+            <p id="whatsapp-connect-status" class="muted" role="status" style="margin-top:10px;"></p>
+          </div>
+        </div>
+
+        <div id="whatsapp-connected-view" class="wa-view hidden">
+          <div class="wa-connected-card">
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;">
+              <div>
+                <h3 id="whatsapp-display-name" style="margin:0 0 4px;">WhatsApp conectado</h3>
+                <span id="whatsapp-display-number" class="badge" style="background:var(--violet-subtle); color:var(--lavender); font-size:13px;"></span>
+              </div>
+              <button id="btn-whatsapp-disconnect" class="btn outline danger small" type="button">Desconectar</button>
+            </div>
+            <div class="wa-info-grid">
+              <div class="wa-info-item"><span class="wa-info-label">Conta WhatsApp Business</span><strong id="whatsapp-info-waba">-</strong></div>
+              <div class="wa-info-item"><span class="wa-info-label">Webhook da Meta</span><strong id="whatsapp-info-webhook">-</strong></div>
+              <div class="wa-info-item"><span class="wa-info-label">Respostas automáticas</span><strong id="whatsapp-info-auto-reply">-</strong></div>
+              <div class="wa-info-item"><span class="wa-info-label">Ligado desde</span><strong id="whatsapp-info-created">-</strong></div>
+            </div>
+            <form id="whatsapp-test-send-form" class="form" style="margin-top:22px;">
+              <h4 style="margin:0;">Enviar mensagem de teste</h4>
+              <label>Número de destino (com indicativo do país)<input name="to" type="tel" placeholder="+351912345678" minlength="5" maxlength="30" required></label>
+              <label>Mensagem<textarea name="message" rows="2" maxlength="4000" required>Teste de integração WhatsApp do Drexier.</textarea></label>
+              <div><button id="btn-whatsapp-test-send" class="btn outline small" type="submit">Enviar teste</button></div>
+            </form>
+          </div>
+        </div>
+      </div>
       </div>
 
       <!-- 2. FATURAÇÃO STRIPE -->
