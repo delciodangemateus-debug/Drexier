@@ -306,9 +306,13 @@ CREATE TABLE IF NOT EXISTS public.whatsapp_integrations (
     access_token TEXT DEFAULT '',
     status TEXT NOT NULL DEFAULT 'connected',
     webhook_subscribed BOOLEAN NOT NULL DEFAULT FALSE,
+    phone_registered BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW())
 );
+
+ALTER TABLE public.whatsapp_integrations
+    ADD COLUMN IF NOT EXISTS phone_registered BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_whatsapp_user_id ON public.whatsapp_integrations(user_id);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_phone_number_id ON public.whatsapp_integrations(phone_number_id);

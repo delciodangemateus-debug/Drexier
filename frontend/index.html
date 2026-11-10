@@ -1491,9 +1491,16 @@
             <div class="wa-info-grid">
               <div class="wa-info-item"><span class="wa-info-label">Conta WhatsApp Business</span><strong id="whatsapp-info-waba">-</strong></div>
               <div class="wa-info-item"><span class="wa-info-label">Webhook da Meta</span><strong id="whatsapp-info-webhook">-</strong></div>
+              <div class="wa-info-item"><span class="wa-info-label">Registo na Cloud API</span><strong id="whatsapp-info-phone-registration">-</strong></div>
               <div class="wa-info-item"><span class="wa-info-label">Respostas automáticas</span><strong id="whatsapp-info-auto-reply">-</strong></div>
               <div class="wa-info-item"><span class="wa-info-label">Ligado desde</span><strong id="whatsapp-info-created">-</strong></div>
             </div>
+            <form id="whatsapp-registration-form" class="form hidden" style="margin-top:22px;">
+              <h4 style="margin:0;">Registar número na Cloud API</h4>
+              <p class="muted">Defina o PIN de verificação em dois passos de seis dígitos. Guarde-o num local seguro; o Drexier não o armazena.</p>
+              <label>PIN de registo<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required></label>
+              <div><button id="btn-whatsapp-register" class="btn primary small" type="submit">Registar número</button></div>
+            </form>
             <form id="whatsapp-test-send-form" class="form" style="margin-top:22px;">
               <h4 style="margin:0;">Enviar mensagem de teste</h4>
               <label>Número de destino (com indicativo do país)<input name="to" type="tel" placeholder="+351912345678" minlength="5" maxlength="30" required></label>

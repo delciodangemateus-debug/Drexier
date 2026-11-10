@@ -23,6 +23,7 @@ from backend.services.whatsapp import (
     fetch_waba_phone_numbers,
     get_meta_config,
     mark_message_as_read,
+    register_phone_number,
     send_whatsapp_message,
     subscribe_waba_webhook,
     verify_webhook_signature,
@@ -77,6 +78,10 @@ class TestSendPayload(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
 
 
+class WhatsAppRegistrationPayload(BaseModel):
+    pin: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
 @router.get("/whatsapp/config")
 def get_whatsapp_public_config():
     """Retorna a configuração pública para o Embedded Signup no frontend."""
@@ -98,7 +103,8 @@ def get_whatsapp_status(user: dict = Depends(get_current_user)):
     with connect() as c:
         row = c.execute(
             """SELECT id, user_id, waba_id, phone_number_id, phone_number,
-                      business_name, status, webhook_subscribed, created_at, updated_at
+                      business_name, status, webhook_subscribed, phone_registered,
+                      created_at, updated_at
                FROM whatsapp_integrations
                WHERE user_id = ?""",
             (user["id"],),
@@ -121,6 +127,7 @@ def get_whatsapp_status(user: dict = Depends(get_current_user)):
             "business_name": row["business_name"],
             "status": row["status"],
             "webhook_subscribed": bool(row["webhook_subscribed"]),
+            "phone_registered": bool(row["phone_registered"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "auto_reply_enabled": _user_auto_reply_enabled(user),
@@ -197,33 +204,22 @@ async def connect_whatsapp(
     phone_number = (payload.phone_number or "").strip()
     business_name = (payload.business_name or "").strip()
 
-    # Se solicitado conexão via .env ou credenciais vazias mas existentes no .env
-    if payload.use_env or (not token and not phone_number_id and not payload.code):
-        if config.get("system_user_token"):
-            token = token or config["system_user_token"]
-        if config.get("phone_number_id"):
-            phone_number_id = phone_number_id or config["phone_number_id"]
-        if config.get("waba_id"):
-            waba_id = waba_id or config["waba_id"]
-
-    # Se ainda não temos token mas temos system_user_token global
-    if not token and config.get("system_user_token"):
-        token = config["system_user_token"]
-
-    # Se ainda não temos phone_number_id mas temos no config global
-    if not phone_number_id and config.get("phone_number_id"):
-        phone_number_id = config["phone_number_id"]
-    if not waba_id and config.get("waba_id"):
-        waba_id = config["waba_id"]
-
-    # Se recebemos um código OAuth do Embedded Signup, efetuamos a troca na Graph API
+    # A credencial do Embedded Signup é específica do cliente; nunca a misture com IDs/token globais.
     if payload.code:
         try:
             token_data = await exchange_code_for_token(payload.code, payload.redirect_uri)
-            token = token_data.get("access_token", token)
+            token = (token_data.get("access_token") or "").strip()
+            if not token:
+                raise ValueError("A Meta concluiu a troca do código sem devolver access_token.")
         except Exception as e:
             logger.error(f"Erro ao trocar código por token: {e}")
             raise HTTPException(400, f"Falha na autenticação com a Meta: {str(e)}")
+    else:
+        # Credenciais globais só podem ser usadas no fluxo explícito de configuração do servidor.
+        if payload.use_env or (not token and not phone_number_id):
+            token = token or config["system_user_token"]
+            phone_number_id = phone_number_id or config["phone_number_id"]
+            waba_id = waba_id or config["waba_id"]
 
     # Se ainda faltam dados do WABA ou phone_number_id, tentamos descobrir via token
     if token and (not waba_id or not phone_number_id):
@@ -238,13 +234,19 @@ async def connect_whatsapp(
     if waba_id and not phone_number_id and token:
         # Busca os números associados a essa WABA
         numbers = await fetch_waba_phone_numbers(waba_id, token)
-        if numbers:
+        if len(numbers) == 1:
             first_num = numbers[0]
             phone_number_id = first_num.get("id", "")
             if not phone_number:
                 phone_number = first_num.get("display_phone_number", "")
             if not business_name:
                 business_name = first_num.get("verified_name", "")
+        elif len(numbers) > 1:
+            raise HTTPException(
+                400,
+                "A conta WhatsApp tem vários números e a Meta não informou qual foi selecionado. "
+                "Tente novamente ou selecione explicitamente o número no Embedded Signup.",
+            )
 
     # Se temos phone_number_id mas faltam número legível ou nome, consulta os detalhes
     if phone_number_id and (not phone_number or not business_name) and token:
@@ -275,11 +277,20 @@ async def connect_whatsapp(
             "SELECT user_id FROM whatsapp_integrations WHERE phone_number_id = ? AND user_id != ?",
             (phone_number_id, user["id"]),
         ).fetchone()
+        current_integration = c.execute(
+            "SELECT phone_number_id, phone_registered FROM whatsapp_integrations WHERE user_id = ?",
+            (user["id"],),
+        ).fetchone()
     if existing:
         raise HTTPException(
             409,
             "Este número de WhatsApp já se encontra ligado a outra conta no sistema.",
         )
+    phone_registered = bool(
+        current_integration
+        and current_integration["phone_number_id"] == phone_number_id
+        and current_integration["phone_registered"]
+    )
 
     # Subscrever a WABA aos webhooks da nossa aplicação
     subscribed = False
@@ -310,9 +321,9 @@ async def connect_whatsapp(
             """INSERT INTO whatsapp_integrations (
                    user_id, waba_id, phone_number_id, phone_number,
                    business_name, access_token, status, webhook_subscribed,
-                   updated_at
+                   phone_registered, updated_at
                )
-               VALUES (?, ?, ?, ?, ?, ?, 'connected', ?, CURRENT_TIMESTAMP)
+               VALUES (?, ?, ?, ?, ?, ?, 'connected', ?, ?, CURRENT_TIMESTAMP)
                ON CONFLICT(user_id) DO UPDATE SET
                    waba_id = excluded.waba_id,
                    phone_number_id = excluded.phone_number_id,
@@ -321,6 +332,7 @@ async def connect_whatsapp(
                    access_token = CASE WHEN excluded.access_token != '' THEN excluded.access_token ELSE whatsapp_integrations.access_token END,
                    status = 'connected',
                    webhook_subscribed = excluded.webhook_subscribed,
+                   phone_registered = excluded.phone_registered,
                    updated_at = CURRENT_TIMESTAMP""",
             (
                 user["id"],
@@ -330,6 +342,7 @@ async def connect_whatsapp(
                 business_name or user["name"],
                 token,
                 1 if subscribed else 0,
+                1 if phone_registered else 0,
             ),
         )
 
@@ -342,8 +355,54 @@ async def connect_whatsapp(
             "phone_number": phone_number,
             "business_name": business_name,
             "webhook_subscribed": subscribed,
+            "phone_registered": phone_registered,
         },
     }
+
+
+@router.post("/whatsapp/register")
+async def register_whatsapp_phone(
+    payload: WhatsAppRegistrationPayload,
+    user: dict = Depends(get_current_user),
+):
+    """Regista o número ligado e nunca armazena o PIN de verificação."""
+    require_whatsapp_subscription(user)
+    with connect() as c:
+        integration = c.execute(
+            """SELECT phone_number_id, access_token, phone_registered
+               FROM whatsapp_integrations
+               WHERE user_id = ? AND status = 'connected'""",
+            (user["id"],),
+        ).fetchone()
+
+    if not integration:
+        raise HTTPException(400, "Ligue primeiro uma conta WhatsApp.")
+    if integration["phone_registered"]:
+        return {"ok": True, "phone_registered": True}
+
+    try:
+        await register_phone_number(
+            integration["phone_number_id"],
+            payload.pin,
+            integration["access_token"],
+        )
+    except Exception as e:
+        logger.warning(
+            "A Meta não confirmou o registo do número WhatsApp %s: %s",
+            integration["phone_number_id"],
+            e,
+        )
+        raise HTTPException(502, f"Falha ao registar o número na Meta: {e}") from e
+
+    with connect() as c:
+        c.execute(
+            """UPDATE whatsapp_integrations
+               SET phone_registered = 1, updated_at = CURRENT_TIMESTAMP
+               WHERE user_id = ? AND status = 'connected'""",
+            (user["id"],),
+        )
+
+    return {"ok": True, "phone_registered": True}
 
 
 @router.post("/whatsapp/disconnect")

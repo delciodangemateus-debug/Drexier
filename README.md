@@ -121,14 +121,26 @@ Cloud API e recebe mensagens no webhook autenticado pela assinatura
 2. No `.env` do backend, defina `META_APP_ID`, `META_APP_SECRET`,
    `META_CONFIG_ID`, `WHATSAPP_VERIFY_TOKEN` e `PUBLIC_URL`. `PUBLIC_URL` deve
    ser HTTPS e apontar para o backend; em desenvolvimento, utilize um túnel
-   HTTPS público. Nunca coloque o App Secret ou tokens no frontend.
+   HTTPS público. Use `WHATSAPP_GRAPH_VERSION=v27.0` para manter o SDK e a
+   Graph API na mesma versão. Configure também `META_SYSTEM_USER_TOKEN` no
+   servidor para a consulta `debug_token` usada quando a Meta não envia os IDs
+   da sessão. Nunca coloque o App Secret ou tokens no frontend.
 3. Configure em Meta > WhatsApp > Webhooks a URL
    `PUBLIC_URL/api/webhooks/whatsapp`, usando o mesmo
-   `WHATSAPP_VERIFY_TOKEN`, e subscreva o campo `messages`.
+   `WHATSAPP_VERIFY_TOKEN`, e subscreva os campos `messages` e
+   `account_update`. O Embedded Signup troca o authorization code no backend
+   imediatamente; se o evento de sessão do navegador não trouxer os IDs, o
+   backend tenta descobri-los pelo token e pela conta partilhada.
 4. Execute o `schema.sql` no Supabase se ainda não o fez, inicie o backend e
    aceda a **Configurações > Integração > WhatsApp Oficial da Meta**.
 5. Selecione **Conectar WhatsApp pela Meta** e conclua o fluxo oficial. A
    conexão só é guardada quando a Meta confirma a subscrição do webhook.
+
+Depois de ligar a conta, o Drexier solicita o PIN de verificação em dois passos
+de seis dígitos e regista o número na Cloud API. O PIN é específico do
+número/cliente, enviado apenas à Meta durante o registo e nunca armazenado pelo
+Drexier. O estado do registo é guardado para permitir retomar a etapa se a Meta
+recusar o PIN.
 
 Para instalações que utilizam credenciais próprias no servidor, configure
 também `META_WABA_ID`, `WHATSAPP_PHONE_NUMBER_ID` e

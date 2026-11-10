@@ -13,6 +13,11 @@ class InsertQuery:
         self.insert_data = data
         return self
 
+    def upsert(self, data):
+        self.insert_data = data
+        self.upsert_called = True
+        return self
+
     def select(self, columns):
         assert columns == "*"
         return self
@@ -90,6 +95,30 @@ def test_insert_errors_are_not_reported_as_success():
             "INSERT INTO business_info(user_id,kind,title,content,metadata) VALUES(?,?,?,?,?)",
             (7, "personalizado", "Card", "Conteúdo", "{}"),
         )
+
+
+def test_on_conflict_insert_uses_supabase_upsert_and_normalizes_boolean():
+    query = InsertQuery(result=type("Result", (), {"data": [{
+        "id": 42,
+        "user_id": 7,
+        "phone_registered": False,
+    }]})())
+
+    class WhatsAppSupabaseClient:
+        def table(self, name):
+            assert name == "whatsapp_integrations"
+            return query
+
+    cursor = SupabaseCursor(WhatsAppSupabaseClient())
+    cursor.execute(
+        """INSERT INTO whatsapp_integrations(user_id,phone_registered)
+           VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET phone_registered=excluded.phone_registered""",
+        (7, 0),
+    )
+
+    assert query.upsert_called is True
+    assert query.insert_data == {"user_id": 7, "phone_registered": False}
+    assert cursor.fetchone()["phone_registered"] == 0
 
 
 @pytest.mark.parametrize(

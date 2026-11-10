@@ -105,15 +105,17 @@ async def debug_token(input_token: str) -> Dict[str, Any]:
     app_id = config["app_id"]
     app_secret = config["app_secret"]
     app_access_token = f"{app_id}|{app_secret}"
+    authorization_token = config["system_user_token"] or app_access_token
 
     url = f"{GRAPH_API_BASE}/{version}/debug_token"
-    params = {
-        "input_token": input_token,
-        "access_token": app_access_token,
-    }
+    params = {"input_token": input_token}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(url, params=params)
+        response = await client.get(
+            url,
+            params=params,
+            headers={"Authorization": f"Bearer {authorization_token}"},
+        )
         data = response.json()
         if response.status_code != 200:
             logger.warning(f"Erro ao depurar token na Meta: {data}")
@@ -149,6 +151,40 @@ async def subscribe_waba_webhook(waba_id: str, access_token: str) -> bool:
     except Exception as e:
         logger.error(f"Erro de conexão ao subscrever WABA {waba_id}: {e}")
         return False
+
+
+async def register_phone_number(phone_number_id: str, pin: str, access_token: str) -> Dict[str, Any]:
+    """Regista um número na Cloud API e ativa a verificação em dois passos."""
+    config = get_meta_config()
+    url = f"{GRAPH_API_BASE}/{config['version']}/{phone_number_id}/register"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            url,
+            headers={"Authorization": "Bearer " + access_token},
+            json={"messaging_product": "whatsapp", "pin": pin},
+        )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            logger.warning(
+                "Resposta inválida da Meta ao registar o número (HTTP %s).",
+                response.status_code,
+            )
+            raise ValueError("A Meta devolveu uma resposta inválida ao registar o número.") from exc
+
+        if response.status_code != 200 or not data.get("success"):
+            error = data.get("error", {})
+            message = error.get("message") or "A Meta não confirmou o registo do número."
+            code = error.get("code")
+            logger.warning(
+                "Falha ao registar o número na Meta (HTTP %s, código %s).",
+                response.status_code,
+                code or "indisponível",
+            )
+            raise ValueError(message)
+
+        return data
 
 
 async def fetch_phone_number_details(phone_number_id: str, access_token: str) -> Dict[str, Any]:

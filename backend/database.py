@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_integrations (
   access_token TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'connected',
   webhook_subscribed INTEGER NOT NULL DEFAULT 0,
+  phone_registered INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -206,6 +207,17 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
     if not has_users:
         conn.executescript(SQL_SCHEMA_FOR_TESTS)
     else:
+        has_whatsapp = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='whatsapp_integrations'"
+        ).fetchone()
+        if has_whatsapp:
+            whatsapp_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(whatsapp_integrations)").fetchall()
+            }
+            if "phone_registered" not in whatsapp_columns:
+                conn.execute(
+                    "ALTER TABLE whatsapp_integrations ADD COLUMN phone_registered INTEGER NOT NULL DEFAULT 0"
+                )
         user_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
         }

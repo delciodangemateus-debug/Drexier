@@ -4404,8 +4404,7 @@ let whatsappConfig = null;
 let facebookSdkPromise = null;
 let facebookSdkConfigKey = "";
 let whatsappSignupSession = null;
-let resolveWhatsappSignupSession = null;
-let rejectWhatsappSignupSession = null;
+let rejectWhatsappLogin = null;
 
 function initializeFacebookSdk(config) {
   const configKey = `${config.app_id}:${config.version}`;
@@ -4452,44 +4451,48 @@ window.addEventListener("message", event => {
     try { payload = JSON.parse(payload); } catch (_) { return; }
   }
   if (!payload || payload.type !== "WA_EMBEDDED_SIGNUP") return;
-  if (payload.event === "FINISH") {
-    whatsappSignupSession = payload.data || {};
-    resolveWhatsappSignupSession?.(whatsappSignupSession);
+  const data = payload.data || {};
+  console.info("[Drexier] META EMBEDDED SIGNUP:", {
+    event: payload.event || "unknown",
+    currentStep: data.current_step || null,
+    hasPhoneNumberId: Boolean(data.phone_number_id),
+    hasMessagingAccountIds: Array.isArray(data.messaging_account_ids) && data.messaging_account_ids.length > 0,
+    isOnBusinessApp: Boolean(data.is_on_biz_app),
+    errorCode: data.error_code || null,
+    hasErrorMessage: Boolean(data.error_message)
+  });
+  if (payload.event === "FINISH" || payload.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") {
+    whatsappSignupSession = {
+      ...data,
+      waba_id: data.waba_id
+        || data.messaging_account_ids?.[0]
+        || data.waba_ids?.[0]
+        || ""
+    };
   } else if (payload.event === "CANCEL" || payload.event === "ERROR") {
-    rejectWhatsappSignupSession?.(new Error("O fluxo de conexão do WhatsApp foi cancelado ou falhou na Meta."));
+    const details = [
+      data.current_step && `etapa ${data.current_step}`,
+      data.error_code && `código ${data.error_code}`,
+      data.error_message
+    ].filter(Boolean).join("; ");
+    const error = new Error(
+      details
+        ? `A Meta ${payload.event === "CANCEL" ? "interrompeu" : "reportou um erro no"} fluxo (${details}).`
+        : `A Meta ${payload.event === "CANCEL" ? "interrompeu" : "reportou um erro no"} fluxo de conexão.`
+    );
+    rejectWhatsappLogin?.(error);
   }
 });
-
-function waitForWhatsappSignupSession() {
-  if (whatsappSignupSession) return Promise.resolve(whatsappSignupSession);
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      resolveWhatsappSignupSession = null;
-      rejectWhatsappSignupSession = null;
-      reject(new Error("A Meta não enviou os dados da conta WhatsApp. Tente novamente."));
-    }, 90000);
-    resolveWhatsappSignupSession = session => {
-      clearTimeout(timeout);
-      resolveWhatsappSignupSession = null;
-      rejectWhatsappSignupSession = null;
-      resolve(session);
-    };
-    rejectWhatsappSignupSession = error => {
-      clearTimeout(timeout);
-      resolveWhatsappSignupSession = null;
-      rejectWhatsappSignupSession = null;
-      reject(error);
-    };
-  });
-}
 
 async function loadWhatsAppStatus() {
   const loading = $("#whatsapp-loading-state");
   const disconnectedView = $("#whatsapp-disconnected-view");
   const connectedView = $("#whatsapp-connected-view");
   const configWarning = $("#whatsapp-config-warning");
+  const connectButton = $("#btn-connect-whatsapp");
   if (!loading || !disconnectedView || !connectedView) return;
 
+  connectButton?.setAttribute("disabled", "");
   loading.classList.remove("hidden");
   disconnectedView.classList.add("hidden");
   connectedView.classList.add("hidden");
@@ -4503,7 +4506,7 @@ async function loadWhatsAppStatus() {
       ? `Webhook: ${config.webhook_url}`
       : "Defina PUBLIC_URL com o endereço HTTPS público do servidor.";
     configWarning?.classList.toggle("hidden", Boolean(config.configured));
-    $("#btn-connect-whatsapp")?.toggleAttribute("disabled", !config.configured);
+    connectButton?.toggleAttribute("disabled", !config.configured);
     $("#btn-connect-whatsapp-env")?.classList.toggle("hidden", !status.can_connect_env);
 
     const badge = $("#whatsapp-status-badge");
@@ -4518,6 +4521,8 @@ async function loadWhatsAppStatus() {
       $("#whatsapp-display-number").textContent = integration.phone_number || "";
       $("#whatsapp-info-waba").textContent = integration.waba_id || "-";
       $("#whatsapp-info-webhook").textContent = integration.webhook_subscribed ? "Ativo" : "Não subscrito";
+      $("#whatsapp-info-phone-registration").textContent = integration.phone_registered ? "Registado" : "Pendente";
+      $("#whatsapp-registration-form")?.classList.toggle("hidden", integration.phone_registered);
       $("#whatsapp-info-auto-reply").textContent = integration.auto_reply_enabled ? "Ativas" : "Pausadas";
       $("#whatsapp-info-created").textContent = integration.created_at
         ? new Date(integration.created_at).toLocaleString("pt-PT")
@@ -4532,8 +4537,14 @@ async function loadWhatsAppStatus() {
     }
 
     if (config.configured) {
-      try { await initializeFacebookSdk(config); }
-      catch (error) { console.warn("[Drexier] SDK Meta indisponível:", error); }
+      try {
+        await initializeFacebookSdk(config);
+        connectButton?.removeAttribute("disabled");
+        $("#whatsapp-connect-status").textContent = "";
+      } catch (error) {
+        console.warn("[Drexier] SDK Meta indisponível:", error);
+        $("#whatsapp-connect-status").textContent = "Não foi possível carregar o SDK da Meta. Atualize a página e tente novamente.";
+      }
     }
   } catch (error) {
     $("#whatsapp-status-badge").textContent = "Erro ao verificar";
@@ -4561,29 +4572,60 @@ $("#btn-connect-whatsapp")?.addEventListener("click", async () => {
     showNotice("A configuração do aplicativo da Meta está incompleta no servidor.", true);
     return;
   }
+  const fb = window.FB;
+  if (!fb || facebookSdkConfigKey !== `${config.app_id}:${config.version}`) {
+    showNotice("O SDK da Meta ainda não está pronto. Atualize a página e tente novamente.", true);
+    return;
+  }
 
   try {
-    const fb = await initializeFacebookSdk(config);
     whatsappSignupSession = null;
     status.textContent = "A abrir o fluxo seguro de autorização da Meta...";
     const auth = await new Promise((resolve, reject) => {
-      fb.login(response => {
-        if (response?.authResponse?.code) resolve(response.authResponse.code);
-        else reject(new Error("A autorização foi cancelada ou a Meta não devolveu o código de acesso."));
-      }, {
-        config_id: config.config_id,
-        response_type: "code",
-        extras: {
-          setup: {}
-        },
-        override_default_response_type: true
-      });
+      const timeout = setTimeout(() => {
+        rejectWhatsappLogin = null;
+        reject(new Error("FB.login não chamou o callback em 90 segundos. A janela da Meta pode ainda estar aberta ou o domínio/configuração OAuth pode não estar autorizado."));
+      }, 90000);
+      rejectWhatsappLogin = error => {
+        clearTimeout(timeout);
+        rejectWhatsappLogin = null;
+        reject(error);
+      };
+      try {
+        fb.login(response => {
+          clearTimeout(timeout);
+          rejectWhatsappLogin = null;
+          const metaError = response?.error;
+          console.info("[Drexier] META RESPONSE:", {
+            status: response?.status || "desconhecido",
+            hasAuthResponse: Boolean(response?.authResponse),
+            hasAuthorizationCode: Boolean(response?.authResponse?.code),
+            errorCode: metaError?.code || null,
+            errorType: metaError?.type || null,
+            hasErrorMessage: Boolean(metaError?.message)
+          });
+          if (response?.authResponse?.code) resolve(response.authResponse.code);
+          const reason = metaError?.message || `estado "${response?.status || "desconhecido"}"`;
+          reject(new Error(`A Meta não devolveu o authorization code (${reason}). Confirme a configuração Facebook Login for Business e o domínio autorizado.`));
+        }, {
+          config_id: config.config_id,
+          response_type: "code",
+          extras: {
+            setup: {}
+          },
+          override_default_response_type: true
+        });
+      } catch (error) {
+        clearTimeout(timeout);
+        rejectWhatsappLogin = null;
+        reject(error);
+      }
     });
-    status.textContent = "Autorização concluída; a validar o número e ativar o webhook...";
-    const session = await waitForWhatsappSignupSession();
+    status.textContent = "Autorização concluída; a trocar o código e a localizar a conta WhatsApp...";
+    const session = whatsappSignupSession || {};
     await finishWhatsappConnection({
       code: auth,
-      waba_id: session.waba_id || "",
+      waba_id: session.waba_id,
       phone_number_id: session.phone_number_id || "",
       business_name: session.business_name || ""
     });
@@ -4611,6 +4653,28 @@ $("#btn-whatsapp-disconnect")?.addEventListener("click", async () => {
     await loadWhatsAppStatus();
   } catch (error) {
     showNotice(error.message, true);
+  }
+});
+
+$("#whatsapp-registration-form")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!paywallCheck()) return;
+  const form = event.currentTarget;
+  const button = $("#btn-whatsapp-register");
+  button.disabled = true;
+  const pin = new FormData(form).get("pin");
+  try {
+    await api("/api/whatsapp/register", {
+      method: "POST",
+      body: JSON.stringify({ pin })
+    });
+    showNotice("Número registado na WhatsApp Cloud API.");
+    await loadWhatsAppStatus();
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    form.reset();
+    button.disabled = false;
   }
 });
 

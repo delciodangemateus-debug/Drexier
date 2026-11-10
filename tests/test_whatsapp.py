@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, patch
 from backend.main import app
 from backend.database import connect, init_db
 from backend.services.whatsapp import (
+    debug_token,
     extract_incoming_messages,
+    register_phone_number,
     verify_webhook_signature,
 )
 from tests.auth_helpers import signup_and_verify
@@ -96,6 +98,110 @@ def test_whatsapp_connect_and_status(auth_client):
     assert st_data["integration"]["phone_number_id"] == "phone_id_999"
     assert st_data["integration"]["waba_id"] == "waba_id_888"
     assert st_data["integration"]["business_name"] == "Minha Loja Oficial"
+
+
+def test_whatsapp_oauth_connect_discovers_assets_without_signup_message(auth_client, monkeypatch):
+    client, token, user_id = auth_client
+    monkeypatch.setenv("META_SYSTEM_USER_TOKEN", "global_system_user_token")
+    monkeypatch.setenv("META_WABA_ID", "global_waba_id")
+    monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "global_phone_id")
+
+    with patch(
+        "backend.routers.whatsapp.exchange_code_for_token",
+        new_callable=AsyncMock,
+        return_value={"access_token": "customer_business_token"},
+    ), patch(
+        "backend.routers.whatsapp.debug_token",
+        new_callable=AsyncMock,
+        return_value={
+            "granular_scopes": [{
+                "scope": "whatsapp_business_management",
+                "target_ids": ["customer_waba_id"],
+            }],
+        },
+    ) as mock_debug, patch(
+        "backend.routers.whatsapp.fetch_waba_phone_numbers",
+        new_callable=AsyncMock,
+        return_value=[{
+            "id": "customer_phone_id",
+            "display_phone_number": "+351912345678",
+            "verified_name": "Empresa Cliente",
+        }],
+    ) as mock_numbers, patch(
+        "backend.routers.whatsapp.subscribe_waba_webhook",
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
+        response = client.post(
+            "/api/whatsapp/connect",
+            headers={"Authorization": "Bearer " + token},
+            json={"code": "short_lived_authorization_code"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["integration"]["waba_id"] == "customer_waba_id"
+    assert response.json()["integration"]["phone_number_id"] == "customer_phone_id"
+    mock_debug.assert_awaited_once_with("customer_business_token")
+    mock_numbers.assert_awaited_once_with("customer_waba_id", "customer_business_token")
+    with connect() as c:
+        integration = c.execute(
+            "SELECT waba_id, phone_number_id, access_token FROM whatsapp_integrations WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    assert integration["waba_id"] == "customer_waba_id"
+    assert integration["phone_number_id"] == "customer_phone_id"
+    assert integration["access_token"] == "customer_business_token"
+
+
+def test_whatsapp_phone_registration_saves_only_registration_status(auth_client):
+    client, token, user_id = auth_client
+    with connect() as c:
+        c.execute(
+            """INSERT INTO whatsapp_integrations
+               (user_id, waba_id, phone_number_id, access_token, status)
+               VALUES (?, 'waba_register', 'phone_register', 'customer_token', 'connected')""",
+            (user_id,),
+        )
+
+    with patch(
+        "backend.routers.whatsapp.register_phone_number",
+        new_callable=AsyncMock,
+        return_value={"success": True},
+    ) as mock_register:
+        response = client.post(
+            "/api/whatsapp/register",
+            headers={"Authorization": "Bearer " + token},
+            json={"pin": "123456"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["phone_registered"] is True
+    mock_register.assert_awaited_once_with("phone_register", "123456", "customer_token")
+    with connect() as c:
+        integration = c.execute(
+            "SELECT phone_registered FROM whatsapp_integrations WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    assert integration["phone_registered"] == 1
+
+
+def test_whatsapp_phone_registration_rejects_invalid_pin(auth_client):
+    client, token, user_id = auth_client
+    with connect() as c:
+        c.execute(
+            """INSERT INTO whatsapp_integrations
+               (user_id, waba_id, phone_number_id, access_token, status)
+               VALUES (?, 'waba_invalid_pin', 'phone_invalid_pin', 'customer_token', 'connected')""",
+            (user_id,),
+        )
+
+    response = client.post(
+        "/api/whatsapp/register",
+        headers={"Authorization": "Bearer " + token},
+        json={"pin": "12a456"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_whatsapp_disconnect(auth_client):
@@ -400,6 +506,88 @@ def test_verify_webhook_signature_fails_closed_without_app_secret(monkeypatch):
     monkeypatch.delenv("META_APP_SECRET", raising=False)
     body = b'{"hello": "world"}'
     assert verify_webhook_signature(body, "sha256=anything") is False
+
+
+@pytest.mark.anyio
+async def test_debug_token_uses_system_user_token_for_authorization(monkeypatch):
+    request = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": {"granular_scopes": []}}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def get(self, url, *, params, headers):
+            request.update(url=url, params=params, headers=headers)
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "backend.services.whatsapp.get_meta_config",
+        lambda: {
+            "version": "v27.0",
+            "app_id": "test_app_id",
+            "app_secret": "test_app_secret",
+            "system_user_token": "provider_system_user_token",
+        },
+    )
+    monkeypatch.setattr(
+        "backend.services.whatsapp.httpx.AsyncClient",
+        lambda **_: FakeAsyncClient(),
+    )
+
+    result = await debug_token("customer_access_token")
+
+    assert result == {"granular_scopes": []}
+    assert request["params"] == {"input_token": "customer_access_token"}
+    assert request["headers"]["Authorization"] == "Bearer provider_system_user_token"
+
+
+@pytest.mark.anyio
+async def test_register_phone_number_sends_pin_only_to_meta(monkeypatch):
+    request = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"success": True}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def post(self, url, *, headers, json):
+            request.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "backend.services.whatsapp.get_meta_config",
+        lambda: {"version": "v27.0"},
+    )
+    monkeypatch.setattr(
+        "backend.services.whatsapp.httpx.AsyncClient",
+        lambda **_: FakeAsyncClient(),
+    )
+
+    result = await register_phone_number("phone_id", "123456", "customer_token")
+
+    assert result == {"success": True}
+    assert request["url"].endswith("/v27.0/phone_id/register")
+    assert request["headers"]["Authorization"].startswith("Bearer ")
+    assert request["json"] == {"messaging_product": "whatsapp", "pin": "123456"}
 
 
 @pytest.mark.anyio

@@ -57,6 +57,8 @@ def _format_row_for_app(table: str, row: Dict[str, Any]) -> Dict[str, Any]:
         res["auto_reply_enabled"] = 1 if res["auto_reply_enabled"] else 0
     if "webhook_subscribed" in res and isinstance(res["webhook_subscribed"], bool):
         res["webhook_subscribed"] = 1 if res["webhook_subscribed"] else 0
+    if "phone_registered" in res and isinstance(res["phone_registered"], bool):
+        res["phone_registered"] = 1 if res["phone_registered"] else 0
     return res
 
 
@@ -341,12 +343,12 @@ class SupabaseCursor:
                         val = json.loads(val)
                     except Exception:
                         val = {}
-                elif col in ("auto_reply_enabled", "webhook_subscribed"):
+                elif col in ("auto_reply_enabled", "webhook_subscribed", "phone_registered"):
                     val = bool(val)
 
                 insert_data[col] = val
 
-            is_upsert = "OR REPLACE" in clean_sql.upper()
+            is_upsert = "OR REPLACE" in clean_sql.upper() or "ON CONFLICT" in clean_sql.upper()
 
             try:
                 if is_upsert:
@@ -409,7 +411,7 @@ class SupabaseCursor:
                         val = json.loads(val)
                     except Exception:
                         val = {}
-                elif col in ("auto_reply_enabled", "webhook_subscribed"):
+                elif col in ("auto_reply_enabled", "webhook_subscribed", "phone_registered"):
                     val = bool(val)
 
                 update_data[col] = val
