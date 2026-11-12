@@ -75,7 +75,7 @@ Se alguma variável estiver ausente ou o Resend rejeitar o envio, a interface ex
 
 O remetente de teste `onboarding@resend.dev` só pode entregar mensagens de teste para o email da própria conta Resend. Para enviar códigos a outros usuários, verifique um domínio no Resend e use um remetente desse domínio. Em uma base Supabase já existente, execute `supabase_auth_challenges.sql` no SQL Editor para criar a tabela segura de desafios e a função que valida cada código de forma atômica. Em uma instalação nova, o `schema.sql` já inclui essa estrutura.
 
-## Integração Oficial de E-mail (Google Gmail & Microsoft Outlook)
+## Integração Oficial de E-mail (Google Gmail)
 
 O Drexier atende clientes, tira dúvidas e conduz conversas por e-mail utilizando IA inteligente com suporte a tom de voz, regras do negócio e respostas obrigatórias:
 
@@ -84,18 +84,11 @@ O Drexier atende clientes, tira dúvidas e conduz conversas por e-mail utilizand
      - `GOOGLE_CLIENT_ID`: ID do cliente OAuth criado no [Google Cloud Console](https://console.cloud.google.com/).
      - `GOOGLE_CLIENT_SECRET`: Segredo do cliente Google.
      - `GOOGLE_REDIRECT_URI`: `http://localhost:8000/api/email/oauth/google/callback`
-   - **Microsoft Outlook (Microsoft Graph)**:
-     - `MICROSOFT_CLIENT_ID`: ID da aplicação criada no [Azure Portal](https://portal.azure.com/).
-     - `MICROSOFT_CLIENT_SECRET`: Segredo da aplicação.
-     - `MICROSOFT_REDIRECT_URI`: `http://localhost:8000/api/email/oauth/microsoft/callback`
-     - `MICROSOFT_TENANT_ID`: `common`
-   - **Conexão Direta (Opcional - SMTP / IMAP)**:
-     - `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, `EMAIL_SMTP_USER`, `EMAIL_SMTP_PASSWORD`
 
 2. **Fluxo do Utilizador no Painel**:
    - O cliente regista-se no Drexier e entra no painel.
    - Acede a **Configurações > Integração**.
-   - Clica no botão **Conectar Google Gmail** ou **Conectar Microsoft Outlook**.
+   - Clica no botão **Conectar Google Gmail**.
    - Acede à página oficial do fornecedor e concede as permissões solicitadas (leitura e envio de e-mails em seu nome).
    - O Drexier conclui a ligação de forma 100% segura e exibe o estado **Conectado**.
    - O utilizador pode aceder às abas **Instruções ao agente**, **Respostas obrigatórias** e **Negócio** para instruir a IA sobre a forma de responder às questões, tom de voz para guiar a conversa e regras de suporte.
@@ -107,56 +100,9 @@ O Drexier atende clientes, tira dúvidas e conduz conversas por e-mail utilizand
    - **Controlo de Respostas Automáticas**: O utilizador pode a qualquer momento pausar ou reativar as respostas automáticas da IA tanto na aba **Mensagens** (botão direto `Respostas IA: Ativas / Pausadas`) quanto em **Configurações > Integração**. Quando pausado, as mensagens continuam a ser recebidas e organizadas no painel, mas a IA não envia e-mails automaticamente.
    - **Gestão e Eliminação de Mensagens**: Na aba **Mensagens**, é possível eliminar mensagens individuais (botão `🗑️` em cada balão de mensagem) ou eliminar conversas inteiras com um clique (`Eliminar Conversa`).
 
-## Integração Oficial WhatsApp Business (Meta Cloud API)
-
-O WhatsApp é ligado pelo Embedded Signup oficial da Meta, envia mensagens pela
-Cloud API e recebe mensagens no webhook autenticado pela assinatura
-`X-Hub-Signature-256`. Para ativar:
-
-1. Configure um app Meta com o produto WhatsApp, Embedded Signup e as permissões
-   aprovadas pela Meta (`whatsapp_business_management` e
-   `whatsapp_business_messaging`). O app precisa estar habilitado como Tech
-   Provider ou Solution Partner segundo os requisitos da Meta e deve usar a
-   configuração Embedded Signup v4.
-2. No `.env` do backend, defina `META_APP_ID`, `META_APP_SECRET`,
-   `META_CONFIG_ID`, `WHATSAPP_VERIFY_TOKEN` e `PUBLIC_URL`. `PUBLIC_URL` deve
-   ser HTTPS e apontar para o backend; em desenvolvimento, utilize um túnel
-   HTTPS público. Use `WHATSAPP_GRAPH_VERSION=v27.0` para manter o SDK e a
-   Graph API na mesma versão. Configure também `META_SYSTEM_USER_TOKEN` no
-   servidor para a consulta `debug_token` usada quando a Meta não envia os IDs
-   da sessão. Nunca coloque o App Secret ou tokens no frontend.
-3. Configure em Meta > WhatsApp > Webhooks a URL
-   `PUBLIC_URL/api/webhooks/whatsapp`, usando o mesmo
-   `WHATSAPP_VERIFY_TOKEN`, e subscreva os campos `messages` e
-   `account_update`. O Embedded Signup troca o authorization code no backend
-   imediatamente; se o evento de sessão do navegador não trouxer os IDs, o
-   backend tenta descobri-los pelo token e pela conta partilhada.
-4. Execute o `schema.sql` no Supabase se ainda não o fez, inicie o backend e
-   aceda a **Configurações > Integração > WhatsApp Oficial da Meta**.
-5. Selecione **Conectar WhatsApp pela Meta** e conclua o fluxo oficial. A
-   conexão só é guardada quando a Meta confirma a subscrição do webhook.
-
-Depois de ligar a conta, o Drexier solicita o PIN de verificação em dois passos
-de seis dígitos e regista o número na Cloud API. O PIN é específico do
-número/cliente, enviado apenas à Meta durante o registo e nunca armazenado pelo
-Drexier. O estado do registo é guardado para permitir retomar a etapa se a Meta
-recusar o PIN.
-
-Para instalações que utilizam credenciais próprias no servidor, configure
-também `META_WABA_ID`, `WHATSAPP_PHONE_NUMBER_ID` e
-`META_SYSTEM_USER_TOKEN` (ou `WHATSAPP_ACCESS_TOKEN`). O token nunca é
-devolvido ao navegador. O painel permite enviar uma mensagem de teste e
-desconectar o número. O webhook rejeita assinaturas inválidas, associa eventos
-apenas ao `phone_number_id` registado e deduplica as mensagens entregues mais
-de uma vez pela Meta.
-
-As respostas automáticas usam as instruções, o idioma e o conhecimento de
-negócio do agente. A opção **Respostas IA: Pausadas** impede respostas
-automáticas WhatsApp, e uma subscrição inativa também suspende o envio.
-
 ## Notas importantes
 - A base de dados isola as ligações de e-mail, contactos, mensagens e informações de negócio por utilizador (`user_id`).
-- O `schema.sql` pode ser reaplicado sem apagar os dados. Ele remove o acesso direto das chaves `anon`/`authenticated` às tabelas privadas e permite acesso apenas ao backend com `service_role`. Configure backups/PITR no painel do Supabase de acordo com o plano do projeto; nenhum script SQL substitui uma política de backup.
+- Ao reaplicar o `schema.sql`, tabelas e credenciais de canais legados, além de integrações de e-mail que não sejam Gmail, são removidas; contas, conversas e dados do negócio permanecem. Revogue no fornecedor qualquer token legado já emitido. O script também restringe o acesso às tabelas privadas à `service_role`. Configure backups/PITR no Supabase; nenhum script SQL substitui uma política de backup.
 - O Gmail mantém IDs processados no banco para deduplicação após reinícios. Erros do provedor agora são reportados como falha de sincronização e não avançam `last_sync_at`.
 - A exclusão da conta em **Configurações > Conta** exige a senha e agenda na Stripe o cancelamento no fim do período pago, sem renovação nem reembolso. Os dados locais só são apagados depois da confirmação Stripe; em caso de falha, a conta permanece para permitir nova tentativa. Exclusões manuais diretamente no SQL Editor não acionam essa integração.
 - **Motor de IA (Google Gemini)**: A resposta e condução das conversas é gerida pelo Google Gemini. Obtenha uma chave gratuita em [Google AI Studio](https://aistudio.google.com/app/apikey) e adicione no `.env` em `GEMINI_API_KEY`. Se a chave não for configurada, o agente aciona o fallback local seguro usando as informações cadastradas.

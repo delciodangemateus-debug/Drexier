@@ -275,7 +275,7 @@ def test_owner_reply_and_conversion_actions():
         c.execute("DELETE FROM email_integrations WHERE user_id=?", (user_id,))
         c.execute(
             """INSERT INTO email_integrations (user_id, provider, email_address, display_name, status)
-               VALUES (?, 'smtp_imap', 'dono@empresa.com', 'Dono da Loja', 'connected')""",
+               VALUES (?, 'google', 'dono@empresa.com', 'Dono da Loja', 'connected')""",
             (user_id,)
         )
     _save_stored_subscription(user_id, {"status": "active", "plan_name": "Plano Business"})

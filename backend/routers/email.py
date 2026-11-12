@@ -12,11 +12,8 @@ from backend.services.billing_service import get_last_successful_payment_at, is_
 from backend.services.email_service import (
     get_email_response_cutoff,
     build_google_auth_url,
-    build_microsoft_auth_url,
     exchange_google_code,
-    exchange_microsoft_code,
     fetch_google_user_profile,
-    fetch_microsoft_user_profile,
     get_email_config,
     send_email,
     sync_emails_for_user,
@@ -63,18 +60,6 @@ def require_email_subscription(user: dict = Depends(get_current_user)):
     return user
 
 
-class ManualEmailConnectPayload(BaseModel):
-    provider: str = Field(default="smtp_imap", pattern="^(google|microsoft|smtp_imap)$")
-    email_address: EmailStr
-    display_name: Optional[str] = ""
-    smtp_host: str = Field(min_length=3)
-    smtp_port: int = Field(default=587)
-    smtp_user: Optional[str] = ""
-    smtp_password: str = Field(min_length=1)
-    imap_host: Optional[str] = ""
-    imap_port: Optional[int] = 993
-
-
 class ToggleAutoReplyPayload(BaseModel):
     enabled: bool
 
@@ -87,16 +72,12 @@ class TestEmailSendPayload(BaseModel):
 
 @router.get("/config")
 def get_email_public_config():
-    """Retorna o estado de configuração dos provedores oficiais Google e Microsoft."""
+    """Retorna o estado de configuração do OAuth Google."""
     config = get_email_config()
     return {
         "google": {
             "configured": config["google"]["configured"],
             "redirect_uri": config["google"]["redirect_uri"],
-        },
-        "microsoft": {
-            "configured": config["microsoft"]["configured"],
-            "redirect_uri": config["microsoft"]["redirect_uri"],
         },
     }
 
@@ -109,7 +90,7 @@ def get_email_status(user: dict = Depends(get_current_user)):
             """SELECT id, user_id, provider, email_address, display_name,
                       status, auto_reply_enabled, last_sync_at, created_at, updated_at
                FROM email_integrations
-               WHERE user_id = ?""",
+               WHERE user_id = ? AND provider = 'google'""",
             (user["id"],),
         ).fetchone()
 
@@ -215,122 +196,6 @@ async def google_oauth_callback(
         return RedirectResponse(f"/?email_auth=error&reason={str(e)}")
 
 
-@router.get("/oauth/microsoft/url")
-def get_microsoft_oauth_url(user: dict = Depends(require_email_subscription)):
-    """
-    Retorna o link oficial de autorização da Microsoft para que o utilizador
-    possa aceder e conceder as permissões solicitadas.
-    """
-    state_token = create_token(user["id"])
-    try:
-        url = build_microsoft_auth_url(state=state_token)
-        return {"url": url}
-    except Exception as e:
-        raise HTTPException(400, str(e))
-
-
-@router.get("/oauth/microsoft/callback")
-async def microsoft_oauth_callback(
-    code: Optional[str] = Query(None),
-    state: Optional[str] = Query(None),
-    error: Optional[str] = Query(None),
-    error_description: Optional[str] = Query(None),
-):
-    """
-    Callback oficial do Microsoft OAuth 2.0.
-    Troca o código por tokens, obtém o e-mail do cliente e grava a integração.
-    """
-    if error:
-        return RedirectResponse(f"/?email_auth=error&reason={error_description or error}")
-
-    if not code or not state:
-        return RedirectResponse("/?email_auth=error&reason=missing_code_or_state")
-
-    uid = decode_token(state)
-    if not uid:
-        return RedirectResponse("/?email_auth=error&reason=invalid_state")
-
-    if not is_subscription_active(uid):
-        return RedirectResponse("/?billing=paywall&reason=subscription_required")
-
-    try:
-        token_data = await exchange_microsoft_code(code)
-        access_token = token_data.get("access_token", "")
-        refresh_token = token_data.get("refresh_token", "")
-        expires_in = token_data.get("expires_in", 3600)
-        expires_at = str(time.time() + expires_in)
-
-        email_addr, display_name = await fetch_microsoft_user_profile(access_token)
-        if not email_addr:
-            email_addr = f"outlook_user_{uid}@outlook.com"
-
-        with connect() as c:
-            c.execute(
-                """INSERT INTO email_integrations (
-                       user_id, provider, email_address, display_name,
-                       access_token, refresh_token, token_expires_at, status, updated_at
-                   )
-                   VALUES (?, 'microsoft', ?, ?, ?, ?, ?, 'connected', CURRENT_TIMESTAMP)
-                   ON CONFLICT(user_id) DO UPDATE SET
-                       provider = 'microsoft',
-                       email_address = excluded.email_address,
-                       display_name = excluded.display_name,
-                       access_token = excluded.access_token,
-                       refresh_token = CASE WHEN excluded.refresh_token != '' THEN excluded.refresh_token ELSE email_integrations.refresh_token END,
-                       token_expires_at = excluded.token_expires_at,
-                       status = 'connected',
-                       updated_at = CURRENT_TIMESTAMP""",
-                (uid, email_addr, display_name, access_token, refresh_token, expires_at),
-            )
-
-        return RedirectResponse("/?email_auth=success&provider=microsoft")
-    except Exception as e:
-        logger.error(f"Erro no callback do Microsoft OAuth: {e}")
-        return RedirectResponse(f"/?email_auth=error&reason={str(e)}")
-
-
-@router.post("/connect-manual")
-def connect_manual_email(
-    payload: ManualEmailConnectPayload,
-    user: dict = Depends(require_email_subscription),
-):
-    """Permite ligação direta por credenciais SMTP/IMAP para testes ou servidores próprios."""
-    with connect() as c:
-        c.execute(
-            """INSERT INTO email_integrations (
-                   user_id, provider, email_address, display_name,
-                   smtp_host, smtp_port, smtp_user, smtp_password,
-                   imap_host, imap_port, status, updated_at
-               )
-               VALUES (?, 'smtp_imap', ?, ?, ?, ?, ?, ?, ?, ?, 'connected', CURRENT_TIMESTAMP)
-               ON CONFLICT(user_id) DO UPDATE SET
-                   provider = 'smtp_imap',
-                   email_address = excluded.email_address,
-                   display_name = excluded.display_name,
-                   smtp_host = excluded.smtp_host,
-                   smtp_port = excluded.smtp_port,
-                   smtp_user = excluded.smtp_user,
-                   smtp_password = excluded.smtp_password,
-                   imap_host = excluded.imap_host,
-                   imap_port = excluded.imap_port,
-                   status = 'connected',
-                   updated_at = CURRENT_TIMESTAMP""",
-            (
-                user["id"],
-                payload.email_address.lower().strip(),
-                payload.display_name or user["name"],
-                payload.smtp_host.strip(),
-                payload.smtp_port,
-                payload.smtp_user or payload.email_address.lower().strip(),
-                payload.smtp_password,
-                payload.imap_host or "",
-                payload.imap_port or 993,
-            ),
-        )
-
-    return {"ok": True, "message": "Email configurado com sucesso via SMTP!"}
-
-
 @router.post("/auto-reply")
 def toggle_auto_reply(
     payload: ToggleAutoReplyPayload,
@@ -339,7 +204,7 @@ def toggle_auto_reply(
     """Ativa ou desativa as respostas automáticas da IA para a integração de e-mail."""
     with connect() as c:
         row = c.execute(
-            "SELECT id FROM email_integrations WHERE user_id = ? AND status = 'connected'",
+            "SELECT id FROM email_integrations WHERE user_id = ? AND status = 'connected' AND provider = 'google'",
             (user["id"],)
         ).fetchone()
         if not row:
@@ -363,7 +228,7 @@ def disconnect_email(user: dict = Depends(get_current_user)):
     """Desconecta a integração de e-mail do utilizador autenticado."""
     with connect() as c:
         c.execute(
-            "UPDATE email_integrations SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+            "UPDATE email_integrations SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND provider = 'google'",
             (user["id"],),
         )
     return {"ok": True, "message": "Email desconectado com sucesso."}

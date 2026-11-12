@@ -311,7 +311,7 @@ async def call_gemini_api(
         }
     }
 
-    client_timeout = httpx.Timeout(45.0, connect=10.0)
+    client_timeout = httpx.Timeout(12.0, connect=4.0)
 
     async with httpx.AsyncClient(timeout=client_timeout) as client:
         for m in candidate_models:
@@ -322,6 +322,11 @@ async def call_gemini_api(
                     headers={"Content-Type": "application/json"},
                     json=payload
                 )
+                if response.status_code == 429:
+                    err_txt = response.text.lower()
+                    if "quota" in err_txt or "exceeded" in err_txt:
+                        logger.warning("Quota da chave Gemini esgotada (429). Interrompendo cascata para resposta rápida do fallback.")
+                        break
                 if response.status_code in (404, 429, 503) and m != candidate_models[-1]:
                     logger.info(f"Modelo {m} retornou {response.status_code}, a tentar alternativa...")
                     continue

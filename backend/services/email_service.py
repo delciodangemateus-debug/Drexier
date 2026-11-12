@@ -5,12 +5,10 @@ from email.header import decode_header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import html
-import imaplib
 import json
 import logging
 import os
 import re
-import smtplib
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -37,15 +35,12 @@ LOOP_ACKNOWLEDGMENT_PATTERNS = [
     r"(resposta autom[aá]tica|auto-?reply|automatic reply|out of office|aus[eê]ncia tempor[aá]ria|agradecemos o seu contacto)"
 ]
 
-# Constantes de OAuth para Google e Microsoft
+# Constantes de OAuth Google
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
 
-MICROSOFT_AUTH_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"
-MICROSOFT_TOKEN_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-MICROSOFT_GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 GOOGLE_SCOPES = [
     "openid",
@@ -54,14 +49,6 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
 ]
-
-MICROSOFT_SCOPES = [
-    "offline_access",
-    "User.Read",
-    "Mail.ReadWrite",
-    "Mail.Send",
-]
-
 
 def get_email_config() -> Dict[str, Any]:
     """Recupera as variáveis de ambiente necessárias para integrações de e-mail."""
@@ -74,27 +61,12 @@ def get_email_config() -> Dict[str, Any]:
         "http://localhost:8000/api/email/oauth/google/callback"
     ).strip()
 
-    ms_client_id = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
-    ms_client_secret = os.getenv("MICROSOFT_CLIENT_SECRET", "").strip()
-    ms_tenant_id = os.getenv("MICROSOFT_TENANT_ID", "common").strip() or "common"
-    ms_redirect_uri = os.getenv(
-        "MICROSOFT_REDIRECT_URI",
-        "http://localhost:8000/api/email/oauth/microsoft/callback"
-    ).strip()
-
     return {
         "google": {
             "client_id": google_client_id,
             "client_secret": google_client_secret,
             "redirect_uri": google_redirect_uri,
             "configured": bool(google_client_id and google_client_secret),
-        },
-        "microsoft": {
-            "client_id": ms_client_id,
-            "client_secret": ms_client_secret,
-            "tenant_id": ms_tenant_id,
-            "redirect_uri": ms_redirect_uri,
-            "configured": bool(ms_client_id and ms_client_secret),
         },
     }
 
@@ -125,7 +97,7 @@ def get_email_response_cutoff(integration: Dict[str, Any]) -> Optional[datetime]
     return max(payment_at, connected_at) if connected_at else payment_at
 
 
-# ==============================================================================
+# ===============================================================================
 # GOOGLE OAUTH2 (GMAIL)
 # ==============================================================================
 
@@ -231,104 +203,8 @@ async def fetch_google_user_profile(access_token: str) -> Tuple[str, str]:
     return "", ""
 
 
-# ==============================================================================
-# MICROSOFT OAUTH2 (OUTLOOK / GRAPH)
-# ==============================================================================
-
-def build_microsoft_auth_url(state: str) -> str:
-    """Gera o link oficial da Microsoft para conceder permissões de leitura e envio de e-mails."""
-    config = get_email_config()["microsoft"]
-    if not config["client_id"]:
-        raise ValueError("MICROSOFT_CLIENT_ID não configurado no ficheiro .env")
-
-    auth_url = MICROSOFT_AUTH_URL_TEMPLATE.format(tenant=config["tenant_id"])
-    params = {
-        "client_id": config["client_id"],
-        "redirect_uri": config["redirect_uri"],
-        "response_type": "code",
-        "scope": " ".join(MICROSOFT_SCOPES),
-        "response_mode": "query",
-        "state": state,
-    }
-    return f"{auth_url}?{urllib.parse.urlencode(params)}"
-
-
-async def exchange_microsoft_code(code: str) -> Dict[str, Any]:
-    """Troca o authorization code pelo access_token e refresh_token da Microsoft."""
-    config = get_email_config()["microsoft"]
-    token_url = MICROSOFT_TOKEN_URL_TEMPLATE.format(tenant=config["tenant_id"])
-    payload = {
-        "client_id": config["client_id"],
-        "client_secret": config["client_secret"],
-        "code": code,
-        "grant_type": "authorization_code",
-        "redirect_uri": config["redirect_uri"],
-        "scope": " ".join(MICROSOFT_SCOPES),
-    }
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        res = await client.post(token_url, data=payload)
-        data = res.json()
-        if res.status_code != 200:
-            err = data.get("error_description") or data.get("error") or "Erro na autorização com Microsoft"
-            raise ValueError(f"Falha Microsoft OAuth: {err}")
-        return data
-
-
-async def refresh_microsoft_token_if_needed(integration: dict) -> str:
-    """Renova o token da Microsoft se expirado ou prestes a expirar."""
-    access_token = integration.get("access_token", "")
-    refresh_token = integration.get("refresh_token", "")
-    expires_at = integration.get("token_expires_at")
-
-    now = time.time()
-    if expires_at and float(expires_at) > (now + 60) and access_token:
-        return access_token
-
-    if not refresh_token:
-        return access_token
-
-    config = get_email_config()["microsoft"]
-    token_url = MICROSOFT_TOKEN_URL_TEMPLATE.format(tenant=config["tenant_id"])
-    payload = {
-        "client_id": config["client_id"],
-        "client_secret": config["client_secret"],
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token",
-        "scope": " ".join(MICROSOFT_SCOPES),
-    }
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        res = await client.post(token_url, data=payload)
-        if res.status_code == 200:
-            data = res.json()
-            new_access_token = data.get("access_token")
-            new_refresh = data.get("refresh_token", refresh_token)
-            expires_in = data.get("expires_in", 3600)
-            new_expires_at = str(now + expires_in)
-            with connect() as c:
-                c.execute(
-                    "UPDATE email_integrations SET access_token=?, refresh_token=?, token_expires_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (new_access_token, new_refresh, new_expires_at, integration["id"])
-                )
-            return new_access_token
-        else:
-            logger.warning(f"Erro ao renovar token Microsoft: {res.text}")
-            return access_token
-
-
-async def fetch_microsoft_user_profile(access_token: str) -> Tuple[str, str]:
-    """Obtém o endereço de e-mail e nome da conta Microsoft Graph conectada."""
-    headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        res = await client.get(f"{MICROSOFT_GRAPH_BASE}/me", headers=headers)
-        if res.status_code == 200:
-            data = res.json()
-            email_addr = data.get("mail") or data.get("userPrincipalName", "")
-            return email_addr, data.get("displayName", "")
-    return "", ""
-
-
-# ==============================================================================
-# ENVIO DE E-MAILS (GMAIL, MICROSOFT GRAPH OU SMTP)
+# Envio de e-mails Gmail
+# ENVIO DE E-MAILS (GMAIL)
 # ==============================================================================
 
 def create_mime_message(
@@ -377,105 +253,34 @@ async def send_email(
     references: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Envia uma mensagem de e-mail usando o provedor conectado (Google Gmail, Microsoft Outlook ou SMTP).
+    Envia uma mensagem oficial pelo Google Gmail conectado.
     """
     provider = integration.get("provider")
     sender_email = integration.get("email_address")
     sender_name = integration.get("display_name")
     from_header = f"{sender_name} <{sender_email}>" if sender_name else sender_email
 
-    if provider == "google":
-        token = await refresh_google_token_if_needed(integration)
-        mime_msg = create_mime_message(from_header, to_email, subject, body_text, in_reply_to, references)
-        raw_base64 = base64.urlsafe_b64encode(mime_msg.as_bytes()).decode("utf-8")
-
-        payload: Dict[str, Any] = {"raw": raw_base64}
-        if thread_id:
-            payload["threadId"] = thread_id
-
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.post(f"{GMAIL_API_BASE}/messages/send", headers=headers, json=payload)
-            if res.status_code not in (200, 201):
-                logger.error(f"Erro Gmail send: {res.text}")
-                raise ValueError(f"Falha ao enviar e-mail via Gmail: {res.text}")
-            return res.json()
-
-    elif provider == "microsoft":
-        token = await refresh_microsoft_token_if_needed(integration)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        if in_reply_to:
-            message_id = urllib.parse.quote(in_reply_to, safe="")
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                res = await client.post(
-                    f"{MICROSOFT_GRAPH_BASE}/me/messages/{message_id}/reply",
-                    headers=headers,
-                    json={"comment": body_text},
-                )
-                if res.status_code != 202:
-                    logger.error(f"Erro Microsoft reply: {res.text}")
-                    raise ValueError(f"Falha ao responder e-mail via Outlook: {res.text}")
-            return {"status": "sent", "provider": "microsoft"}
-
-        mail_payload = {
-            "message": {
-                "subject": subject,
-                "body": {
-                    "contentType": "Text",
-                    "content": body_text,
-                },
-                "toRecipients": [
-                    {"emailAddress": {"address": to_email}}
-                ],
-            },
-            "saveToSentItems": "true",
-        }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            res = await client.post(f"{MICROSOFT_GRAPH_BASE}/me/sendMail", headers=headers, json=mail_payload)
-            if res.status_code not in (200, 202):
-                logger.error(f"Erro Microsoft sendMail: {res.text}")
-                raise ValueError(f"Falha ao enviar e-mail via Outlook: {res.text}")
-            return {"status": "sent", "provider": "microsoft"}
-
-    elif provider == "smtp_imap":
-        # Envio padrão via SMTP
-        smtp_host = integration.get("smtp_host")
-        smtp_port = integration.get("smtp_port") or 587
-        smtp_user = integration.get("smtp_user") or sender_email
-        smtp_pass = integration.get("smtp_password")
-
-        mime_msg = create_mime_message(from_header, to_email, subject, body_text, in_reply_to, references)
-
-        if not smtp_host:
-            raise ValueError("Servidor SMTP não configurado.")
-
-        if smtp_port == 465:
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20) as server:
-                if smtp_user and smtp_pass:
-                    server.login(smtp_user, smtp_pass)
-                server.send_message(mime_msg)
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
-                server.ehlo()
-                try:
-                    server.starttls()
-                    server.ehlo()
-                except Exception:
-                    pass
-                if smtp_user and smtp_pass:
-                    server.login(smtp_user, smtp_pass)
-                server.send_message(mime_msg)
-
-        return {"status": "sent", "provider": "smtp"}
-
-    else:
+    if provider != "google":
         raise ValueError(f"Provedor de email desconhecido: {provider}")
+
+    token = await refresh_google_token_if_needed(integration)
+    mime_msg = create_mime_message(from_header, to_email, subject, body_text, in_reply_to, references)
+    raw_base64 = base64.urlsafe_b64encode(mime_msg.as_bytes()).decode("utf-8")
+
+    payload: Dict[str, Any] = {"raw": raw_base64}
+    if thread_id:
+        payload["threadId"] = thread_id
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        res = await client.post(f"{GMAIL_API_BASE}/messages/send", headers=headers, json=payload)
+        if res.status_code not in (200, 201):
+            logger.error(f"Erro Gmail send: {res.text}")
+            raise ValueError(f"Falha ao enviar e-mail via Gmail: {res.text}")
+        return res.json()
 
 
 # ==============================================================================
@@ -1061,126 +866,6 @@ async def _sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[s
     return processed_items
 
 
-async def sync_microsoft_emails(user_dict: dict, integration: dict) -> List[Dict[str, Any]]:
-    """
-    Sincroniza e-mails não lidos do Microsoft Outlook / Graph,
-    gera respostas inteligentes com a IA e envia automaticamente ao cliente.
-    """
-    token = await refresh_microsoft_token_if_needed(integration)
-    headers = {"Authorization": f"Bearer {token}"}
-    my_email = (integration.get("email_address") or "").lower().strip()
-
-    cutoff_at = get_email_response_cutoff(integration)
-    if cutoff_at is None:
-        logger.warning("Sincronização Outlook bloqueada: não há data de pagamento confirmado válida.")
-        return []
-
-    processed_items = []
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Busca mensagens não lidas
-        url = f"{MICROSOFT_GRAPH_BASE}/me/mailFolders/Inbox/messages?$filter=isRead eq false&$top=15&$orderby=receivedDateTime desc"
-        res = await client.get(url, headers=headers)
-        if res.status_code != 200:
-            logger.warning(f"Falha ao listar mensagens do Outlook: {res.text}")
-            return []
-
-        messages = res.json().get("value", [])
-        for m in messages:
-            msg_id = m.get("id")
-            processed_key = (
-                "microsoft",
-                str(integration.get("id") or integration.get("email_address")),
-                str(msg_id),
-            )
-            if processed_key in _PROCESSED_MESSAGE_IDS:
-                continue
-            conversation_id = m.get("conversationId")
-            subject = m.get("subject", "Sem assunto")
-            sender_obj = m.get("from", {}).get("emailAddress", {})
-            sender_email = (sender_obj.get("address") or "").lower().strip()
-            customer_name = sender_obj.get("name", "")
-            body_content = m.get("body", {}).get("content", "")
-            content_type = m.get("body", {}).get("contentType", "text")
-            received_dt = m.get("receivedDateTime")
-
-            # Filtro por data de recebimento: após pagamento e ligação da integração
-            if received_dt:
-                try:
-                    received_at = _parse_utc_datetime(received_dt)
-                    if received_at is None:
-                        raise ValueError("data de recebimento ausente ou inválida")
-                    if received_at < cutoff_at:
-                        await client.patch(
-                            f"{MICROSOFT_GRAPH_BASE}/me/messages/{msg_id}",
-                            headers=headers,
-                            json={"isRead": True}
-                        )
-                        logger.info(f"E-mail Outlook {msg_id} anterior ao início da cobertura paga ignorado.")
-                        continue
-                except ValueError:
-                    logger.warning(f"Data de recebimento inválida no e-mail Outlook {msg_id}; mensagem mantida sem resposta.")
-                    continue
-            else:
-                logger.warning(f"Data de recebimento ausente no e-mail Outlook {msg_id}; mensagem mantida sem resposta.")
-                continue
-
-            if not sender_email or sender_email == my_email:
-                continue
-
-            if content_type.lower() == "html":
-                text_clean = re.sub(r"<[^>]+>", " ", body_content)
-                text_clean = html.unescape(text_clean)
-            else:
-                text_clean = body_content
-
-            body_text = clean_email_body(text_clean) or "(Email sem corpo de texto legível)"
-
-            # Filtro anti-spam / anúncios
-            is_valid, reject_reason = is_genuine_customer_inquiry(
-                sender_email=sender_email,
-                customer_name=customer_name,
-                subject=subject,
-                body=body_text,
-            )
-            if not is_valid:
-                logger.info(f"[Filtro Anti-Spam] E-mail Outlook de {sender_email} ('{subject}') ignorado: {reject_reason}")
-                await client.patch(
-                    f"{MICROSOFT_GRAPH_BASE}/me/messages/{msg_id}",
-                    headers=headers,
-                    json={"isRead": True}
-                )
-                continue
-
-            reply_text = await process_and_reply_email(
-                user_dict=user_dict,
-                integration=integration,
-                customer_email=sender_email,
-                customer_name=customer_name,
-                subject=subject,
-                incoming_content=body_text,
-                thread_id=conversation_id,
-                message_id_header=msg_id,
-            )
-
-            _PROCESSED_MESSAGE_IDS.add(processed_key)
-            # Marca como lida na Microsoft Graph
-            await client.patch(
-                f"{MICROSOFT_GRAPH_BASE}/me/messages/{msg_id}",
-                headers=headers,
-                json={"isRead": True}
-            )
-
-            processed_items.append({
-                "message_id": msg_id,
-                "from": sender_email,
-                "subject": subject,
-                "reply": reply_text
-            })
-
-    return processed_items
-
-
 async def process_and_reply_email(
     user_dict: dict,
     integration: dict,
@@ -1495,203 +1180,12 @@ async def process_and_reply_email(
     return reply_text
 
 
-def extract_imap_body(msg: email.message.Message) -> str:
-    """Extrai texto legível de uma mensagem de e-mail MIME recebida via IMAP."""
-    if msg.is_multipart():
-        for part in msg.walk():
-            ctype = part.get_content_type()
-            cdisp = str(part.get("Content-Disposition") or "")
-            if ctype == "text/plain" and "attachment" not in cdisp:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    return payload.decode(charset, errors="replace")
-        for part in msg.walk():
-            ctype = part.get_content_type()
-            cdisp = str(part.get("Content-Disposition") or "")
-            if ctype == "text/html" and "attachment" not in cdisp:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    raw_html = payload.decode(charset, errors="replace")
-                    return html.unescape(re.sub(r"<[^>]+>", " ", raw_html))
-    else:
-        payload = msg.get_payload(decode=True)
-        if payload:
-            charset = msg.get_content_charset() or "utf-8"
-            text = payload.decode(charset, errors="replace")
-            if msg.get_content_type() == "text/html":
-                return html.unescape(re.sub(r"<[^>]+>", " ", text))
-            return text
-    return ""
-
-
-async def sync_imap_emails(user_dict: dict, integration: dict) -> List[Dict[str, Any]]:
-    """
-    Sincroniza e-mails não lidos via IMAP (servidores próprios ou genéricos),
-    gera respostas inteligentes com a IA Drexier e responde de forma real ao cliente.
-    """
-    imap_host = integration.get("imap_host")
-    if not imap_host:
-        return []
-    imap_port = int(integration.get("imap_port") or 993)
-    user = integration.get("smtp_user") or integration.get("email_address")
-    password = integration.get("smtp_password")
-    my_email = (integration.get("email_address") or "").lower().strip()
-
-    cutoff_at = get_email_response_cutoff(integration)
-    if cutoff_at is None:
-        logger.warning("Sincronização IMAP bloqueada: não há data de pagamento confirmado válida.")
-        return []
-
-    processed_items = []
-
-    def _fetch_imap_messages():
-        items = []
-        try:
-            if imap_port == 993:
-                mail = imaplib.IMAP4_SSL(imap_host, imap_port)
-            else:
-                mail = imaplib.IMAP4(imap_host, imap_port)
-            mail.login(user, password)
-            mail.select("INBOX")
-            status, search_data = mail.uid("search", None, "UNSEEN")
-            if status != "OK" or not search_data or not search_data[0]:
-                try:
-                    mail.close()
-                    mail.logout()
-                except Exception:
-                    pass
-                return items
-
-            msg_ids = search_data[0].split()
-            for mid in msg_ids[-15:]:
-                res, data = mail.uid("fetch", mid, "(BODY.PEEK[])")
-                if res != "OK" or not data or not data[0]:
-                    continue
-                raw_bytes = data[0][1]
-                msg = email.message_from_bytes(raw_bytes)
-                raw_from = msg.get("From", "")
-                subject = msg.get("Subject", "Sem assunto")
-                if subject:
-                    decoded = decode_header(subject)
-                    subject = "".join(
-                        part.decode(enc or "utf-8", errors="replace") if isinstance(part, bytes) else str(part)
-                        for part, enc in decoded
-                    )
-                message_id = msg.get("Message-ID", "")
-                date_hdr = msg.get("Date")
-                sender_email, customer_name = parse_sender_info(raw_from)
-                if not sender_email or sender_email == my_email:
-                    continue
-
-                # Filtro por data de recebimento: após pagamento e ligação da integração
-                if date_hdr:
-                    try:
-                        from email.utils import parsedate_to_datetime
-                        received_at = parsedate_to_datetime(date_hdr)
-                        if received_at.tzinfo is None:
-                            received_at = received_at.replace(tzinfo=timezone.utc)
-                        received_at = received_at.astimezone(timezone.utc)
-                        if received_at < cutoff_at:
-                            mail.uid("store", mid, "+FLAGS", "\\Seen")
-                            logger.info(f"E-mail IMAP {message_id or mid} anterior ao início da cobertura paga ignorado.")
-                            continue
-                    except (TypeError, ValueError):
-                        logger.warning(f"Data de recebimento inválida no e-mail IMAP {message_id or mid}; mensagem mantida sem resposta.")
-                        continue
-                else:
-                    logger.warning(f"Data de recebimento ausente no e-mail IMAP {message_id or mid}; mensagem mantida sem resposta.")
-                    continue
-
-                body_text = clean_email_body(extract_imap_body(msg)) or "(Email sem corpo legível)"
-
-                # Filtro anti-spam / anúncios
-                is_valid, reject_reason = is_genuine_customer_inquiry(
-                    sender_email=sender_email,
-                    customer_name=customer_name,
-                    subject=subject,
-                    body=body_text,
-                )
-                if not is_valid:
-                    logger.info(f"[Filtro Anti-Spam] E-mail IMAP de {sender_email} ('{subject}') ignorado: {reject_reason}")
-                    mail.uid("store", mid, "+FLAGS", "\\Seen")
-                    continue
-
-                items.append({
-                    "uid": mid,
-                    "sender_email": sender_email,
-                    "customer_name": customer_name,
-                    "subject": subject,
-                    "body_text": body_text,
-                    "message_id": message_id,
-                })
-
-            mail.close()
-            mail.logout()
-        except Exception as e:
-            logger.warning(f"Erro ao verificar mensagens IMAP: {e}")
-        return items
-
-    loop = asyncio.get_running_loop()
-    raw_emails = await loop.run_in_executor(None, _fetch_imap_messages)
-
-    for item in raw_emails:
-        processed_key = (
-            "smtp_imap",
-            str(integration.get("id") or integration.get("email_address")),
-            item["uid"].decode() if isinstance(item["uid"], bytes) else str(item["uid"]),
-        )
-        if processed_key in _PROCESSED_MESSAGE_IDS:
-            continue
-        reply_text = await process_and_reply_email(
-            user_dict=user_dict,
-            integration=integration,
-            customer_email=item["sender_email"],
-            customer_name=item["customer_name"],
-            subject=item["subject"],
-            incoming_content=item["body_text"],
-            thread_id=None,
-            message_id_header=item["message_id"],
-        )
-
-        _PROCESSED_MESSAGE_IDS.add(processed_key)
-        def _mark_imap_message_seen():
-            mail = None
-            try:
-                if imap_port == 993:
-                    mail = imaplib.IMAP4_SSL(imap_host, imap_port)
-                else:
-                    mail = imaplib.IMAP4(imap_host, imap_port)
-                mail.login(user, password)
-                mail.select("INBOX")
-                status, _ = mail.uid("store", item["uid"], "+FLAGS", "\\Seen")
-                if status != "OK":
-                    raise RuntimeError(f"Falha ao marcar e-mail IMAP {item['uid']} como lido.")
-            finally:
-                if mail is not None:
-                    try:
-                        mail.close()
-                    finally:
-                        mail.logout()
-
-        await loop.run_in_executor(None, _mark_imap_message_seen)
-        processed_items.append({
-            "message_id": item["message_id"],
-            "from": item["sender_email"],
-            "subject": item["subject"],
-            "reply": reply_text
-        })
-
-    return processed_items
-
-
 async def sync_emails_for_user(user_id: int) -> List[Dict[str, Any]]:
     """Dispara a sincronização de e-mails para um utilizador específico."""
     with connect() as c:
         user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         integration = c.execute(
-            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
+            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected' AND provider = 'google'",
             (user_id,)
         ).fetchone()
 
@@ -1739,13 +1233,11 @@ async def sync_emails_for_user(user_id: int) -> List[Dict[str, Any]]:
         return []
     provider = integration_dict.get("provider")
 
-    processed = []
-    if provider == "google":
-        processed = await sync_google_emails(user_dict, integration_dict)
-    elif provider == "microsoft":
-        processed = await sync_microsoft_emails(user_dict, integration_dict)
-    elif provider == "smtp_imap":
-        processed = await sync_imap_emails(user_dict, integration_dict)
+    if provider != "google":
+        logger.warning("Sincronização bloqueada para provedor de e-mail não suportado.")
+        return []
+
+    processed = await sync_google_emails(user_dict, integration_dict)
 
     with connect() as c:
         c.execute(
@@ -1790,11 +1282,7 @@ async def process_confirmation_action(
 
         user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         integration = c.execute(
-            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
-            (user_id,)
-        ).fetchone()
-        wa_integration = c.execute(
-            "SELECT * FROM whatsapp_integrations WHERE user_id = ? AND status = 'connected'",
+            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected' AND provider = 'google'",
             (user_id,)
         ).fetchone()
         email_thread = c.execute(
@@ -1803,11 +1291,10 @@ async def process_confirmation_action(
             (req["contact_id"], user_id)
         ).fetchone()
 
-        is_whatsapp = ("@" not in req["contact_key"]) or (not integration and wa_integration is not None)
-        if not is_whatsapp and not integration:
+        if "@" not in req["contact_key"]:
+            raise ValueError("Este cliente não tem um endereço de e-mail para receber a confirmação.")
+        if not integration:
             raise ValueError("Nenhuma conta de e-mail conectada para envio da confirmação.")
-        if is_whatsapp and not wa_integration:
-            raise ValueError("Nenhuma conta de WhatsApp conectada para envio da confirmação.")
 
         # Histórico recente
         history_rows = c.execute(
@@ -1827,7 +1314,7 @@ async def process_confirmation_action(
     customer_name = req["name"] or req["contact_key"]
     customer_email = req["contact_key"]
 
-    channel_name = "WhatsApp" if is_whatsapp else "e-mail"
+    channel_name = "e-mail"
     sender_role = "agent"
 
     if action == "confirm":
@@ -1896,34 +1383,24 @@ async def process_confirmation_action(
             business_description=user_dict.get("business_description") or "",
         )
 
-    thread_id = email_thread["thread_id"] if email_thread and not is_whatsapp else None
-    last_message_id = email_thread["last_message_id"] if email_thread and not is_whatsapp else None
-    if email_thread and email_thread["subject"] and not is_whatsapp:
+    thread_id = email_thread["thread_id"] if email_thread else None
+    last_message_id = email_thread["last_message_id"] if email_thread else None
+    if email_thread and email_thread["subject"]:
         subject = email_thread["subject"]
         if not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
 
-    # Envia resposta oficial pelo canal correto
+    # Envia a resposta oficial pelo Gmail conectado.
     try:
-        if is_whatsapp:
-            from backend.services.whatsapp import send_whatsapp_message
-            wa_dict = dict(wa_integration)
-            await send_whatsapp_message(
-                phone_number_id=wa_dict["phone_number_id"],
-                to=req["contact_key"],
-                text=reply_text,
-                access_token=wa_dict.get("access_token") or None,
-            )
-        else:
-            await send_email(
-                integration=integration_dict,
-                to_email=customer_email,
-                subject=subject,
-                body_text=reply_text,
-                thread_id=thread_id,
-                in_reply_to=last_message_id,
-                references=last_message_id,
-            )
+        await send_email(
+            integration=integration_dict,
+            to_email=customer_email,
+            subject=subject,
+            body_text=reply_text,
+            thread_id=thread_id,
+            in_reply_to=last_message_id,
+            references=last_message_id,
+        )
     except Exception as e:
         logger.error(f"Erro ao enviar confirmação ({channel_name}): {e}")
         raise RuntimeError(f"Mensagem gerada, mas falha no envio: {str(e)}")
@@ -1971,11 +1448,7 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
 
         user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         email_integration = c.execute(
-            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
-            (user_id,),
-        ).fetchone()
-        wa_integration = c.execute(
-            "SELECT * FROM whatsapp_integrations WHERE user_id = ? AND status = 'connected'",
+            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected' AND provider = 'google'",
             (user_id,),
         ).fetchone()
         email_thread = c.execute(
@@ -1994,10 +1467,9 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
         ).fetchall()
 
     customer_key = req["contact_key"]
-    is_whatsapp = ("@" not in customer_key) or (not email_integration and wa_integration is not None)
-    if is_whatsapp and not wa_integration:
-        raise ValueError("Não há WhatsApp conectado para enviar o lembrete deste cliente.")
-    if not is_whatsapp and not email_integration:
+    if "@" not in customer_key:
+        raise ValueError("Este cliente não tem um endereço de e-mail para receber o lembrete.")
+    if not email_integration:
         raise ValueError("Não há e-mail conectado para enviar o lembrete deste cliente.")
 
     local_scheduled = scheduled_at.astimezone(BUSINESS_TIMEZONE)
@@ -2012,7 +1484,7 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
     user_dict = dict(user) if user else {}
     business_name = user_dict.get("name") or "nosso negócio"
     contact_name = req["name"] or customer_key
-    channel_name = "WhatsApp" if is_whatsapp else "e-mail"
+    channel_name = "e-mail"
     instruction = (
         f"Escreva um lembrete curto, simpático e personalizado para {contact_name}, "
         f"como continuação da conversa com {business_name}. A {req['request_type']} "
@@ -2036,30 +1508,20 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
         business_description=user_dict.get("business_description") or "",
     )
 
-    if is_whatsapp:
-        from backend.services.whatsapp import send_whatsapp_message
-        wa_dict = dict(wa_integration)
-        await send_whatsapp_message(
-            phone_number_id=wa_dict["phone_number_id"],
-            to=customer_key,
-            text=reply_text,
-            access_token=wa_dict.get("access_token") or None,
-        )
-    else:
-        integration_dict = dict(email_integration)
-        subject = email_thread["subject"] if email_thread and email_thread["subject"] else "Lembrete da sua marcação"
-        if not subject.lower().startswith("re:"):
-            subject = f"Re: {subject}"
-        last_message_id = email_thread["last_message_id"] if email_thread else None
-        await send_email(
-            integration=integration_dict,
-            to_email=customer_key,
-            subject=subject,
-            body_text=reply_text,
-            thread_id=email_thread["thread_id"] if email_thread else None,
-            in_reply_to=last_message_id,
-            references=last_message_id,
-        )
+    integration_dict = dict(email_integration)
+    subject = email_thread["subject"] if email_thread and email_thread["subject"] else "Lembrete da sua marcação"
+    if not subject.lower().startswith("re:"):
+        subject = f"Re: {subject}"
+    last_message_id = email_thread["last_message_id"] if email_thread else None
+    await send_email(
+        integration=integration_dict,
+        to_email=customer_key,
+        subject=subject,
+        body_text=reply_text,
+        thread_id=email_thread["thread_id"] if email_thread else None,
+        in_reply_to=last_message_id,
+        references=last_message_id,
+    )
 
     with connect() as c:
         c.execute(
@@ -2073,7 +1535,7 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
 
     return {
         "ok": True,
-        "channel": "whatsapp" if is_whatsapp else "email",
+        "channel": "email",
         "reply_text": reply_text,
         "scheduled_at": scheduled_at.isoformat(),
         "days_remaining": days_remaining,
@@ -2082,7 +1544,7 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
 
 async def send_owner_reply(user_id: int, contact_id: int, message_text: str) -> Dict[str, Any]:
     """
-    Envia uma resposta oficial escrita manualmente pelo proprietário via WhatsApp ou e-mail.
+    Envia uma resposta oficial escrita manualmente pelo proprietário via Gmail.
     """
     message_text = message_text.strip()
     if not message_text:
@@ -2097,12 +1559,7 @@ async def send_owner_reply(user_id: int, contact_id: int, message_text: str) -> 
             raise ValueError("Cliente não encontrado.")
 
         email_integration = c.execute(
-            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected'",
-            (user_id,)
-        ).fetchone()
-
-        wa_integration = c.execute(
-            "SELECT * FROM whatsapp_integrations WHERE user_id = ? AND status = 'connected'",
+            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected' AND provider = 'google'",
             (user_id,)
         ).fetchone()
 
@@ -2111,30 +1568,8 @@ async def send_owner_reply(user_id: int, contact_id: int, message_text: str) -> 
             (contact_id, user_id)
         ).fetchone()
 
-    is_whatsapp = ("@" not in contact["contact_key"]) or (not email_integration and wa_integration is not None)
-
-    if is_whatsapp:
-        if not wa_integration:
-            raise ValueError("Nenhuma conta de WhatsApp conectada para envio desta mensagem.")
-
-        from backend.services.whatsapp import send_whatsapp_message
-        wa_dict = dict(wa_integration)
-        await send_whatsapp_message(
-            phone_number_id=wa_dict["phone_number_id"],
-            to=contact["contact_key"],
-            text=message_text,
-            access_token=wa_dict.get("access_token") or None,
-        )
-
-        with connect() as c:
-            cur = c.execute(
-                "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'owner', ?)",
-                (user_id, contact_id, message_text)
-            )
-            msg_id = cur.lastrowid
-            c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (contact_id,))
-
-        return {"ok": True, "channel": "whatsapp", "message_id": msg_id, "content": message_text}
+    if "@" not in contact["contact_key"]:
+        raise ValueError("Este cliente não tem um endereço de e-mail para receber a resposta.")
 
     if not email_integration:
         raise ValueError("Nenhuma conta de e-mail conectada para envio. Conecte o e-mail em Configurações.")

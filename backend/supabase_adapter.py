@@ -53,12 +53,10 @@ def _format_row_for_app(table: str, row: Dict[str, Any]) -> Dict[str, Any]:
         res["mandatory_responses"] = json.dumps(res["mandatory_responses"], ensure_ascii=False)
     if "metadata" in res and isinstance(res["metadata"], (dict, list)):
         res["metadata"] = json.dumps(res["metadata"], ensure_ascii=False)
+    if "conversation_history" in res and isinstance(res["conversation_history"], (dict, list)):
+        res["conversation_history"] = json.dumps(res["conversation_history"], ensure_ascii=False)
     if "auto_reply_enabled" in res and isinstance(res["auto_reply_enabled"], bool):
         res["auto_reply_enabled"] = 1 if res["auto_reply_enabled"] else 0
-    if "webhook_subscribed" in res and isinstance(res["webhook_subscribed"], bool):
-        res["webhook_subscribed"] = 1 if res["webhook_subscribed"] else 0
-    if "phone_registered" in res and isinstance(res["phone_registered"], bool):
-        res["phone_registered"] = 1 if res["phone_registered"] else 0
     return res
 
 
@@ -83,24 +81,38 @@ def _apply_where_conditions(query, where_clause: str, params: list, param_offset
             col = col_part.split(".")[-1] if "." in col_part else col_part
             query = query.lt(col, params[p_idx])
             p_idx += 1
-        elif "=?" in c_norm:
-            col_part = c_norm.split("=?")[0].strip()
-            col = col_part.split(".")[-1] if "." in col_part else col_part
-            val = params[p_idx]
-            p_idx += 1
-            query = query.eq(col, val)
-        elif "='" in c_norm:
-            parts = c_norm.split("='")
-            col_part = parts[0].strip()
-            col = col_part.split(".")[-1] if "." in col_part else col_part
-            val = parts[1].rstrip("'").strip()
-            query = query.eq(col, val)
         elif "!=" in c_norm:
             parts = c_norm.split("!=")
             col_part = parts[0].strip()
             col = col_part.split(".")[-1] if "." in col_part else col_part
-            val = parts[1].strip().strip("'")
+            val_part = parts[1].strip()
+            if val_part == "?" and p_idx < len(params):
+                val = params[p_idx]
+                p_idx += 1
+            else:
+                val = val_part.strip("'")
             query = query.neq(col, val)
+        elif "=" in c_norm:
+            parts = c_norm.split("=", 1)
+            col_part = parts[0].strip()
+            col = col_part.split(".")[-1] if "." in col_part else col_part
+            val_part = parts[1].strip()
+            if val_part == "?" and p_idx < len(params):
+                val = params[p_idx]
+                p_idx += 1
+            elif val_part.startswith("'") and val_part.endswith("'"):
+                val = val_part[1:-1]
+            elif val_part.lower() in ("true", "false"):
+                val = val_part.lower() == "true"
+            else:
+                try:
+                    val = int(val_part)
+                except ValueError:
+                    try:
+                        val = float(val_part)
+                    except ValueError:
+                        val = val_part.strip("'")
+            query = query.eq(col, val)
 
     return query, p_idx
 
@@ -338,29 +350,62 @@ class SupabaseCursor:
                     except ValueError:
                         val = token
 
-                if col in ("mandatory_responses", "metadata") and isinstance(val, str):
+                if col in ("mandatory_responses", "metadata", "conversation_history") and isinstance(val, str):
                     try:
                         val = json.loads(val)
                     except Exception:
-                        val = {}
+                        val = [] if col == "conversation_history" else {}
                 elif col in ("auto_reply_enabled", "webhook_subscribed", "phone_registered"):
                     val = bool(val)
 
                 insert_data[col] = val
 
             is_upsert = "OR REPLACE" in clean_sql.upper() or "ON CONFLICT" in clean_sql.upper()
+            on_conflict_col = None
+            if "ON CONFLICT" in clean_sql.upper():
+                conf_m = re.search(r"ON\s+CONFLICT\s*\(\s*(\w+)\s*\)", clean_sql, re.IGNORECASE)
+                if conf_m:
+                    on_conflict_col = conf_m.group(1)
 
             try:
                 if is_upsert:
-                    res = self.client.table(table).upsert(insert_data).execute()
+                    if on_conflict_col:
+                        try:
+                            res = self.client.table(table).upsert(insert_data, on_conflict=on_conflict_col).execute()
+                        except TypeError:
+                            res = self.client.table(table).upsert(insert_data).execute()
+                    else:
+                        res = self.client.table(table).upsert(insert_data).execute()
                 else:
                     res = self.client.table(table).insert(insert_data).select("*").execute()
             except Exception as e:
                 err_str = str(e)
-                if "duplicate key" in err_str or "23505" in err_str:
+                # Mantém o comportamento quando uma tabela opcional não existe.
+                if "PGRST205" in err_str or "schema cache" in err_str.lower():
+                    logger.warning(f"[SupabaseCursor] Tabela {table} ausente no Supabase; prosseguindo sem deduplicação persistida.")
+                    self.lastrowid = 1
+                    self.rowcount = 1
+                    self._rows = []
+                    return self
+
+                # Se for coluna inexistente, remove e tenta de novo para compatibilidade.
+                if "42703" in err_str or "does not exist" in err_str.lower():
+                    col_m = re.search(r"column\s+[\w\.]+\.(\w+)\s+does not exist", err_str, re.IGNORECASE)
+                    missing_col = col_m.group(1) if col_m else None
+                    if missing_col and missing_col in insert_data:
+                        logger.warning(f"[SupabaseCursor] Removendo coluna inexistente '{missing_col}' de {table} para compatibilidade.")
+                        insert_data.pop(missing_col, None)
+                        if is_upsert:
+                            res = self.client.table(table).upsert(insert_data, on_conflict=on_conflict_col).execute() if on_conflict_col else self.client.table(table).upsert(insert_data).execute()
+                        else:
+                            res = self.client.table(table).insert(insert_data).select("*").execute()
+                    else:
+                        raise
+                elif "duplicate key" in err_str or "23505" in err_str:
                     raise Exception(f"UNIQUE constraint failed: {err_str}") from e
-                logger.exception(f"[SupabaseCursor] Falha no insert em {table}")
-                raise
+                else:
+                    logger.exception(f"[SupabaseCursor] Falha no insert em {table}")
+                    raise
 
             if res.data and len(res.data) > 0:
                 inserted_row = res.data[0]
@@ -396,6 +441,8 @@ class SupabaseCursor:
                 if val_token == "?":
                     val = p[param_idx]
                     param_idx += 1
+                elif val_token.upper() == "NULL":
+                    val = None
                 elif val_token.upper() in ("CURRENT_TIMESTAMP", "NOW()"):
                     val = datetime.now(timezone.utc).isoformat()
                 elif val_token.startswith("'") and val_token.endswith("'"):
@@ -406,11 +453,11 @@ class SupabaseCursor:
                     except ValueError:
                         val = val_token
 
-                if col in ("mandatory_responses", "metadata") and isinstance(val, str):
+                if col in ("mandatory_responses", "metadata", "conversation_history") and isinstance(val, str):
                     try:
                         val = json.loads(val)
                     except Exception:
-                        val = {}
+                        val = [] if col == "conversation_history" else {}
                 elif col in ("auto_reply_enabled", "webhook_subscribed", "phone_registered"):
                     val = bool(val)
 
@@ -472,7 +519,28 @@ class SupabaseCursor:
                 if limit_clause:
                     query = query.limit(int(limit_clause))
 
-                res = query.execute()
+                try:
+                    res = query.execute()
+                except Exception as ex:
+                    err_s = str(ex)
+                    if ("42703" in err_s or "does not exist" in err_s.lower()) and cols_str != "*":
+                        logger.warning(f"[SupabaseCursor] Coluna ausente em {table} ({err_s}). Tentando fallback select('*').")
+                        query_fallback = self.client.table(table).select("*")
+                        if where_clause:
+                            query_fallback, _ = _apply_where_conditions(query_fallback, where_clause, p, 0)
+                        if order_clause:
+                            query_fallback = query_fallback.order(col_order, desc=desc)
+                        if limit_clause:
+                            query_fallback = query_fallback.limit(int(limit_clause))
+                        res = query_fallback.execute()
+                    elif "PGRST205" in err_s or "schema cache" in err_s.lower():
+                        logger.warning(f"[SupabaseCursor] Tabela {table} ausente no Supabase.")
+                        self._rows = []
+                        self.rowcount = 0
+                        return self
+                    else:
+                        raise
+
                 rows = [_format_row_for_app(table, r) for r in res.data]
                 self._rows = [SupabaseRow(r) for r in rows]
                 self.rowcount = len(self._rows)

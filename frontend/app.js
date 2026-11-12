@@ -568,7 +568,8 @@ async function api(url, options = {}) {
     if (!signal && typeof AbortController !== "undefined") {
       controller = new AbortController();
       signal = controller.signal;
-      setTimeout(() => controller.abort(), 12000);
+      const timeoutMs = Number(options.timeoutMs) || 45000;
+      setTimeout(() => controller.abort(), timeoutMs);
     }
 
     try {
@@ -1184,7 +1185,7 @@ async function navigate(page) {
       loadInfo().catch((e) => showNotice(e.message, true));
     } else if (page === "settings") {
       fillSettings();
-      Promise.allSettled([loadMe(), loadEmailStatus(), loadWhatsAppStatus(), loadBillingStatus()]).catch(() => {});
+      Promise.allSettled([loadMe(), loadEmailStatus(), loadBillingStatus()]).catch(() => {});
     }
   } catch (e) {
     showNotice(e.message, true);
@@ -1222,16 +1223,19 @@ function hideChartTooltip() {
    DYNAMIC AGENT TOPBAR STATUS HELPER
    ============================================================ */
 let currentAgentState = "ready";
+let isEmailConnected = false;
+
 function setAgentStatus(state) {
   currentAgentState = state;
   const topbar = $("#topbar-agent-status");
   const side = $("#side-agent-status");
+  const cssClass = state === "ready" ? "active" : (state === "paused" ? "inactive" : state);
 
   if (topbar) {
-    topbar.className = `topbar-agent-pill ${state === "ready" ? "active" : state}`;
+    topbar.className = `topbar-agent-pill ${cssClass}`;
     const txt = topbar.querySelector("span:last-child");
     if (txt) {
-      if (state === "ready") txt.textContent = "IA Pronta";
+      if (state === "ready") txt.textContent = "IA Ativa";
       else if (state === "responding") txt.textContent = "A responder...";
       else if (state === "paused") txt.textContent = "Agente Desativado";
       else if (state === "disconnected") txt.textContent = "Desconectado";
@@ -1239,7 +1243,7 @@ function setAgentStatus(state) {
   }
 
   if (side) {
-    side.className = `sidebar-agent-status ${state === "ready" ? "active" : state}`;
+    side.className = `sidebar-agent-status ${cssClass}`;
     const txt = side.querySelector("span:last-child");
     if (txt) {
       if (state === "ready") txt.textContent = "Agente Ativo";
@@ -1247,6 +1251,30 @@ function setAgentStatus(state) {
       else if (state === "paused") txt.textContent = "Agente Desativado";
       else if (state === "disconnected") txt.textContent = "Desconectado";
     }
+  }
+}
+
+function syncGlobalAgentState() {
+  const hasChannel = Boolean(isEmailConnected);
+  const isEnabled = typeof currentAutomationLevel !== "undefined" && currentAutomationLevel !== "disabled";
+
+  const agentSwitchBtn = $("#btn-toggle-agent-global");
+  if (agentSwitchBtn) {
+    agentSwitchBtn.disabled = false;
+    agentSwitchBtn.classList.toggle("active", isEnabled);
+    agentSwitchBtn.setAttribute("aria-checked", isEnabled ? "true" : "false");
+    agentSwitchBtn.setAttribute(
+      "aria-label",
+      isEnabled ? "Desativar respostas automáticas do agente" : "Ativar respostas automáticas do agente"
+    );
+  }
+
+  if (!hasChannel) {
+    setAgentStatus("disconnected");
+  } else if (isEnabled) {
+    setAgentStatus("ready");
+  } else {
+    setAgentStatus("paused");
   }
 }
 
@@ -1931,14 +1959,23 @@ function renderContactsList(contacts) {
     const info = document.createElement("div");
     info.className = "contact-card-info";
 
-    const isWa = !c.contact_key.includes("@");
+    const hasEmail = c.contact_key.includes("@");
+    const isWebsite = c.contact_key.startsWith("web_");
     const name = document.createElement("div");
     name.className = "contact-card-name";
     name.textContent = c.name || c.contact_key;
 
     const channelBadge = document.createElement("span");
-    channelBadge.className = isWa ? "contact-channel-badge wa" : "contact-channel-badge email";
-    channelBadge.textContent = isWa ? "WhatsApp" : "Gmail";
+    if (isWebsite) {
+      channelBadge.className = "contact-channel-badge website";
+      channelBadge.textContent = "Website";
+    } else if (hasEmail) {
+      channelBadge.className = "contact-channel-badge email";
+      channelBadge.textContent = "Gmail";
+    } else {
+      channelBadge.className = "contact-channel-badge";
+      channelBadge.textContent = "Sem e-mail";
+    }
     name.appendChild(channelBadge);
 
     const email = document.createElement("div");
@@ -1982,14 +2019,14 @@ $("#refresh-contacts")?.addEventListener("click", () => loadContacts(true).catch
 async function openConversation(id) {
   selectedContact = id;
   const c = contactsCache.find(x => x.id === id);
-  const isWa = c && !c.contact_key.includes("@");
+  const hasEmail = c && c.contact_key.includes("@");
 
   // Destacar o card selecionado na lista
   $$(".contact-card-item").forEach(el => el.classList.remove("active"));
   renderContactsList(contactsCache);
 
   $("#conversation-title").textContent = c ? (c.name || c.contact_key) : "Conversa";
-  $("#conversation-subtitle").textContent = c ? (isWa ? `WhatsApp: ${c.contact_key}` : `Gmail Oficial: ${c.contact_key}`) : "";
+  $("#conversation-subtitle").textContent = c ? (hasEmail ? `Gmail Oficial: ${c.contact_key}` : `Sem e-mail: ${c.contact_key}`) : "";
   $("#btn-delete-conversation")?.classList.remove("hidden");
 
   // Atualizar Coluna 3: Perfil do Cliente
@@ -2134,12 +2171,10 @@ $("#owner-reply-form")?.addEventListener("submit", async e => {
   if (!msg) return;
 
   const c = contactsCache.find(x => x.id === selectedContact);
-  const isWa = c && !c.contact_key.includes("@");
-
   const btn = $("#btn-send-owner-reply");
   const originalText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = isWa ? "A enviar por WhatsApp..." : "A enviar por e-mail...";
+  btn.textContent = "A enviar por e-mail...";
 
   try {
     const res = await api(`/api/contacts/${selectedContact}/reply`, {
@@ -2147,7 +2182,7 @@ $("#owner-reply-form")?.addEventListener("submit", async e => {
       body: JSON.stringify({ message: msg })
     });
     input.value = "";
-    showNotice(res.channel === "whatsapp" ? "Mensagem oficial entregue no WhatsApp do cliente!" : (res.detail || "Resposta oficial entregue com sucesso no e-mail do cliente!"));
+    showNotice(res.detail || "Resposta oficial entregue com sucesso no e-mail do cliente!");
     await renderConversationMessages(selectedContact, true);
     await loadContacts(true);
   } catch (err) {
@@ -3965,7 +4000,7 @@ $$("[data-setting]").forEach(b => b.addEventListener("click", () => {
   $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== `setting-${b.dataset.setting}`));
   if (b.dataset.setting === "integration") {
     loadEmailStatus();
-    loadWhatsAppStatus();
+    loadWebsiteIntegrationStatus(true);
   }
   if (b.dataset.setting === "billing") {
     loadBillingStatus();
@@ -4385,321 +4420,7 @@ $("#delete-account-form")?.addEventListener("submit", async e => {
 });
 
 /* ════════════════════════════════════════════════════════════
-   SELEÇÃO DOS CANAIS DE INTEGRAÇÃO
-   ════════════════════════════════════════════════════════════ */
-function switchIntegrationChannel(channel) {
-  const isWhatsApp = channel === "whatsapp";
-  $("#channel-email-section")?.classList.toggle("hidden", isWhatsApp);
-  $("#channel-whatsapp-section")?.classList.toggle("hidden", !isWhatsApp);
-  $("#tab-channel-email")?.classList.toggle("is-channel-active", !isWhatsApp);
-  $("#tab-channel-whatsapp")?.classList.toggle("is-channel-active", isWhatsApp);
-  if (isWhatsApp) loadWhatsAppStatus();
-  else loadEmailStatus();
-}
-
-$("#tab-channel-email")?.addEventListener("click", () => switchIntegrationChannel("email"));
-$("#tab-channel-whatsapp")?.addEventListener("click", () => switchIntegrationChannel("whatsapp"));
-
-let whatsappConfig = null;
-let facebookSdkPromise = null;
-let facebookSdkConfigKey = "";
-let whatsappSignupSession = null;
-let rejectWhatsappLogin = null;
-
-function initializeFacebookSdk(config) {
-  const configKey = `${config.app_id}:${config.version}`;
-  if (window.FB && facebookSdkConfigKey === configKey) {
-    return Promise.resolve(window.FB);
-  }
-  if (window.FB) {
-    window.FB.init({ appId: config.app_id, cookie: true, xfbml: false, version: config.version });
-    facebookSdkConfigKey = configKey;
-    return Promise.resolve(window.FB);
-  }
-  if (facebookSdkPromise) return facebookSdkPromise;
-
-  facebookSdkPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.async = true;
-    script.defer = true;
-    script.crossOrigin = "anonymous";
-    script.src = "https://connect.facebook.net/en_US/sdk.js";
-    script.onload = () => {
-      if (!window.FB) {
-        reject(new Error("O SDK oficial de login da Meta não ficou disponível."));
-        return;
-      }
-      window.FB.init({ appId: config.app_id, cookie: true, xfbml: false, version: config.version });
-      facebookSdkConfigKey = configKey;
-      resolve(window.FB);
-    };
-    script.onerror = () => reject(new Error("Não foi possível carregar o SDK oficial da Meta."));
-    document.head.appendChild(script);
-  }).catch(error => {
-    facebookSdkPromise = null;
-    throw error;
-  });
-  return facebookSdkPromise;
-}
-
-window.addEventListener("message", event => {
-  const isMetaOrigin = event.origin.startsWith("https://")
-    && /(^|\.)facebook\.com$/.test(new URL(event.origin).hostname);
-  if (!isMetaOrigin) return;
-  let payload = event.data;
-  if (typeof payload === "string") {
-    try { payload = JSON.parse(payload); } catch (_) { return; }
-  }
-  if (!payload || payload.type !== "WA_EMBEDDED_SIGNUP") return;
-  const data = payload.data || {};
-  console.info("[Drexier] META EMBEDDED SIGNUP:", {
-    event: payload.event || "unknown",
-    currentStep: data.current_step || null,
-    hasPhoneNumberId: Boolean(data.phone_number_id),
-    hasMessagingAccountIds: Array.isArray(data.messaging_account_ids) && data.messaging_account_ids.length > 0,
-    isOnBusinessApp: Boolean(data.is_on_biz_app),
-    errorCode: data.error_code || null,
-    hasErrorMessage: Boolean(data.error_message)
-  });
-  if (payload.event === "FINISH" || payload.event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING") {
-    whatsappSignupSession = {
-      ...data,
-      waba_id: data.waba_id
-        || data.messaging_account_ids?.[0]
-        || data.waba_ids?.[0]
-        || ""
-    };
-  } else if (payload.event === "CANCEL" || payload.event === "ERROR") {
-    const details = [
-      data.current_step && `etapa ${data.current_step}`,
-      data.error_code && `código ${data.error_code}`,
-      data.error_message
-    ].filter(Boolean).join("; ");
-    const error = new Error(
-      details
-        ? `A Meta ${payload.event === "CANCEL" ? "interrompeu" : "reportou um erro no"} fluxo (${details}).`
-        : `A Meta ${payload.event === "CANCEL" ? "interrompeu" : "reportou um erro no"} fluxo de conexão.`
-    );
-    rejectWhatsappLogin?.(error);
-  }
-});
-
-async function loadWhatsAppStatus() {
-  const loading = $("#whatsapp-loading-state");
-  const disconnectedView = $("#whatsapp-disconnected-view");
-  const connectedView = $("#whatsapp-connected-view");
-  const configWarning = $("#whatsapp-config-warning");
-  const connectButton = $("#btn-connect-whatsapp");
-  if (!loading || !disconnectedView || !connectedView) return;
-
-  connectButton?.setAttribute("disabled", "");
-  loading.classList.remove("hidden");
-  disconnectedView.classList.add("hidden");
-  connectedView.classList.add("hidden");
-  try {
-    const [config, status] = await Promise.all([
-      api("/api/whatsapp/config"),
-      api("/api/whatsapp/status")
-    ]);
-    whatsappConfig = config;
-    $("#whatsapp-webhook-url").textContent = config.webhook_url
-      ? `Webhook: ${config.webhook_url}`
-      : "Defina PUBLIC_URL com o endereço HTTPS público do servidor.";
-    configWarning?.classList.toggle("hidden", Boolean(config.configured));
-    connectButton?.toggleAttribute("disabled", !config.configured);
-    $("#btn-connect-whatsapp-env")?.classList.toggle("hidden", !status.can_connect_env);
-
-    const badge = $("#whatsapp-status-badge");
-    const pill = $("#pill-whatsapp-status");
-    if (status.connected && status.integration) {
-      const integration = status.integration;
-      badge.textContent = "Conectado";
-      badge.className = "badge badge-connected";
-      pill.textContent = "Conectado";
-      pill.className = "badge badge-connected";
-      $("#whatsapp-display-name").textContent = integration.business_name || "WhatsApp conectado";
-      $("#whatsapp-display-number").textContent = integration.phone_number || "";
-      $("#whatsapp-info-waba").textContent = integration.waba_id || "-";
-      $("#whatsapp-info-webhook").textContent = integration.webhook_subscribed ? "Ativo" : "Não subscrito";
-      $("#whatsapp-info-phone-registration").textContent = integration.phone_registered ? "Registado" : "Pendente";
-      $("#whatsapp-registration-form")?.classList.toggle("hidden", integration.phone_registered);
-      $("#whatsapp-info-auto-reply").textContent = integration.auto_reply_enabled ? "Ativas" : "Pausadas";
-      $("#whatsapp-info-created").textContent = integration.created_at
-        ? new Date(integration.created_at).toLocaleString("pt-PT")
-        : "-";
-      connectedView.classList.remove("hidden");
-    } else {
-      badge.textContent = "Desconectado";
-      badge.className = "badge badge-disconnected";
-      pill.textContent = "Desconectado";
-      pill.className = "badge";
-      disconnectedView.classList.remove("hidden");
-    }
-
-    if (config.configured) {
-      try {
-        await initializeFacebookSdk(config);
-        connectButton?.removeAttribute("disabled");
-        $("#whatsapp-connect-status").textContent = "";
-      } catch (error) {
-        console.warn("[Drexier] SDK Meta indisponível:", error);
-        $("#whatsapp-connect-status").textContent = "Não foi possível carregar o SDK da Meta. Atualize a página e tente novamente.";
-      }
-    }
-  } catch (error) {
-    $("#whatsapp-status-badge").textContent = "Erro ao verificar";
-    disconnectedView.classList.remove("hidden");
-    showNotice(`Não foi possível carregar o estado do WhatsApp: ${error.message}`, true);
-  } finally {
-    loading.classList.add("hidden");
-  }
-}
-
-async function finishWhatsappConnection(payload) {
-  const result = await api("/api/whatsapp/connect", {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
-  await loadWhatsAppStatus();
-  showNotice(result.message || "WhatsApp conectado com sucesso.");
-}
-
-$("#btn-connect-whatsapp")?.addEventListener("click", async () => {
-  if (!paywallCheck()) return;
-  const status = $("#whatsapp-connect-status");
-  const config = whatsappConfig;
-  if (!config?.configured) {
-    showNotice("A configuração do aplicativo da Meta está incompleta no servidor.", true);
-    return;
-  }
-  const fb = window.FB;
-  if (!fb || facebookSdkConfigKey !== `${config.app_id}:${config.version}`) {
-    showNotice("O SDK da Meta ainda não está pronto. Atualize a página e tente novamente.", true);
-    return;
-  }
-
-  try {
-    whatsappSignupSession = null;
-    status.textContent = "A abrir o fluxo seguro de autorização da Meta...";
-    const auth = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        rejectWhatsappLogin = null;
-        reject(new Error("FB.login não chamou o callback em 90 segundos. A janela da Meta pode ainda estar aberta ou o domínio/configuração OAuth pode não estar autorizado."));
-      }, 90000);
-      rejectWhatsappLogin = error => {
-        clearTimeout(timeout);
-        rejectWhatsappLogin = null;
-        reject(error);
-      };
-      try {
-        fb.login(response => {
-          clearTimeout(timeout);
-          rejectWhatsappLogin = null;
-          const metaError = response?.error;
-          console.info("[Drexier] META RESPONSE:", {
-            status: response?.status || "desconhecido",
-            hasAuthResponse: Boolean(response?.authResponse),
-            hasAuthorizationCode: Boolean(response?.authResponse?.code),
-            errorCode: metaError?.code || null,
-            errorType: metaError?.type || null,
-            hasErrorMessage: Boolean(metaError?.message)
-          });
-          if (response?.authResponse?.code) resolve(response.authResponse.code);
-          const reason = metaError?.message || `estado "${response?.status || "desconhecido"}"`;
-          reject(new Error(`A Meta não devolveu o authorization code (${reason}). Confirme a configuração Facebook Login for Business e o domínio autorizado.`));
-        }, {
-          config_id: config.config_id,
-          response_type: "code",
-          extras: {
-            setup: {}
-          },
-          override_default_response_type: true
-        });
-      } catch (error) {
-        clearTimeout(timeout);
-        rejectWhatsappLogin = null;
-        reject(error);
-      }
-    });
-    status.textContent = "Autorização concluída; a trocar o código e a localizar a conta WhatsApp...";
-    const session = whatsappSignupSession || {};
-    await finishWhatsappConnection({
-      code: auth,
-      waba_id: session.waba_id,
-      phone_number_id: session.phone_number_id || "",
-      business_name: session.business_name || ""
-    });
-    status.textContent = "";
-  } catch (error) {
-    status.textContent = "";
-    showNotice(`Não foi possível conectar o WhatsApp: ${error.message}`, true);
-  }
-});
-
-$("#btn-connect-whatsapp-env")?.addEventListener("click", async () => {
-  if (!paywallCheck()) return;
-  try {
-    await finishWhatsappConnection({ use_env: true });
-  } catch (error) {
-    showNotice(`Não foi possível conectar o número configurado no servidor: ${error.message}`, true);
-  }
-});
-
-$("#btn-whatsapp-disconnect")?.addEventListener("click", async () => {
-  if (!confirm("Desconectar este número WhatsApp? O agente deixará de responder às mensagens recebidas.")) return;
-  try {
-    await api("/api/whatsapp/disconnect", { method: "POST" });
-    showNotice("WhatsApp desconectado.");
-    await loadWhatsAppStatus();
-  } catch (error) {
-    showNotice(error.message, true);
-  }
-});
-
-$("#whatsapp-registration-form")?.addEventListener("submit", async event => {
-  event.preventDefault();
-  if (!paywallCheck()) return;
-  const form = event.currentTarget;
-  const button = $("#btn-whatsapp-register");
-  button.disabled = true;
-  const pin = new FormData(form).get("pin");
-  try {
-    await api("/api/whatsapp/register", {
-      method: "POST",
-      body: JSON.stringify({ pin })
-    });
-    showNotice("Número registado na WhatsApp Cloud API.");
-    await loadWhatsAppStatus();
-  } catch (error) {
-    showNotice(error.message, true);
-  } finally {
-    form.reset();
-    button.disabled = false;
-  }
-});
-
-$("#whatsapp-test-send-form")?.addEventListener("submit", async event => {
-  event.preventDefault();
-  if (!paywallCheck()) return;
-  const form = event.currentTarget;
-  const button = $("#btn-whatsapp-test-send");
-  button.disabled = true;
-  try {
-    const values = Object.fromEntries(new FormData(form));
-    await api("/api/whatsapp/test-send", {
-      method: "POST",
-      body: JSON.stringify(values)
-    });
-    showNotice("Mensagem de teste enviada pela Cloud API oficial.");
-  } catch (error) {
-    showNotice(`Falha ao enviar mensagem de teste: ${error.message}`, true);
-  } finally {
-    button.disabled = false;
-  }
-});
-
-/* ════════════════════════════════════════════════════════════
-   INTEGRAÇÃO DE E-MAIL OFICIAL (GOOGLE GMAIL & MICROSOFT OUTLOOK)
+   INTEGRAÇÃO DE E-MAIL OFICIAL (GOOGLE GMAIL)
    ════════════════════════════════════════════════════════════ */
 let emailConfig = null;
 
@@ -4718,7 +4439,7 @@ async function loadEmailStatus() {
   connectedView.classList.add("hidden");
 
   try {
-    // 1. Obtém a configuração pública de provedores (Google e Microsoft)
+    // 1. Obtém a configuração pública do Google
     try {
       emailConfig = await api("/api/email/config");
       const hasConfig = emailConfig && emailConfig.google?.configured;
@@ -4745,10 +4466,7 @@ async function loadEmailStatus() {
         emailPill.className = "channel-pill connected";
       }
 
-      let providerName = "E-mail Oficial";
-      if (it.provider === "google") providerName = "Google Gmail";
-      else if (it.provider === "microsoft") providerName = "Microsoft Outlook";
-      else if (it.provider === "smtp_imap") providerName = "Servidor SMTP / IMAP";
+      const providerName = "Google Gmail";
 
       const dispProvider = $("#email-display-provider");
       const dispAddr = $("#email-display-address");
@@ -4770,9 +4488,11 @@ async function loadEmailStatus() {
           : "Aguardando pagamento confirmado";
       }
 
+      isEmailConnected = true;
       updateAutoReplyUI(Boolean(it.auto_reply_enabled), true);
       connectedView.classList.remove("hidden");
     } else {
+      isEmailConnected = false;
       updateAutoReplyUI(false, false);
       if (badge) {
         badge.textContent = "Desconectado";
@@ -4785,6 +4505,7 @@ async function loadEmailStatus() {
       }
       disconnectedView.classList.remove("hidden");
     }
+    syncGlobalAgentState();
   } catch (err) {
     loading.classList.add("hidden");
     disconnectedView.classList.remove("hidden");
@@ -4853,37 +4574,19 @@ async function handleEmailSync(triggerBtn) {
 $("#btn-email-sync")?.addEventListener("click", (e) => handleEmailSync(e.target));
 $("#btn-sync-emails-messages")?.addEventListener("click", (e) => handleEmailSync(e.target));
 
-// Controlo de Respostas Automáticas do Agente
+// Controlo de Respostas Automáticas do E-mail
 function updateAutoReplyUI(enabled, connected = true) {
-  if (!connected) {
-    setAgentStatus("disconnected");
-  } else if (enabled) {
-    setAgentStatus("ready");
-  } else {
-    setAgentStatus("paused");
-  }
   const autoReplyText = $("#email-info-auto-reply");
   const autoReplyBtn = $("#btn-toggle-auto-reply");
   const msgToggleBtn = $("#btn-toggle-auto-reply-messages");
   const liveStatusDot = $("#live-status-dot");
   const liveStatusBar = $("#conversation-live-status");
   const liveStatusText = $("#live-status-text");
-  const agentSwitchBtn = $("#btn-toggle-agent-global");
-
-  if (agentSwitchBtn) {
-    agentSwitchBtn.classList.toggle("active", Boolean(enabled && connected));
-    agentSwitchBtn.setAttribute("aria-checked", Boolean(enabled && connected) ? "true" : "false");
-    agentSwitchBtn.disabled = !connected;
-    agentSwitchBtn.setAttribute(
-      "aria-label",
-      enabled && connected ? "Desativar respostas automáticas do agente" : "Ativar respostas automáticas do agente"
-    );
-  }
 
   if (!connected) {
     if (autoReplyText) {
       autoReplyText.textContent = "Desconectado";
-      autoReplyText.className = "wa-text-gray";
+      autoReplyText.className = "integration-text-muted";
     }
     if (autoReplyBtn) {
       autoReplyBtn.textContent = "Desativado";
@@ -4901,7 +4604,7 @@ function updateAutoReplyUI(enabled, connected = true) {
   if (enabled) {
     if (autoReplyText) {
       autoReplyText.textContent = "Ativa";
-      autoReplyText.className = "wa-text-green";
+      autoReplyText.className = "integration-text-success";
     }
     if (autoReplyBtn) {
       autoReplyBtn.textContent = "Desativar";
@@ -4920,7 +4623,7 @@ function updateAutoReplyUI(enabled, connected = true) {
   } else {
     if (autoReplyText) {
       autoReplyText.textContent = "Pausada";
-      autoReplyText.className = "wa-text-gray";
+      autoReplyText.className = "integration-text-muted";
     }
     if (autoReplyBtn) {
       autoReplyBtn.textContent = "Ativar";
@@ -4968,34 +4671,588 @@ async function toggleAutoReply() {
 $("#btn-toggle-auto-reply")?.addEventListener("click", toggleAutoReply);
 $("#btn-toggle-auto-reply-messages")?.addEventListener("click", toggleAutoReply);
 
-// Botão interruptor de ativação do agente na aba Mensagens (Switch com animação)
-const agentGlobalBtn2 = $("#btn-toggle-agent-global");
-if (agentGlobalBtn2) {
-  agentGlobalBtn2.onclick = async () => {
-    if (!paywallCheck()) return;
-    try {
-      const statusData = await api("/api/email/status");
-      if (!statusData.connected) {
-        showNotice("Conecte primeiro o seu e-mail comercial Google Gmail nas configurações.", true);
-        return;
-      }
-      const currentEnabled = Boolean(statusData.integration.auto_reply_enabled);
-      const newEnabled = !currentEnabled;
-      // Animação imediata na UI para alta reatividade
-      agentGlobalBtn2.classList.toggle("active", newEnabled);
-      agentGlobalBtn2.setAttribute("aria-checked", newEnabled ? "true" : "false");
-      const res = await api("/api/email/auto-reply", {
-        method: "POST",
-        body: JSON.stringify({ enabled: newEnabled })
-      });
-      updateAutoReplyUI(!!res.auto_reply_enabled, true);
-      showNotice(res.auto_reply_enabled ? "Agente ativado com sucesso! As respostas automáticas estão ativas." : "Agente pausado com sucesso.");
-      await loadEmailStatus();
-    } catch (err) {
-      showNotice(err.message, true);
-      await loadEmailStatus();
+/* ════════════════════════════════════════════════════════════
+   INTEGRAÇÃO DE WEBSITES (CHATBOT IA & HEAD SCRIPT)
+   ════════════════════════════════════════════════════════════ */
+
+let currentWebsiteIntegration = null;
+let isWebsiteLoading = false;
+let websitePollTimer = null;
+
+function updateWebsiteStatusBadge(status, errorMsg) {
+  const badge = $("#website-status-badge");
+  const pill = $("#pill-website-status");
+  const banner = $("#website-connection-banner");
+  const bannerTitle = $("#website-banner-title");
+  const bannerDesc = $("#website-banner-desc");
+
+  let label = "Pendente";
+  let badgeClass = "badge badge-pending";
+  let pillClass = "badge badge-pending";
+  let title = "Estado da Instalação: Pendente";
+  let desc = "O código exclusivo foi gerado. Cole-o na secção <head> do seu website para ativar a comunicação.";
+  let borderLeftColor = "#f59e0b";
+
+  if (status === "active") {
+    label = "Ativo";
+    badgeClass = "badge badge-connected";
+    pillClass = "badge badge-connected";
+    title = "Website Conectado e Ativo";
+    desc = "A ligação entre o seu website e o servidor Drexier está confirmada. O agente está pronto para atender os visitantes!";
+    borderLeftColor = "var(--lime-arcade)";
+  } else if (status === "disconnected") {
+    label = "Desconectado";
+    badgeClass = "badge badge-disconnected";
+    pillClass = "badge badge-disconnected";
+    title = "Website Desconectado";
+    desc = errorMsg || "A ligação com o website foi interrompida ou o código do widget foi removido.";
+    borderLeftColor = "var(--orange-arcade)";
+  } else if (status === "error") {
+    label = "Erro";
+    badgeClass = "badge badge-error";
+    pillClass = "badge badge-error";
+    title = "Falha na Validação da Ligação";
+    desc = errorMsg || "Ocorreu uma falha na validação do domínio ou na comunicação com o website.";
+    borderLeftColor = "#ef4444";
+  }
+
+  if (badge) {
+    badge.textContent = label;
+    badge.className = badgeClass;
+  }
+  if (pill) {
+    pill.textContent = label;
+    pill.className = pillClass;
+  }
+  if (banner) {
+    banner.style.borderLeftColor = borderLeftColor;
+  }
+  if (bannerTitle) bannerTitle.textContent = title;
+  if (bannerDesc) bannerDesc.textContent = desc;
+}
+
+function renderWebsiteActiveInstructions(history, initialPrompt, instructions, config) {
+  const textEl = $("#website-active-instructions-text");
+  const pillEl = $("#website-instructions-status-pill");
+  if (!textEl) return;
+
+  const list = Array.isArray(history) && history.length > 0 ? history : [];
+  const userMessages = list.filter(m => m.sender === "user").map(m => m.content);
+
+  const cfg = config || currentWebsiteIntegration || {};
+  const currentColor = cfg.theme_color || "#18181b";
+  const currentPos = cfg.position === "bottom-left" ? "Canto Inferior Esquerdo" : "Canto Inferior Direito";
+  const currentName = cfg.agent_name || "Agente Drexier";
+  const currentRadius = cfg.border_radius === "4px" ? "Cantos Retos (4px)" : (cfg.border_radius === "24px" ? "Cápsula (24px)" : "Arredondado Suave (16px)");
+  const currentShape = cfg.button_shape === "square" ? "Botão Quadrado" : (cfg.button_shape === "pill" ? "Botão Pílula" : "Botão Circular");
+  const currentMode = cfg.theme_mode === "dark" ? "Dark Mode (Escuro)" : "Light Clean (Neutro)";
+  const isNeutralDefault = (currentColor === "#18181b" || currentColor === "#111827") && (cfg.position || "bottom-right") === "bottom-right" && userMessages.length === 0;
+
+  if (pillEl) {
+    if (isNeutralDefault) {
+      pillEl.textContent = "Padrão Neutro";
+      pillEl.className = "badge";
+      pillEl.style.background = "var(--surface-interaction)";
+      pillEl.style.color = "var(--text-tertiary)";
+    } else {
+      const count = userMessages.length || (instructions ? 1 : 0);
+      pillEl.textContent = `${count} Diretriz(es) Ativa(s)`;
+      pillEl.className = "badge badge-active";
+      pillEl.style.background = "var(--surface-interaction)";
+      pillEl.style.color = "var(--text-primary)";
     }
+  }
+
+  let html = `
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:12px;">
+      <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 12px;">
+        <div class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Estilo &amp; Cor no HEAD</div>
+        <div style="font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; margin-top:3px;">
+          <span style="display:inline-block; width:14px; height:14px; border-radius:50%; background:${currentColor}; border:1.5px solid var(--border-arcade); flex-shrink:0;"></span>
+          <span>${currentColor === "#18181b" ? "Preto Neutro (#18181b)" : currentColor}</span>
+        </div>
+      </div>
+      <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 12px;">
+        <div class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Estrutura do Chat</div>
+        <div style="font-size:13px; font-weight:700; margin-top:3px;">${currentRadius} · ${currentMode}</div>
+      </div>
+      <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 12px;">
+        <div class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Posição &amp; Botão</div>
+        <div style="font-size:13px; font-weight:700; margin-top:3px;">${currentPos} · ${currentShape}</div>
+      </div>
+      <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 12px;">
+        <div class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Identidade do Agente</div>
+        <div style="font-size:13px; font-weight:700; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(currentName)}</div>
+      </div>
+    </div>
+  `;
+
+  if (userMessages.length > 0) {
+    html += `
+      <div style="margin-top:8px;">
+        <div class="muted" style="font-size:11.5px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.4px;">Instruções Criadas e Marcadas (Aplicadas ao HEAD):</div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+    `;
+    userMessages.forEach((msg) => {
+      html += `
+        <div style="display:flex; align-items:flex-start; gap:8px; background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:7px 10px; font-size:12.5px; line-height:1.4;">
+          <span style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:50%; background:var(--text-primary); color:var(--bg-main); font-size:10px; font-weight:900; flex-shrink:0; margin-top:1px;">✓</span>
+          <span style="color:var(--text-primary); font-weight:500;">${escapeHtml(msg)}</span>
+        </div>
+      `;
+    });
+    html += `</div></div>`;
+  } else if (instructions && instructions.trim()) {
+    html += `
+      <div style="margin-top:8px;">
+        <div class="muted" style="font-size:11.5px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.4px;">Diretrizes Marcadas:</div>
+        <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 10px; font-size:12.5px; line-height:1.45; color:var(--text-primary); white-space:pre-wrap;">${escapeHtml(instructions)}</div>
+      </div>
+    `;
+  } else {
+    html += `
+      <div style="padding:10px 12px; background:var(--surface-primary); border:1px dashed var(--border-arcade); border-radius:var(--radius-sm); font-size:12.5px; line-height:1.45; color:var(--text-secondary); font-style:italic;">
+        Padrão neutro moderno ativo (branco, preto e cinza). Dite o estilo e a estrutura que desejar (ex: cantos retos, tema escuro, bordas bem arredondadas, botão quadrado ou circular) ou use as sugestões. O agente atualizará o código HEAD e a demonstração instantaneamente.
+      </div>
+    `;
+  }
+
+  textEl.innerHTML = html;
+}
+
+function updateWebsitePreview(config) {
+  if (!config) return;
+  const name = config.agent_name || "Agente Drexier";
+  const role = config.agent_role || "Online • Atendimento";
+  const color = config.theme_color || "#18181b"; // Padrão Neutro Preto
+  const pos = config.position || "bottom-right";
+  const greet = config.greeting_message || "Olá! Como posso ajudar hoje?";
+  const domain = config.allowed_domain || "seu-website.com";
+  const borderRadius = config.border_radius || "16px";
+  const buttonShape = config.button_shape || "circle";
+  const themeMode = config.theme_mode || "light";
+
+  const nameEl = $("#mock-agent-name");
+  const roleEl = $("#mock-agent-role");
+  const avatarEl = $("#mock-avatar");
+  const greetEl = $("#mock-greeting-bubble");
+  const urlEl = $("#website-preview-url-text");
+
+  if (nameEl) nameEl.textContent = name;
+  if (roleEl) roleEl.textContent = role;
+  if (avatarEl) avatarEl.textContent = (name.trim().charAt(0) || "D").toUpperCase();
+  if (greetEl) greetEl.textContent = greet;
+  if (urlEl) urlEl.textContent = "https://" + domain;
+
+  const header = $("#mock-chat-header");
+  const btn = $("#mock-chat-button");
+  const send = $("#btn-mock-send");
+  const chatWindow = $("#mock-chat-window");
+
+  if (header) header.style.backgroundColor = color;
+  if (btn) btn.style.backgroundColor = color;
+  if (send) send.style.backgroundColor = color;
+
+  // Aplica o estilo estrutural do chat ditado pelo utilizador
+  if (chatWindow) {
+    chatWindow.style.borderRadius = borderRadius;
+    if (themeMode === "dark") {
+      chatWindow.classList.add("mock-theme-dark");
+    } else {
+      chatWindow.classList.remove("mock-theme-dark");
+    }
+  }
+
+  if (btn) {
+    if (buttonShape === "square" || buttonShape === "quadrado") {
+      btn.style.borderRadius = "12px";
+    } else if (buttonShape === "pill" || buttonShape === "pilula") {
+      btn.style.borderRadius = "26px";
+    } else {
+      btn.style.borderRadius = "50%";
+    }
+  }
+
+  const mockWidget = $("#website-mock-widget");
+  if (mockWidget) {
+    mockWidget.className = pos === "bottom-left" ? "mock-widget-bottom-left" : "mock-widget-bottom-right";
+  }
+}
+
+async function loadWebsiteIntegrationStatus(badgeOnly = false) {
+  if (isWebsiteLoading) return;
+  isWebsiteLoading = true;
+  try {
+    const res = await api("/api/integrations/website");
+    currentWebsiteIntegration = res;
+
+    updateWebsiteStatusBadge(res.status || "pending", res.error_message);
+
+    if (badgeOnly) return;
+
+    const codeDisplay = $("#website-head-code-display");
+    if (codeDisplay) {
+      codeDisplay.textContent = res.head_code || (res.site_key ? `<!-- Drexier AI -->\n<script>\n  window.drexierSettings = { siteKey: "${res.site_key}" };\n</script>\n<script defer src="${window.location.origin}/widget.js"></script>` : "A aguardar geração do código...");
+    }
+
+    renderWebsiteActiveInstructions(res.conversation_history, res.initial_prompt, res.agent_instructions, res);
+
+    const fieldName = $("#website-field-agent-name");
+    const fieldRole = $("#website-field-agent-role");
+    const fieldColor = $("#website-field-theme-color");
+    const fieldPicker = $("#website-field-color-picker");
+    const fieldPos = $("#website-field-position");
+    const fieldDom = $("#website-field-allowed-domain");
+    const fieldGreet = $("#website-field-greeting");
+    const fieldInst = $("#website-field-instructions");
+
+    if (fieldName) fieldName.value = res.agent_name || "";
+    if (fieldRole) fieldRole.value = res.agent_role || "";
+    if (fieldColor) fieldColor.value = res.theme_color || "#18181b";
+    if (fieldPicker) fieldPicker.value = (res.theme_color && res.theme_color.startsWith("#") && res.theme_color.length === 7) ? res.theme_color : "#18181b";
+    if (fieldPos) fieldPos.value = res.position || "bottom-right";
+    if (fieldDom) fieldDom.value = res.allowed_domain || "";
+    if (fieldGreet) fieldGreet.value = res.greeting_message || "";
+    if (fieldInst) fieldInst.value = res.agent_instructions || "";
+
+    updateWebsitePreview(res);
+  } catch (err) {
+    console.warn("Falha ao carregar estado da integração de websites:", err);
+  } finally {
+    isWebsiteLoading = false;
+  }
+}
+
+async function sendWebsiteAIMessage(messageText) {
+  const input = $("#website-ai-input");
+  const text = (messageText || input?.value || "").trim();
+  if (!text) return;
+
+  if (input) input.value = "";
+
+  const sendBtn = $("#btn-website-ai-send");
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.innerHTML = `<span>A atualizar...</span>`;
+  }
+
+  try {
+    const res = await api("/api/integrations/website/chat", {
+      method: "POST",
+      body: JSON.stringify({ message: text }),
+      timeoutMs: 35000
+    });
+
+    if (res.integration) {
+      currentWebsiteIntegration = res.integration;
+      updateWebsiteStatusBadge(res.integration.status || "pending", res.integration.error_message);
+      updateWebsitePreview(res.integration);
+
+      const codeDisplay = $("#website-head-code-display");
+      if (codeDisplay) codeDisplay.textContent = res.head_code;
+
+      renderWebsiteActiveInstructions(res.integration.conversation_history, null, res.integration.agent_instructions, res.integration);
+
+      const fieldName = $("#website-field-agent-name");
+      const fieldRole = $("#website-field-agent-role");
+      const fieldColor = $("#website-field-theme-color");
+      const fieldPicker = $("#website-field-color-picker");
+      const fieldPos = $("#website-field-position");
+      const fieldDom = $("#website-field-allowed-domain");
+      const fieldGreet = $("#website-field-greeting");
+      const fieldInst = $("#website-field-instructions");
+
+      if (fieldName && res.integration.agent_name) fieldName.value = res.integration.agent_name;
+      if (fieldRole && res.integration.agent_role) fieldRole.value = res.integration.agent_role;
+      if (fieldColor && res.integration.theme_color) fieldColor.value = res.integration.theme_color;
+      if (fieldPicker && res.integration.theme_color?.startsWith("#")) fieldPicker.value = res.integration.theme_color;
+      if (fieldPos && res.integration.position) fieldPos.value = res.integration.position;
+      if (fieldDom && res.integration.allowed_domain) fieldDom.value = res.integration.allowed_domain;
+      if (fieldGreet && res.integration.greeting_message) fieldGreet.value = res.integration.greeting_message;
+      if (fieldInst && res.integration.agent_instructions) fieldInst.value = res.integration.agent_instructions;
+    }
+    showNotice("Instrução lida e código HEAD atualizado com sucesso!");
+  } catch (err) {
+    showNotice(`Erro ao processar instrução: ${err.message}`, true);
+  } finally {
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.innerHTML = `<svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Aplicar Instrução</span>`;
+    }
+  }
+}
+
+function switchIntegrationChannel(channel) {
+  $$("[data-channel]").forEach(b => {
+    const isAct = b.dataset.channel === channel;
+    b.classList.toggle("is-channel-active", isAct);
+    b.style.background = isAct ? "var(--surface-elevated)" : "transparent";
+    b.style.borderColor = isAct ? "var(--border-active)" : "transparent";
+  });
+
+  $("#channel-email-section")?.classList.toggle("hidden", channel !== "email");
+  $("#channel-website-section")?.classList.toggle("hidden", channel !== "website");
+
+  if (channel === "website") {
+    loadWebsiteIntegrationStatus();
+    startWebsitePolling();
+  } else {
+    stopWebsitePolling();
+    if (channel === "email") {
+      loadEmailStatus();
+    }
+  }
+}
+
+function startWebsitePolling() {
+  if (websitePollTimer) clearInterval(websitePollTimer);
+  websitePollTimer = setInterval(() => {
+    const webSec = $("#channel-website-section");
+    if (webSec && !webSec.classList.contains("hidden") && token && !document.hidden) {
+      loadWebsiteIntegrationStatus(true);
+    }
+  }, 6000);
+}
+
+function stopWebsitePolling() {
+  if (websitePollTimer) {
+    clearInterval(websitePollTimer);
+    websitePollTimer = null;
+  }
+}
+
+// Event Listeners da Integração de Websites
+$$("[data-channel]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    switchIntegrationChannel(btn.dataset.channel);
+  });
+});
+
+$("#btn-website-ai-undo")?.addEventListener("click", async () => {
+  const btn = $("#btn-website-ai-undo");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api("/api/integrations/website/chat/undo", { method: "POST" });
+    if (res.integration) {
+      currentWebsiteIntegration = res.integration;
+      renderWebsiteActiveInstructions(res.integration.conversation_history, null, res.integration.agent_instructions, res.integration);
+      updateWebsitePreview(res.integration);
+      const codeDisplay = $("#website-head-code-display");
+      if (codeDisplay) codeDisplay.textContent = res.integration.head_code;
+    }
+    showNotice("Última instrução retrocedida com sucesso!");
+  } catch (err) {
+    showNotice(`Erro ao retroceder instrução: ${err.message}`, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
+$("#btn-website-ai-clear")?.addEventListener("click", async () => {
+  if (!confirm("Tem certeza que deseja apagar todas as instruções e restaurar o estilo padrão neutro (branco, preto e cinza)? A chave única de integração será preservada.")) return;
+  const btn = $("#btn-website-ai-clear");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api("/api/integrations/website/chat/clear", { method: "POST" });
+    if (res.integration) {
+      currentWebsiteIntegration = res.integration;
+      renderWebsiteActiveInstructions(res.integration.conversation_history, null, res.integration.agent_instructions, res.integration);
+      updateWebsitePreview(res.integration);
+      const codeDisplay = $("#website-head-code-display");
+      if (codeDisplay) codeDisplay.textContent = res.integration.head_code;
+    }
+    showNotice("Instruções apagadas e restauradas para o padrão neutro!");
+  } catch (err) {
+    showNotice(`Erro ao apagar instruções: ${err.message}`, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
+$("#btn-website-ai-send")?.addEventListener("click", () => sendWebsiteAIMessage());
+$("#website-ai-input")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendWebsiteAIMessage();
+  }
+});
+
+$$(".website-prompt-chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    const p = chip.dataset.prompt;
+    if (p) sendWebsiteAIMessage(p);
+  });
+});
+
+$("#btn-website-copy-code")?.addEventListener("click", async () => {
+  const code = $("#website-head-code-display")?.textContent || "";
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    const label = $("#label-copy-code");
+    if (label) {
+      const orig = label.textContent;
+      label.textContent = "Copiado!";
+      setTimeout(() => { label.textContent = orig; }, 2000);
+    }
+    showNotice("Código HEAD copiado para a área de transferência!");
+  } catch (err) {
+    showNotice("Falha ao copiar automaticamente. Selecione e copie o código.", true);
+  }
+});
+
+$("#btn-website-regenerate")?.addEventListener("click", async () => {
+  try {
+    const res = await api("/api/integrations/website/regenerate-code", {
+      method: "POST",
+      body: JSON.stringify({ reset_key: false })
+    });
+    if (res.head_code) {
+      const codeDisplay = $("#website-head-code-display");
+      if (codeDisplay) codeDisplay.textContent = res.head_code;
+    }
+    showNotice("Código HEAD regenerado com sucesso!");
+  } catch (err) {
+    showNotice(`Erro ao regenerar código: ${err.message}`, true);
+  }
+});
+
+$("#btn-website-save-manual")?.addEventListener("click", async () => {
+  const payload = {
+    agent_name: $("#website-field-agent-name")?.value,
+    agent_role: $("#website-field-agent-role")?.value,
+    theme_color: $("#website-field-theme-color")?.value,
+    position: $("#website-field-position")?.value,
+    allowed_domain: $("#website-field-allowed-domain")?.value,
+    greeting_message: $("#website-field-greeting")?.value,
+    agent_instructions: $("#website-field-instructions")?.value,
   };
+  try {
+    const res = await api("/api/integrations/website/config", {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
+    currentWebsiteIntegration = res;
+    updateWebsitePreview(res);
+    const codeDisplay = $("#website-head-code-display");
+    if (codeDisplay) codeDisplay.textContent = res.head_code;
+    showNotice("Configurações salvas e código atualizado com sucesso!");
+  } catch (err) {
+    showNotice(`Erro ao salvar alterações: ${err.message}`, true);
+  }
+});
+
+$("#btn-verify-website-connection")?.addEventListener("click", async () => {
+  const btn = $("#btn-verify-website-connection");
+  const label = $("#label-verify-btn");
+  if (btn) btn.disabled = true;
+  if (label) label.textContent = "A verificar...";
+  try {
+    const res = await api("/api/integrations/website/verify", { method: "POST" });
+    updateWebsiteStatusBadge(res.status, res.error_message);
+    if (res.status === "active") {
+      showNotice("Ligação confirmada com sucesso! O website está conectado e ativo.");
+    } else if (res.status === "pending") {
+      showNotice("Instalação pendente: o código ainda não foi detectado no website.", true);
+    } else if (res.status === "disconnected") {
+      showNotice("Website desconectado: o widget não foi detectado ou deixou de responder.", true);
+    } else {
+      showNotice(`Falha na verificação: ${res.error_message || "erro de comunicação"}`, true);
+    }
+  } catch (err) {
+    showNotice(`Erro na verificação da ligação: ${err.message}`, true);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (label) label.textContent = "Verificar Ligação";
+  }
+});
+
+$("#website-field-color-picker")?.addEventListener("input", (e) => {
+  const val = e.target.value;
+  const txt = $("#website-field-theme-color");
+  if (txt) txt.value = val;
+  if (currentWebsiteIntegration) {
+    currentWebsiteIntegration.theme_color = val;
+    updateWebsitePreview(currentWebsiteIntegration);
+  }
+});
+
+$("#website-field-theme-color")?.addEventListener("input", (e) => {
+  const val = e.target.value.trim();
+  if (val.startsWith("#") && val.length === 7) {
+    const picker = $("#website-field-color-picker");
+    if (picker) picker.value = val;
+    if (currentWebsiteIntegration) {
+      currentWebsiteIntegration.theme_color = val;
+      updateWebsitePreview(currentWebsiteIntegration);
+    }
+  }
+});
+
+$("#website-field-position")?.addEventListener("change", (e) => {
+  if (currentWebsiteIntegration) {
+    currentWebsiteIntegration.position = e.target.value;
+    updateWebsitePreview(currentWebsiteIntegration);
+  }
+});
+
+// Mock preview controls
+$("#btn-mock-toggle")?.addEventListener("click", () => {
+  $("#mock-chat-window")?.classList.toggle("hidden");
+});
+$("#mock-chat-button")?.addEventListener("click", () => {
+  $("#mock-chat-window")?.classList.toggle("hidden");
+});
+$("#btn-mock-send")?.addEventListener("click", handleMockChatSend);
+$("#mock-chat-input")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") handleMockChatSend();
+});
+
+async function handleMockChatSend() {
+  const input = $("#mock-chat-input");
+  const text = input?.value.trim();
+  if (!text) return;
+  input.value = "";
+
+  const msgs = $("#mock-messages");
+  if (!msgs) return;
+
+  const userB = document.createElement("div");
+  userB.className = "mock-bubble mock-bubble-visitor";
+  userB.style.backgroundColor = currentWebsiteIntegration?.theme_color || "#18181b";
+  userB.textContent = text;
+  msgs.appendChild(userB);
+
+  const typingB = document.createElement("div");
+  typingB.className = "mock-bubble mock-bubble-agent";
+  typingB.textContent = "...";
+  msgs.appendChild(typingB);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    if (currentWebsiteIntegration?.site_key) {
+      const res = await fetch("/api/widget/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          site_key: currentWebsiteIntegration.site_key,
+          visitor_id: "preview_tester",
+          visitor_name: "Testador Preview",
+          message: text
+        })
+      });
+      const data = await res.json();
+      typingB.textContent = data.reply || "Mensagem de teste recebida pelo agente com sucesso!";
+    } else {
+      setTimeout(() => {
+        typingB.textContent = "Olá! O seu agente Drexier responderá aos clientes com base nas diretrizes e inteligência configuradas.";
+      }, 500);
+    }
+  } catch (_) {
+    typingB.textContent = "Olá! O seu agente Drexier responderá aos clientes com base nas diretrizes e inteligência configuradas.";
+  }
+  msgs.scrollTop = msgs.scrollHeight;
+  // IMPORTANTE: NÃO recarrega nem altera o status da integração durante o teste no preview!
 }
 
 // Monitorização resiliente em segundo plano (tempo real inteligente)
@@ -5253,7 +5510,7 @@ function renderAutomationLevelUI(level) {
 
   let labelText = "Totalmente Automático";
   let dotClass = "full";
-  let pillText = "IA: Total";
+  let pillText = "IA Ativa";
 
   if (level === "semi") {
     labelText = "Semi-automático";
@@ -5262,7 +5519,7 @@ function renderAutomationLevelUI(level) {
   } else if (level === "disabled") {
     labelText = "Desativado";
     dotClass = "disabled";
-    pillText = "IA: Pausada";
+    pillText = "Agente Desativado";
   }
 
   if (indicator) {
@@ -5272,14 +5529,16 @@ function renderAutomationLevelUI(level) {
     label.textContent = labelText;
   }
   if (topbarPill) {
-    topbarPill.classList.toggle("active", level !== "disabled");
+    const isReady = level !== "disabled";
+    topbarPill.className = `topbar-agent-pill ${isReady ? "active" : "inactive"}`;
     const span = topbarPill.querySelector("span:last-child");
     if (span) span.textContent = pillText;
   }
   if (sideAgentStatus) {
-    sideAgentStatus.classList.toggle("inactive", level === "disabled");
+    const isReady = level !== "disabled";
+    sideAgentStatus.className = `sidebar-agent-status ${isReady ? "active" : "inactive"}`;
     const span = sideAgentStatus.querySelector("span:last-child");
-    if (span) span.textContent = level === "disabled" ? "Agente Desativado" : (level === "full" ? "Agente Total" : "Agente Semi");
+    if (span) span.textContent = isReady ? (level === "full" ? "Agente Total" : "Agente Semi") : "Agente Desativado";
   }
 
   // Marca ativo no menu dropdown
@@ -5290,7 +5549,13 @@ function renderAutomationLevelUI(level) {
   // Atualiza botão do Agent Switch na aba Mensagens
   const msgSwitch = $("#btn-toggle-agent-global");
   if (msgSwitch) {
+    msgSwitch.disabled = false;
     msgSwitch.classList.toggle("active", level !== "disabled");
+    msgSwitch.setAttribute("aria-checked", level !== "disabled" ? "true" : "false");
+    msgSwitch.setAttribute(
+      "aria-label",
+      level !== "disabled" ? "Desativar respostas automáticas do agente" : "Ativar respostas automáticas do agente"
+    );
   }
 }
 
@@ -5313,13 +5578,19 @@ async function setAutomationLevel(newLevel) {
       body: JSON.stringify({ level: newLevel })
     });
     const levelNames = {
-      full: "Totalmente Automático (IA responde e valida marcações com base nos horários da aba Negócio)",
-      semi: "Semi-automático (IA responde a dúvidas, mas marcação requer 'Validar com IA')",
-      disabled: "Desativado (IA não responde às mensagens recebidas)"
+      full: "Totalmente Automático (IA responde automaticamente)",
+      semi: "Semi-automático (IA responde a dúvidas pontuais)",
+      disabled: "Desativado (IA pausada)"
     };
-    showNotice(`Nível de Automação alterado para: ${levelNames[newLevel] || newLevel}`);
+    if (newLevel === "disabled") {
+      showNotice("Agente pausado com sucesso. A IA não responderá às mensagens.");
+    } else {
+      showNotice(`Agente ativado! Nível: ${levelNames[newLevel] || newLevel}`);
+    }
+    syncGlobalAgentState();
   } catch(err) {
     showNotice(err.message, true);
+    await loadAutomationLevel();
   }
 }
 
@@ -5355,17 +5626,25 @@ function setupAutomationLevelListeners() {
     });
   }
 
-  // Interação com o botão global na aba mensagens para ciclar os níveis
+  // Interação mestre com o botão interruptor e a caixa inteira na aba mensagens
+  const handleToggleAgent = async (e) => {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+    if (!paywallCheck()) return;
+    const nextLevel = currentAutomationLevel === "disabled" ? "full" : "disabled";
+    await setAutomationLevel(nextLevel);
+  };
+
   const agentGlobalBtn = $("#btn-toggle-agent-global");
   if (agentGlobalBtn) {
-    agentGlobalBtn.onclick = async (e) => {
-      e.preventDefault();
-      // Alterna entre Full -> Semi -> Disabled -> Full
-      let nextLevel = "full";
-      if (currentAutomationLevel === "full") nextLevel = "semi";
-      else if (currentAutomationLevel === "semi") nextLevel = "disabled";
-      else nextLevel = "full";
-      await setAutomationLevel(nextLevel);
+    agentGlobalBtn.onclick = handleToggleAgent;
+  }
+  const agentToggleBox = $("#agent-toggle-box");
+  if (agentToggleBox) {
+    agentToggleBox.onclick = (e) => {
+      if (e.target !== agentGlobalBtn && !agentGlobalBtn?.contains(e.target)) {
+        handleToggleAgent(e);
+      }
     };
   }
 }

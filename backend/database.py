@@ -92,33 +92,10 @@ CREATE TABLE IF NOT EXISTS response_variants (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
-CREATE TABLE IF NOT EXISTS whatsapp_integrations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL UNIQUE,
-  waba_id TEXT NOT NULL,
-  phone_number_id TEXT NOT NULL UNIQUE,
-  phone_number TEXT DEFAULT '',
-  business_name TEXT DEFAULT '',
-  access_token TEXT DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'connected',
-  webhook_subscribed INTEGER NOT NULL DEFAULT 0,
-  phone_registered INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS processed_whatsapp_messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL,
-  message_id TEXT NOT NULL,
-  processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(user_id, message_id),
-  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-);
 CREATE TABLE IF NOT EXISTS email_integrations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL UNIQUE,
-  provider TEXT NOT NULL CHECK(provider IN ('google', 'microsoft', 'smtp_imap')),
+    provider TEXT NOT NULL CHECK(provider = 'google'),
   email_address TEXT NOT NULL,
   display_name TEXT DEFAULT '',
   access_token TEXT DEFAULT '',
@@ -128,12 +105,6 @@ CREATE TABLE IF NOT EXISTS email_integrations (
   auto_reply_enabled INTEGER NOT NULL DEFAULT 1,
   last_sync_at TEXT,
   sync_cursor TEXT DEFAULT '',
-  smtp_host TEXT DEFAULT '',
-  smtp_port INTEGER DEFAULT 587,
-  smtp_user TEXT DEFAULT '',
-  smtp_password TEXT DEFAULT '',
-  imap_host TEXT DEFAULT '',
-  imap_port INTEGER DEFAULT 993,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -155,7 +126,7 @@ CREATE TABLE IF NOT EXISTS email_threads (
 CREATE TABLE IF NOT EXISTS processed_email_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
-  provider TEXT NOT NULL CHECK(provider IN ('google', 'microsoft', 'smtp_imap')),
+    provider TEXT NOT NULL CHECK(provider = 'google'),
   provider_message_id TEXT NOT NULL CHECK(length(trim(provider_message_id)) > 0),
   processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(user_id, provider, provider_message_id),
@@ -174,6 +145,27 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   current_period_end TEXT DEFAULT '',
   cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
   last_successful_payment_at TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS website_integrations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE,
+  site_key TEXT NOT NULL UNIQUE,
+  site_name TEXT NOT NULL DEFAULT 'Meu Website',
+  allowed_domain TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  agent_name TEXT NOT NULL DEFAULT 'Agente Drexier',
+  agent_role TEXT NOT NULL DEFAULT 'Atendente Virtual',
+  greeting_message TEXT NOT NULL DEFAULT 'Olá! Como posso ajudar hoje?',
+  theme_color TEXT NOT NULL DEFAULT '#6366f1',
+  position TEXT NOT NULL DEFAULT 'bottom-right',
+  agent_instructions TEXT NOT NULL DEFAULT '',
+  conversation_history TEXT NOT NULL DEFAULT '[]',
+  last_heartbeat_at TEXT,
+  last_verified_domain TEXT,
+  error_message TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -207,17 +199,6 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
     if not has_users:
         conn.executescript(SQL_SCHEMA_FOR_TESTS)
     else:
-        has_whatsapp = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='whatsapp_integrations'"
-        ).fetchone()
-        if has_whatsapp:
-            whatsapp_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(whatsapp_integrations)").fetchall()
-            }
-            if "phone_registered" not in whatsapp_columns:
-                conn.execute(
-                    "ALTER TABLE whatsapp_integrations ADD COLUMN phone_registered INTEGER NOT NULL DEFAULT 0"
-                )
         user_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()
         }
@@ -236,7 +217,7 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
         """CREATE TABLE IF NOT EXISTS processed_email_messages (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                user_id INTEGER NOT NULL,
-               provider TEXT NOT NULL CHECK(provider IN ('google', 'microsoft', 'smtp_imap')),
+            provider TEXT NOT NULL CHECK(provider = 'google'),
                provider_message_id TEXT NOT NULL CHECK(length(trim(provider_message_id)) > 0),
                processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                UNIQUE(user_id, provider, provider_message_id),
@@ -244,15 +225,46 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
            )"""
     )
     conn.execute(
-        """CREATE TABLE IF NOT EXISTS processed_whatsapp_messages (
+        """CREATE TABLE IF NOT EXISTS website_integrations (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
-               user_id INTEGER NOT NULL,
-               message_id TEXT NOT NULL,
-               processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-               UNIQUE(user_id, message_id),
+               user_id INTEGER NOT NULL UNIQUE,
+               site_key TEXT NOT NULL UNIQUE,
+               site_name TEXT NOT NULL DEFAULT 'Meu Website',
+               allowed_domain TEXT NOT NULL DEFAULT '',
+               status TEXT NOT NULL DEFAULT 'pending',
+               agent_name TEXT NOT NULL DEFAULT 'Agente Drexier',
+               agent_role TEXT NOT NULL DEFAULT 'Atendente Virtual',
+               greeting_message TEXT NOT NULL DEFAULT 'Olá! Como posso ajudar hoje?',
+               theme_color TEXT NOT NULL DEFAULT '#6366f1',
+               position TEXT NOT NULL DEFAULT 'bottom-right',
+               agent_instructions TEXT NOT NULL DEFAULT '',
+               conversation_history TEXT NOT NULL DEFAULT '[]',
+               last_heartbeat_at TEXT,
+               last_verified_domain TEXT,
+               error_message TEXT DEFAULT '',
+               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
            )"""
     )
+    email_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(email_integrations)").fetchall()
+    }
+    legacy_email_columns = {"smtp_host", "smtp_port", "smtp_user", "smtp_password", "imap_host", "imap_port"}
+    if email_columns & legacy_email_columns:
+        conn.execute("DELETE FROM email_integrations WHERE provider <> 'google'")
+        conn.execute("DELETE FROM email_threads WHERE provider <> 'google'")
+        conn.execute("DELETE FROM processed_email_messages WHERE provider <> 'google'")
+        for column in legacy_email_columns & email_columns:
+            conn.execute(f"ALTER TABLE email_integrations DROP COLUMN {column}")
+
+    for table in ("processed_whatsapp_messages", "whatsapp_integrations"):
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if exists:
+            conn.execute(f"DROP TABLE {table}")
 
 
 def connect():

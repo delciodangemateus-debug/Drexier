@@ -30,8 +30,6 @@ def setup_test_db(tmp_path, monkeypatch):
     monkeypatch.setattr("backend.database.DB_PATH", str(test_db))
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "test_google_client_id_123")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test_google_client_secret_abc")
-    monkeypatch.setenv("MICROSOFT_CLIENT_ID", "test_ms_client_id_456")
-    monkeypatch.setenv("MICROSOFT_CLIENT_SECRET", "test_ms_client_secret_xyz")
     init_db()
     yield
 
@@ -89,38 +87,6 @@ def test_extract_scheduled_at_requires_future_date_and_time():
     assert extract_scheduled_at("Dia 6 de novembro às 14h30", now) == "2026-11-06T14:30:00+00:00"
     assert extract_scheduled_at("Amanhã", now) is None
     assert extract_scheduled_at("Hoje às 09h", now) is None
-
-
-@pytest.mark.anyio
-async def test_microsoft_email_reply_uses_graph_reply_endpoint():
-    response = type("Response", (), {"status_code": 202, "text": ""})()
-
-    with patch(
-        "backend.services.email_service.refresh_microsoft_token_if_needed",
-        new_callable=AsyncMock,
-        return_value="access-token",
-    ), patch(
-        "backend.services.email_service.httpx.AsyncClient.post",
-        new_callable=AsyncMock,
-        return_value=response,
-    ) as mock_post:
-        result = await send_email(
-            integration={
-                "provider": "microsoft",
-                "email_address": "empresa@outlook.com",
-                "access_token": "access-token",
-            },
-            to_email="cliente@example.com",
-            subject="Re: Dúvida",
-            body_text="Olá! Segue a resposta.",
-            in_reply_to="message/id",
-        )
-
-    assert result == {"status": "sent", "provider": "microsoft"}
-    request_url = mock_post.await_args.args[0]
-    request_data = mock_post.await_args.kwargs["json"]
-    assert request_url.endswith("/me/messages/message%2Fid/reply")
-    assert request_data == {"comment": "Olá! Segue a resposta."}
 
 
 @pytest.mark.anyio
@@ -358,7 +324,7 @@ async def test_ai_reminder_uses_context_and_sends_email(auth_client):
 
 
 @pytest.mark.anyio
-async def test_ai_reminder_sends_over_whatsapp_for_phone_contact(auth_client):
+async def test_ai_reminder_rejects_phone_contact_without_email(auth_client):
     _, _, user_id = auth_client
     with connect() as c:
         contact_id = c.execute(
@@ -371,28 +337,9 @@ async def test_ai_reminder_sends_over_whatsapp_for_phone_contact(auth_client):
                VALUES (?, ?, 'booking', 'Consulta', 'pending', ?)""",
             (user_id, contact_id, extract_scheduled_at("Amanhã às 14h")),
         ).lastrowid
-        c.execute(
-            """INSERT INTO whatsapp_integrations
-               (user_id, waba_id, phone_number_id, access_token, status)
-               VALUES (?, 'waba', 'phone', 'token', 'connected')""",
-            (user_id,),
-        )
 
-    with patch(
-        "backend.services.email_service.draft_reply",
-        new_callable=AsyncMock,
-        return_value="Olá João, lembramos da sua consulta.",
-    ), patch(
-        "backend.services.whatsapp.send_whatsapp_message",
-        new_callable=AsyncMock,
-        return_value={"messages": [{"id": "outgoing"}]},
-    ) as mock_send:
-        result = await send_ai_booking_reminder(user_id, request_id)
-
-    assert result["ok"] is True
-    assert result["channel"] == "whatsapp"
-    mock_send.assert_awaited_once()
-    assert mock_send.await_args.kwargs["to"] == "351911111111"
+    with pytest.raises(ValueError, match="não tem um endereço de e-mail"):
+        await send_ai_booking_reminder(user_id, request_id)
 
 
 @pytest.mark.anyio
@@ -583,8 +530,8 @@ def test_email_public_config(auth_client):
     res = client.get("/api/email/config")
     assert res.status_code == 200
     data = res.json()
+    assert set(data) == {"google"}
     assert data["google"]["configured"] is True
-    assert data["microsoft"]["configured"] is True
 
 
 def test_email_status_when_disconnected(auth_client):
@@ -616,39 +563,11 @@ def test_email_status_exposes_paid_response_start(auth_client):
     assert res.json()["integration"]["response_since_at"] == "2026-10-15T10:00:00+00:00"
 
 
-def test_manual_email_connect_and_disconnect(auth_client):
+def test_non_gmail_email_routes_are_not_exposed(auth_client):
     client, token, user_id = auth_client
-    connect_payload = {
-        "provider": "smtp_imap",
-        "email_address": "suporte@meudominio.com",
-        "display_name": "Suporte Técnico",
-        "smtp_host": "smtp.meudominio.com",
-        "smtp_port": 587,
-        "smtp_user": "suporte@meudominio.com",
-        "smtp_password": "supersecretpassword",
-        "imap_host": "imap.meudominio.com",
-        "imap_port": 993,
-    }
-    res_conn = client.post("/api/email/connect-manual", json=connect_payload, headers={"Authorization": f"Bearer {token}"})
-    assert res_conn.status_code == 200
-    assert res_conn.json()["ok"] is True
-
-    # Verifica status conectado
-    res_status = client.get("/api/email/status", headers={"Authorization": f"Bearer {token}"})
-    assert res_status.status_code == 200
-    data = res_status.json()
-    assert data["connected"] is True
-    assert data["integration"]["provider"] == "smtp_imap"
-    assert data["integration"]["email_address"] == "suporte@meudominio.com"
-
-    # Desconectar
-    res_disc = client.post("/api/email/disconnect", headers={"Authorization": f"Bearer {token}"})
-    assert res_disc.status_code == 200
-    assert res_disc.json()["ok"] is True
-
-    # Status agora deve ser desconectado
-    res_status_after = client.get("/api/email/status", headers={"Authorization": f"Bearer {token}"})
-    assert res_status_after.json()["connected"] is False
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.post("/api/email/connect-manual", json={}, headers=headers).status_code == 404
+    assert client.get("/api/email/oauth/microsoft/url", headers=headers).status_code == 404
 
 
 def test_google_oauth_url_and_callback(auth_client):
@@ -688,45 +607,6 @@ def test_google_oauth_url_and_callback(auth_client):
     assert st_data["connected"] is True
     assert st_data["integration"]["provider"] == "google"
     assert st_data["integration"]["email_address"] == "atendimento.google@empresa.com"
-
-
-def test_microsoft_oauth_url_and_callback(auth_client):
-    client, token, user_id = auth_client
-
-    # 1. Obter link oficial da Microsoft
-    res_url = client.get("/api/email/oauth/microsoft/url", headers={"Authorization": f"Bearer {token}"})
-    assert res_url.status_code == 200
-    url_data = res_url.json()
-    assert "login.microsoftonline.com" in url_data["url"]
-    assert "test_ms_client_id_456" in url_data["url"]
-
-    # 2. Simular callback oficial da Microsoft
-    state = token
-    with patch("backend.routers.email.exchange_microsoft_code", new_callable=AsyncMock) as mock_exch, \
-         patch("backend.routers.email.fetch_microsoft_user_profile", new_callable=AsyncMock) as mock_profile:
-        mock_exch.return_value = {
-            "access_token": "EwB_test_ms_access_token",
-            "refresh_token": "M.R3_test_ms_refresh_token",
-            "expires_in": 3600,
-        }
-        mock_profile.return_value = ("contato.outlook@empresa.com", "Equipe Outlook")
-
-        res_callback = client.get(
-            "/api/email/oauth/microsoft/callback",
-            params={"code": "M.C544_test_code", "state": state},
-            follow_redirects=False,
-        )
-        assert res_callback.status_code in (302, 307)
-        assert "email_auth=success" in res_callback.headers["location"]
-        assert "provider=microsoft" in res_callback.headers["location"]
-
-    # Verifica status agora conectado com Microsoft
-    res_status = client.get("/api/email/status", headers={"Authorization": f"Bearer {token}"})
-    assert res_status.status_code == 200
-    st_data = res_status.json()
-    assert st_data["connected"] is True
-    assert st_data["integration"]["provider"] == "microsoft"
-    assert st_data["integration"]["email_address"] == "contato.outlook@empresa.com"
 
 
 @pytest.mark.anyio

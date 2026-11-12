@@ -149,7 +149,7 @@ Comentário diz "Bloqueia TODOS os endpoints de escrita / IA / integrações" ma
 - **Remediação concreta:**
 1. Mapear TODAS as rotas em `backend/main.py` e `backend/routers/*.py` - verificar quais têm `require_active_subscription`
 2. Considerar middleware global para rotas sensíveis por path pattern (ex: `/api/agent/*`, `/api/email/send/*`) ao invés de depender só de decorar cada endpoint
-3. Revisar `backend/routers/email.py` e `backend/routers/whatsapp.py` - garantir proteção
+3. Revisar `backend/routers/email.py` - garantir proteção
 4. Testar acesso sem assinatura a endpoints críticos
 - **Verificação:** Grep por `@app.` e `@router.` sem `require_active_subscription` em rotas de escrita/IA
 - **Status:** **Corrigir antes do lançamento**
@@ -356,7 +356,6 @@ except Exception as e:
 - `POST /api/billing/webhook` - **Público** (correto p/ Stripe) - valida assinatura ✓
 
 **Email router (`/api/email/*`):** Requer análise completa - provável protegido por auth + paywall
-**WhatsApp router (`/api/whatsapp/*`):** Requer análise completa
 
 **Ação necessária:** Fazer grep completo de todas rotas e dependências para confirmar cobertura 100% das rotas sensíveis com paywall/auth.
 

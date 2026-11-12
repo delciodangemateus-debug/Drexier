@@ -1321,9 +1321,10 @@
             <strong>Google Gmail Oficial</strong>
             <span class="badge" id="pill-email-status" style="background:var(--surface-interaction); color:var(--text-tertiary); margin-left:8px;">Desconectado</span>
           </button>
-          <button type="button" class="btn outline" id="tab-channel-whatsapp" data-channel="whatsapp">
-            <strong>WhatsApp Oficial da Meta</strong>
-            <span class="badge" id="pill-whatsapp-status" style="margin-left:8px;">A verificar</span>
+          <button type="button" class="btn outline" id="tab-channel-website" data-channel="website">
+            <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            <strong>Integrar site</strong>
+            <span class="badge" id="pill-website-status" style="margin-left:8px;">Pendente</span>
           </button>
         </div>
 
@@ -1340,40 +1341,39 @@
             <p class="muted">A carregar estado da integração de e-mail...</p>
           </div>
 
-          <div id="email-env-warning" class="wa-alert-box hidden">
-            <div class="wa-alert-icon">
+          <div id="email-env-warning" class="integration-alert-box hidden">
+            <div class="integration-alert-icon">
               <svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             </div>
-            <div class="wa-alert-content">
+            <div class="integration-alert-content">
               <strong>Configuração de Credenciais Google no ficheiro .env</strong>
               <p class="muted">Adicione GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET para permitir autorização direta.</p>
             </div>
-
           </div>
 
           <!-- DESCONECTADO -->
-          <div id="email-disconnected-view" class="wa-view">
-            <div class="wa-hero-card">
+          <div id="email-disconnected-view" class="integration-view">
+            <div class="integration-hero-card">
               <h3>Ligue a sua conta Google Gmail em segundos</h3>
               <p class="muted">Autorize com segurança o Drexier a monitorizar a sua caixa de entrada e a enviar respostas assistidas pela IA.</p>
               
-              <div class="wa-steps-grid">
-                <div class="wa-step-item">
-                  <span class="wa-step-num">1</span>
+              <div class="integration-steps-grid">
+                <div class="integration-step-item">
+                  <span class="integration-step-num">1</span>
                   <div>
                     <strong>Conectar Google Gmail</strong>
                     <p class="muted">Autentique com um clique através da autorização OAuth 2.0 oficial.</p>
                   </div>
                 </div>
-                <div class="wa-step-item">
-                  <span class="wa-step-num">2</span>
+                <div class="integration-step-item">
+                  <span class="integration-step-num">2</span>
                   <div>
                     <strong>Conceder Permissões</strong>
                     <p class="muted">Autorize o envio e leitura de e-mails na tela oficial e segura da Google.</p>
                   </div>
                 </div>
-                <div class="wa-step-item">
-                  <span class="wa-step-num">3</span>
+                <div class="integration-step-item">
+                  <span class="integration-step-num">3</span>
                   <div>
                     <strong>Ativar Atendimento</strong>
                     <p class="muted">Configure nas abas ao lado o tom de voz e as respostas do agente.</p>
@@ -1397,8 +1397,8 @@
           </div>
 
           <!-- CONECTADO -->
-          <div id="email-connected-view" class="wa-view hidden">
-            <div class="wa-connected-card">
+          <div id="email-connected-view" class="integration-view hidden">
+            <div class="integration-connected-card">
               <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
                 <div>
                   <h3 id="email-display-provider" style="margin:0 0 4px;">E-mail Conectado</h3>
@@ -1410,28 +1410,28 @@
                 </div>
               </div>
 
-              <div class="wa-info-grid">
-                <div class="wa-info-item">
-                  <span class="wa-info-label">Provedor</span>
+              <div class="integration-info-grid">
+                <div class="integration-info-item">
+                  <span class="integration-info-label">Provedor</span>
                   <strong id="email-info-provider">Google Gmail</strong>
                 </div>
-                <div class="wa-info-item">
-                  <span class="wa-info-label">Nome de Remetente</span>
+                <div class="integration-info-item">
+                  <span class="integration-info-label">Nome de Remetente</span>
                   <strong id="email-info-name">-</strong>
                 </div>
-                <div class="wa-info-item">
-                  <span class="wa-info-label">Automação de Respostas</span>
+                <div class="integration-info-item">
+                  <span class="integration-info-label">Automação de Respostas</span>
                   <div style="display:flex; align-items:center; gap:8px; margin-top:2px;">
                     <strong id="email-info-auto-reply" style="color:var(--color-success);">Ativa</strong>
                     <button type="button" class="btn outline small" id="btn-toggle-auto-reply" style="padding:2px 8px; font-size:11px;">Desativar</button>
                   </div>
                 </div>
-                <div class="wa-info-item">
-                  <span class="wa-info-label">Última Sincronização</span>
+                <div class="integration-info-item">
+                  <span class="integration-info-label">Última Sincronização</span>
                   <strong id="email-info-last-sync">-</strong>
                 </div>
-                <div class="wa-info-item">
-                  <span class="wa-info-label">Status da Automação</span>
+                <div class="integration-info-item">
+                  <span class="integration-info-label">Status da Automação</span>
                   <strong id="email-info-response-since">Aguardando pagamento confirmado</strong>
                 </div>
               </div>
@@ -1439,74 +1439,255 @@
           </div>
         </div>
 
-      <div id="channel-whatsapp-section" class="hidden">
+      <!-- 2. CANAL WEBSITE (INTEGRAR SITE COM CHATBOT IA) -->
+      <div id="channel-website-section" class="hidden">
         <div class="panel-heading">
           <div>
-            <h2>Integração Oficial WhatsApp Business</h2>
-            <p class="muted">Ligue o seu número pela Cloud API oficial da Meta. As mensagens recebidas serão atendidas pelo agente de IA.</p>
+            <h2>Integração de Websites (Chatbot Inteligente)</h2>
+            <p class="muted">Converse com a IA Drexier para desenhar o seu agente de atendimento e instale o código exclusivo na secção HEAD do seu website.</p>
           </div>
-          <div id="whatsapp-status-badge" class="badge badge-disconnected">A verificar...</div>
+          <div id="website-status-badge" class="badge badge-disconnected">Pendente</div>
         </div>
 
-        <div id="whatsapp-loading-state" class="empty-state hidden">
-          <p class="muted">A verificar a ligação do WhatsApp...</p>
-        </div>
-
-        <div id="whatsapp-config-warning" class="wa-alert-box hidden">
-          <div class="wa-alert-icon">!</div>
-          <div class="wa-alert-content">
-            <strong>Configure o aplicativo da Meta no backend</strong>
-            <p class="muted">Defina META_APP_ID, META_APP_SECRET, META_CONFIG_ID, WHATSAPP_VERIFY_TOKEN e PUBLIC_URL. O endpoint HTTPS mostrado no painel deve estar registado nos Webhooks da Meta, com o campo <code>messages</code> subscrito.</p>
-            <p class="muted">Nunca coloque o App Secret nem tokens no navegador.</p>
-            <p id="whatsapp-webhook-url" class="muted"></p>
+        <!-- Banner de estado da ligação e diagnóstico em tempo real -->
+        <div id="website-connection-banner" class="integration-alert-box" style="margin-bottom:24px;">
+          <div class="integration-alert-icon" id="website-banner-icon">
+            <svg class="svg-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
           </div>
-        </div>
-
-        <div id="whatsapp-disconnected-view" class="wa-view">
-          <div class="wa-hero-card">
-            <h3>Conecte com o Embedded Signup oficial da Meta</h3>
-            <p class="muted">A autorização acontece diretamente na Meta. O Drexier não pede a sua senha do WhatsApp e utiliza apenas a Cloud API oficial.</p>
-            <div class="wa-steps-grid">
-              <div class="wa-step-item"><span class="wa-step-num">1</span><div><strong>Inicie a conexão</strong><p class="muted">Entre na sua conta Meta e escolha a conta WhatsApp Business e o número.</p></div></div>
-              <div class="wa-step-item"><span class="wa-step-num">2</span><div><strong>Autorize a integração</strong><p class="muted">Confirme as permissões solicitadas no fluxo oficial da Meta.</p></div></div>
-              <div class="wa-step-item"><span class="wa-step-num">3</span><div><strong>Atenda com a IA</strong><p class="muted">A IA usa as informações do negócio e as instruções configuradas no Agent Studio.</p></div></div>
-            </div>
-            <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:20px;">
-              <button id="btn-connect-whatsapp" class="btn primary" type="button">Conectar WhatsApp pela Meta</button>
-              <button id="btn-connect-whatsapp-env" class="btn outline hidden" type="button">Usar número configurado no servidor</button>
-            </div>
-            <p id="whatsapp-connect-status" class="muted" role="status" style="margin-top:10px;"></p>
+          <div class="integration-alert-content" style="flex:1;">
+            <strong id="website-banner-title">Estado da Instalação: Pendente</strong>
+            <p class="muted" id="website-banner-desc" style="margin:4px 0 0;">O código de instalação exclusivo foi gerado. Cole-o na secção &lt;head&gt; do seu website para ativar a comunicação.</p>
+          </div>
+          <div>
+            <button type="button" class="btn outline small" id="btn-verify-website-connection">
+              <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+              <span id="label-verify-btn">Verificar Ligação</span>
+            </button>
           </div>
         </div>
 
-        <div id="whatsapp-connected-view" class="wa-view hidden">
-          <div class="wa-connected-card">
-            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;">
-              <div>
-                <h3 id="whatsapp-display-name" style="margin:0 0 4px;">WhatsApp conectado</h3>
-                <span id="whatsapp-display-number" class="badge" style="background:var(--violet-subtle); color:var(--lavender); font-size:13px;"></span>
+        <!-- Layout principal: Criação com IA & Código vs Pré-visualização -->
+        <div class="website-integration-layout">
+          <!-- COLUNA ESQUERDA -->
+          <div class="website-config-column">
+            <!-- Card 1: Como imagina o seu agente (Instruções do Agente & Estilo) -->
+            <div class="integration-hero-card" style="margin-bottom:20px; padding:22px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                <div>
+                  <h3 style="font-size:17px; margin:0 0 4px; display:flex; align-items:center; gap:8px;">
+                    <svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                    Como imagina o seu agente virtual?
+                  </h3>
+                  <p class="muted" style="margin:0; font-size:13px;">Defina as instruções completas do agente: estilo visual, posicionamento (esquerda/direita), cores, tom de voz e comportamento. O HTML e o código HEAD atualizam-se com precisão instantânea.</p>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <button type="button" class="btn outline small" id="btn-website-ai-undo" title="Retroceder para a versão anterior das instruções" style="display:inline-flex; align-items:center; gap:6px;">
+                    <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                    <span>Retroceder</span>
+                  </button>
+                  <button type="button" class="btn outline danger small" id="btn-website-ai-clear" title="Apagar todas as instruções e restaurar o padrão neutro" style="display:inline-flex; align-items:center; gap:6px;">
+                    <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    <span>Apagar Tudo</span>
+                  </button>
+                </div>
               </div>
-              <button id="btn-whatsapp-disconnect" class="btn outline danger small" type="button">Desconectar</button>
+
+              <!-- Sugestões Rápidas de Estilo e Comportamento -->
+              <div class="website-quick-suggestions">
+                <span class="muted" style="font-size:11.5px; font-weight:700;">Ideias para adicionar:</span>
+                <button type="button" class="btn outline small website-prompt-chip" data-prompt="Quero um agente comercial e persuasivo com foco em vendas e marcações.">Comercial &amp; Persuasivo</button>
+                <button type="button" class="btn outline small website-prompt-chip" data-prompt="Quero o botão flutuante posicionado no canto inferior esquerdo.">Botão na Esquerda</button>
+                <button type="button" class="btn outline small website-prompt-chip" data-prompt="Quero destacar o botão e o topo do chat na cor azul royal #2563eb.">Destaque Azul #2563eb</button>
+                <button type="button" class="btn outline small website-prompt-chip" data-prompt="Quero bordas arredondadas modernas e botão circular.">Bordas Arredondadas</button>
+                <button type="button" class="btn outline small website-prompt-chip" data-prompt="Quero cantos retos retangulares e botão quadrado.">Cantos Retos &amp; Botão Quadrado</button>
+                <button type="button" class="btn outline small website-prompt-chip" data-prompt="Quero tema escuro dark mode com fundo preto e destaque azul #2563eb.">Dark Mode &amp; Azul</button>
+              </div>
+
+              <!-- Bloco de Visualização das Instruções Ativas do Agente -->
+              <div class="website-active-instructions-box" style="margin-top:14px; margin-bottom:12px; background:var(--bg-main); border:2px solid var(--border-arcade); border-radius:var(--radius-md); padding:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <span class="muted" style="font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">Instrução Ativa no HEAD:</span>
+                  <span class="badge" id="website-instructions-status-pill" style="font-size:11px; padding:2px 8px;">Padrão Neutro</span>
+                </div>
+                <div id="website-active-instructions-text" style="font-size:13.5px; line-height:1.5; color:var(--text-primary); font-family:var(--font-sans); white-space:pre-wrap;">Como imagina o seu agente virtual? Descreva o estilo visual, posicionamento, personalidade e comportamento pretendidos.</div>
+              </div>
+
+              <!-- Campo único para Definir ou Incrementar Instruções -->
+              <div class="website-ai-input-bar">
+                <textarea id="website-ai-input" rows="3" placeholder="Escreva aqui as instruções para o seu agente... (ex: quero botão na esquerda, tom executivo em preto e branco, foco em agendar reuniões)" class="form-control" style="font-size:13.5px; line-height:1.45;"></textarea>
+                <button type="button" class="btn primary" id="btn-website-ai-send" style="align-self:flex-end; padding:10px 18px; font-weight:700;">
+                  <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  <span>Aplicar Instrução</span>
+                </button>
+              </div>
             </div>
-            <div class="wa-info-grid">
-              <div class="wa-info-item"><span class="wa-info-label">Conta WhatsApp Business</span><strong id="whatsapp-info-waba">-</strong></div>
-              <div class="wa-info-item"><span class="wa-info-label">Webhook da Meta</span><strong id="whatsapp-info-webhook">-</strong></div>
-              <div class="wa-info-item"><span class="wa-info-label">Registo na Cloud API</span><strong id="whatsapp-info-phone-registration">-</strong></div>
-              <div class="wa-info-item"><span class="wa-info-label">Respostas automáticas</span><strong id="whatsapp-info-auto-reply">-</strong></div>
-              <div class="wa-info-item"><span class="wa-info-label">Ligado desde</span><strong id="whatsapp-info-created">-</strong></div>
+
+            <!-- Card 2: Código de Instalação HEAD -->
+            <div class="integration-hero-card" style="margin-bottom:20px; padding:22px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                <div>
+                  <h3 style="font-size:17px; margin:0 0 4px; display:flex; align-items:center; gap:8px;">
+                    <svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                    Código de Instalação no Website
+                  </h3>
+                  <p class="muted" style="margin:0; font-size:13px;">Copie este código e cole-o dentro da secção <code>&lt;head&gt; ... &lt;/head&gt;</code> do seu website.</p>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <button type="button" class="btn outline small" id="btn-website-regenerate" title="Gerar novamente o código preservando a chave">
+                    <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    <span>Gerar Novamente</span>
+                  </button>
+                  <button type="button" class="btn primary small" id="btn-website-copy-code">
+                    <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    <span id="label-copy-code">Copiar Código</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="code-block-wrapper">
+                <pre class="code-preview"><code id="website-head-code-display">&lt;!-- A carregar código HEAD exclusivo... --&gt;</code></pre>
+              </div>
+
+              <div class="integration-steps-grid" style="margin-top:16px;">
+                <div class="integration-step-item">
+                  <span class="integration-step-num">1</span>
+                  <div>
+                    <strong>Cole na secção &lt;head&gt;</strong>
+                    <p class="muted">Insira o código gerado no cabeçalho das páginas do seu website.</p>
+                  </div>
+                </div>
+                <div class="integration-step-item">
+                  <span class="integration-step-num">2</span>
+                  <div>
+                    <strong>Aceda ao seu Website</strong>
+                    <p class="muted">O widget carrega e estabelece comunicação imediata com o servidor.</p>
+                  </div>
+                </div>
+                <div class="integration-step-item">
+                  <span class="integration-step-num">3</span>
+                  <div>
+                    <strong>Ativação Confirmada</strong>
+                    <p class="muted">O Drexier valida a chave e o domínio e atualiza o estado para <strong>Ativo</strong>.</p>
+                  </div>
+                </div>
+              </div>
             </div>
-            <form id="whatsapp-registration-form" class="form hidden" style="margin-top:22px;">
-              <h4 style="margin:0;">Registar número na Cloud API</h4>
-              <p class="muted">Defina o PIN de verificação em dois passos de seis dígitos. Guarde-o num local seguro; o Drexier não o armazena.</p>
-              <label>PIN de registo<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required></label>
-              <div><button id="btn-whatsapp-register" class="btn primary small" type="submit">Registar número</button></div>
-            </form>
-            <form id="whatsapp-test-send-form" class="form" style="margin-top:22px;">
-              <h4 style="margin:0;">Enviar mensagem de teste</h4>
-              <label>Número de destino (com indicativo do país)<input name="to" type="tel" placeholder="+351912345678" minlength="5" maxlength="30" required></label>
-              <label>Mensagem<textarea name="message" rows="2" maxlength="4000" required>Teste de integração WhatsApp do Drexier.</textarea></label>
-              <div><button id="btn-whatsapp-test-send" class="btn outline small" type="submit">Enviar teste</button></div>
-            </form>
+
+            <!-- Card 3: Ajustes e Diretrizes Manuais -->
+            <div class="integration-hero-card" style="padding:22px;">
+              <details id="website-advanced-details">
+                <summary style="cursor:pointer; font-weight:700; font-family:var(--font-display); font-size:15px; display:flex; align-items:center; justify-content:space-between; user-select:none;">
+                  <span style="display:flex; align-items:center; gap:8px;">
+                    <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    Ajustes Manuais e Diretrizes Comportamentais
+                  </span>
+                  <span class="muted" style="font-size:12px; font-weight:normal;">Clique para editar diretamente</span>
+                </summary>
+
+                <div style="margin-top:18px; display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                  <div>
+                    <label class="form-label" for="website-field-agent-name">Nome do Agente no Chat</label>
+                    <input type="text" id="website-field-agent-name" class="form-control" placeholder="Ex: Assistente Drexier" />
+                  </div>
+                  <div>
+                    <label class="form-label" for="website-field-agent-role">Cargo / Subtítulo</label>
+                    <input type="text" id="website-field-agent-role" class="form-control" placeholder="Ex: Atendimento &amp; Vendas" />
+                  </div>
+                  <div>
+                    <label class="form-label" for="website-field-theme-color">Cor de Destaque</label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                      <input type="color" id="website-field-color-picker" style="width:40px; height:38px; padding:2px; border:2px solid var(--border-arcade); border-radius:var(--radius-sm); cursor:pointer;" />
+                      <input type="text" id="website-field-theme-color" class="form-control" placeholder="#6366f1" style="flex:1;" />
+                    </div>
+                  </div>
+                  <div>
+                    <label class="form-label" for="website-field-position">Posição no Ecrã</label>
+                    <select id="website-field-position" class="form-control">
+                      <option value="bottom-right">Canto Inferior Direito</option>
+                      <option value="bottom-left">Canto Inferior Esquerdo</option>
+                    </select>
+                  </div>
+                  <div style="grid-column:1 / -1;">
+                    <label class="form-label" for="website-field-allowed-domain">Domínio Autorizado do Website (Segurança)</label>
+                    <input type="text" id="website-field-allowed-domain" class="form-control" placeholder="Ex: meusite.com (deixe vazio para aceitar qualquer domínio)" />
+                    <span class="muted" style="font-size:11.5px; margin-top:3px; display:block;">Bloqueia tentativas não autorizadas de carregar o seu agente noutros domínios.</span>
+                  </div>
+                  <div style="grid-column:1 / -1;">
+                    <label class="form-label" for="website-field-greeting">Mensagem de Boas-Vindas</label>
+                    <input type="text" id="website-field-greeting" class="form-control" placeholder="Olá! Como posso ajudar hoje?" />
+                  </div>
+                  <div style="grid-column:1 / -1;">
+                    <label class="form-label" for="website-field-instructions">Diretrizes Específicas de Atendimento para o Site</label>
+                    <textarea id="website-field-instructions" rows="3" class="form-control" placeholder="Ex: Priorize esclarecer dúvidas de stock e encaminhe o cliente para fechar o pedido..."></textarea>
+                  </div>
+                  <div style="grid-column:1 / -1; display:flex; justify-content:flex-end;">
+                    <button type="button" class="btn primary small" id="btn-website-save-manual">Salvar Alterações</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+
+          <!-- COLUNA DIREITA: PRÉ-VISUALIZAÇÃO INTERATIVA -->
+          <div class="website-preview-column">
+            <div class="website-preview-card">
+              <div class="website-preview-browser-bar">
+                <div class="website-preview-dots">
+                  <span></span><span></span><span></span>
+                </div>
+                <div class="website-preview-url" id="website-preview-url-text">https://seu-website.com</div>
+              </div>
+
+              <!-- Janela Simulada do Website -->
+              <div class="website-preview-viewport" id="website-preview-viewport">
+                <div class="website-preview-dummy-page">
+                  <div class="dummy-nav"></div>
+                  <div class="dummy-hero-title"></div>
+                  <div class="dummy-hero-subtitle"></div>
+                  <div class="dummy-cards">
+                    <div class="dummy-card"></div>
+                    <div class="dummy-card"></div>
+                  </div>
+                </div>
+
+                <!-- Widget Mock no Preview -->
+                <div id="website-mock-widget" class="mock-widget-bottom-right">
+                  <!-- Janela do Chat Mock -->
+                  <div id="mock-chat-window" class="mock-chat-window is-open">
+                    <div id="mock-chat-header" class="mock-chat-header" style="background:#18181b;">
+                      <div class="mock-header-info">
+                        <div id="mock-avatar" class="mock-avatar">D</div>
+                        <div>
+                          <div id="mock-agent-name" class="mock-name">Agente Drexier</div>
+                          <div class="mock-status">
+                            <span class="mock-dot"></span>
+                            <span id="mock-agent-role">Online • Atendimento</span>
+                          </div>
+                        </div>
+                      </div>
+                      <button type="button" class="mock-close-btn" id="btn-mock-toggle" title="Minimizar pré-visualização">✕</button>
+                    </div>
+                    <div id="mock-messages" class="mock-messages">
+                      <div class="mock-bubble mock-bubble-agent" id="mock-greeting-bubble">
+                        Olá! Como posso ajudar hoje?
+                      </div>
+                    </div>
+                    <div class="mock-input-area">
+                      <input type="text" id="mock-chat-input" placeholder="Experimente testar uma mensagem..." />
+                      <button type="button" id="btn-mock-send" class="mock-send-btn" style="background:#18181b;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                      </button>
+                    </div>
+                    <div class="mock-footer-note">⚡ Drexier AI Preview Interativo</div>
+                  </div>
+
+                  <!-- Botão Flutuante Mock -->
+                  <button type="button" id="mock-chat-button" class="mock-chat-button" style="background:#18181b;" aria-label="Simular botão">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -50,9 +50,9 @@ from backend.services.billing_service import (
     get_user_subscription_status,
     schedule_subscription_cancellation,
 )
-from backend.routers.whatsapp import router as whatsapp_router
 from backend.routers.email import router as email_router
 from backend.routers.billing import router as billing_router
+from backend.routers.website import router as website_router
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -71,7 +71,7 @@ async def background_email_worker():
         try:
             with connect() as c:
                 active_users = c.execute(
-                    "SELECT DISTINCT user_id FROM email_integrations WHERE status = 'connected'"
+                    "SELECT DISTINCT user_id FROM email_integrations WHERE status = 'connected' AND provider = 'google'"
                 ).fetchall()
             
             for row in active_users:
@@ -105,10 +105,10 @@ async def lifespan(app: FastAPI):
             pass
 
 app = FastAPI(title="Drexier API", version="0.1.0", lifespan=lifespan)
-# Roteadores do sistema (Faturação Stripe, Canal Email Google ativo, WhatsApp legado)
+# Roteadores do sistema
 app.include_router(billing_router)
 app.include_router(email_router)
-app.include_router(whatsapp_router)
+app.include_router(website_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -135,6 +135,10 @@ def get_app_js():
 @app.get("/i18n.js")
 def get_i18n_js():
     return FileResponse(ROOT / "frontend" / "i18n.js")
+
+@app.get("/widget.js")
+def get_widget_js():
+    return FileResponse(ROOT / "frontend" / "widget.js", media_type="application/javascript")
 
 def current_user(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):

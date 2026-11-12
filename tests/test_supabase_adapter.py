@@ -97,28 +97,28 @@ def test_insert_errors_are_not_reported_as_success():
         )
 
 
-def test_on_conflict_insert_uses_supabase_upsert_and_normalizes_boolean():
+def test_on_conflict_insert_uses_supabase_upsert_for_gmail():
     query = InsertQuery(result=type("Result", (), {"data": [{
         "id": 42,
         "user_id": 7,
-        "phone_registered": False,
+        "provider": "google",
     }]})())
 
-    class WhatsAppSupabaseClient:
+    class EmailSupabaseClient:
         def table(self, name):
-            assert name == "whatsapp_integrations"
+            assert name == "email_integrations"
             return query
 
-    cursor = SupabaseCursor(WhatsAppSupabaseClient())
+    cursor = SupabaseCursor(EmailSupabaseClient())
     cursor.execute(
-        """INSERT INTO whatsapp_integrations(user_id,phone_registered)
-           VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET phone_registered=excluded.phone_registered""",
-        (7, 0),
+        """INSERT INTO email_integrations(user_id,provider)
+           VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider""",
+        (7, "google"),
     )
 
     assert query.upsert_called is True
-    assert query.insert_data == {"user_id": 7, "phone_registered": False}
-    assert cursor.fetchone()["phone_registered"] == 0
+    assert query.insert_data == {"user_id": 7, "provider": "google"}
+    assert cursor.fetchone()["provider"] == "google"
 
 
 @pytest.mark.parametrize(
