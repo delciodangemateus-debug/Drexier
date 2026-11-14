@@ -787,3 +787,124 @@ def test_toggle_auto_reply(auth_client):
 
     status_res2 = client.get("/api/email/status", headers={"Authorization": f"Bearer {token}"})
     assert status_res2.json()["integration"]["auto_reply_enabled"] is True
+
+
+@pytest.mark.anyio
+async def test_duplicate_email_is_never_replied_twice(auth_client):
+    """
+    Garante que uma mensagem idêntica recebida repetidamente pelo cliente
+    só é respondida uma única vez pelo agente, evitando loops e envios repetidos.
+    """
+    _, _, user_id = auth_client
+    with patch(
+        "backend.services.email_service.draft_reply",
+        new_callable=AsyncMock,
+        return_value="Olá! Como posso ajudar?",
+    ) as mock_draft, patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        msg = {
+            "user_dict": {"id": user_id, "name": "Drexier Business"},
+            "integration": {
+                "provider": "google",
+                "email_address": "empresa@gmail.com",
+                "auto_reply_enabled": 1,
+            },
+            "customer_email": "cliente.repetido@example.com",
+            "customer_name": "Cliente Repetido",
+            "subject": "Informações de Serviços",
+            "incoming_content": "Quais são os serviços disponíveis?",
+            "thread_id": "thread-123",
+            "message_id_header": "<msg-unique-123@example.com>",
+        }
+
+        # Primeiro envio: deve gerar resposta e enviar email
+        reply1 = await process_and_reply_email(**msg)
+        assert reply1 == "Olá! Como posso ajudar?"
+        assert mock_send.await_count == 1
+        assert mock_draft.await_count == 1
+
+        # Segundo envio idêntico (lag ou repetição): deve detectar duplicado e NÃO enviar novamente
+        reply2 = await process_and_reply_email(**msg)
+        assert reply2 == "Olá! Como posso ajudar?"
+        assert mock_send.await_count == 1  # Mantém 1, não incrementou!
+        assert mock_draft.await_count == 1  # Não gastou chamada de IA!
+
+    with connect() as c:
+        agent_msgs = c.execute(
+            "SELECT count(*) as total FROM messages WHERE user_id = ? AND sender = 'agent'",
+            (user_id,),
+        ).fetchone()["total"]
+        customer_msgs = c.execute(
+            "SELECT count(*) as total FROM messages WHERE user_id = ? AND sender = 'customer'",
+            (user_id,),
+        ).fetchone()["total"]
+
+    assert agent_msgs == 1
+    assert customer_msgs == 1
+
+
+def test_natural_language_booking_time_extraction():
+    """
+    Garante flexibilidade na extração de datas e horas em linguagem natural portuguesa.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime(2026, 11, 5, 10, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+    
+    # Horas numéricas
+    assert extract_scheduled_at("amanhã às 14h", now) == "2026-11-06T14:00:00+00:00"
+    assert extract_scheduled_at("amanhã às 14:30", now) == "2026-11-06T14:30:00+00:00"
+    assert extract_scheduled_at("dia 10 de novembro às 11h", now) == "2026-11-10T11:00:00+00:00"
+
+    # Períodos naturais do dia
+    assert extract_scheduled_at("amanhã de tarde", now) == "2026-11-06T15:00:00+00:00"
+    assert extract_scheduled_at("amanhã de manhã", now) == "2026-11-06T09:00:00+00:00"
+    assert extract_scheduled_at("depois de amanhã às 11h", now) == "2026-11-07T11:00:00+00:00"
+
+    # Sem hora -> Deve retornar None para que o agente pergunte o horário pretendido
+    assert extract_scheduled_at("amanhã", now) is None
+    assert extract_scheduled_at("próxima terça", now) is None
+
+
+@pytest.mark.anyio
+async def test_email_from_user_account_email_is_processed(auth_client):
+    """
+    Garante que mensagens enviadas pelo e-mail de login da conta (ex: proprietário testando)
+    para o e-mail oficial integrado da empresa NÃO são bloqueadas pelo anti-loop.
+    Apenas mensagens originadas pelo próprio endereço oficial integrado devem ser ignoradas.
+    """
+    _, _, user_id = auth_client
+    with patch(
+        "backend.services.email_service.draft_reply",
+        new_callable=AsyncMock,
+        return_value="Olá! Sim, temos viaturas disponíveis nessa faixa.",
+    ) as mock_draft, patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        msg = {
+            "user_dict": {"id": user_id, "name": "Autos Del", "email": "dono@gmail.com"},
+            "integration": {
+                "provider": "google",
+                "email_address": "empresa@gmail.com",
+                "auto_reply_enabled": 1,
+            },
+            "customer_email": "dono@gmail.com",
+            "customer_name": "Karim / Dono",
+            "subject": "Informação sobre viaturas",
+            "incoming_content": "Gostaria de saber se tem alguma viatura de 15 a 20 mil euros?",
+            "thread_id": "thread-karim-001",
+            "message_id_header": "<karim-test-001@example.com>",
+        }
+
+        reply = await process_and_reply_email(**msg)
+        assert reply == "Olá! Sim, temos viaturas disponíveis nessa faixa."
+        assert mock_send.await_count == 1
+        assert mock_draft.await_count == 1
+
+

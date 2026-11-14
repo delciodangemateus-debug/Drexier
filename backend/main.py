@@ -52,7 +52,6 @@ from backend.services.billing_service import (
 )
 from backend.routers.email import router as email_router
 from backend.routers.billing import router as billing_router
-from backend.routers.website import router as website_router
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -108,7 +107,6 @@ app = FastAPI(title="Drexier API", version="0.1.0", lifespan=lifespan)
 # Roteadores do sistema
 app.include_router(billing_router)
 app.include_router(email_router)
-app.include_router(website_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -135,10 +133,6 @@ def get_app_js():
 @app.get("/i18n.js")
 def get_i18n_js():
     return FileResponse(ROOT / "frontend" / "i18n.js")
-
-@app.get("/widget.js")
-def get_widget_js():
-    return FileResponse(ROOT / "frontend" / "widget.js", media_type="application/javascript")
 
 def current_user(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -539,7 +533,9 @@ def dashboard(user=Depends(current_user)):
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
           WHERE r.user_id=? AND r.status IN ('pending', 'confirmed', 'confirmed_manual', 'resolved')
           ORDER BY r.scheduled_at ASC""",(uid,)).fetchall()
-    week_end = now + timedelta(days=7)
+
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_end = today_start + timedelta(days=7)
     bookings_rows = []
     for row in booking_rows:
         item = dict(row)
@@ -557,7 +553,7 @@ def dashboard(user=Depends(current_user)):
                 scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
         except (TypeError, ValueError):
             continue
-        if now <= scheduled_at.astimezone(timezone.utc) < week_end:
+        if today_start <= scheduled_at.astimezone(timezone.utc) < week_end:
             bookings_rows.append(item)
     bookings_count = len(bookings_rows)
     res = {"messages_answered":total_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,

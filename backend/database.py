@@ -149,27 +149,6 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
-CREATE TABLE IF NOT EXISTS website_integrations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL UNIQUE,
-  site_key TEXT NOT NULL UNIQUE,
-  site_name TEXT NOT NULL DEFAULT 'Meu Website',
-  allowed_domain TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'pending',
-  agent_name TEXT NOT NULL DEFAULT 'Agente Drexier',
-  agent_role TEXT NOT NULL DEFAULT 'Atendente Virtual',
-  greeting_message TEXT NOT NULL DEFAULT 'Olá! Como posso ajudar hoje?',
-  theme_color TEXT NOT NULL DEFAULT '#6366f1',
-  position TEXT NOT NULL DEFAULT 'bottom-right',
-  agent_instructions TEXT NOT NULL DEFAULT '',
-  conversation_history TEXT NOT NULL DEFAULT '[]',
-  last_heartbeat_at TEXT,
-  last_verified_domain TEXT,
-  error_message TEXT DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-);
 """
 
 
@@ -224,29 +203,7 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
            )"""
     )
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS website_integrations (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               user_id INTEGER NOT NULL UNIQUE,
-               site_key TEXT NOT NULL UNIQUE,
-               site_name TEXT NOT NULL DEFAULT 'Meu Website',
-               allowed_domain TEXT NOT NULL DEFAULT '',
-               status TEXT NOT NULL DEFAULT 'pending',
-               agent_name TEXT NOT NULL DEFAULT 'Agente Drexier',
-               agent_role TEXT NOT NULL DEFAULT 'Atendente Virtual',
-               greeting_message TEXT NOT NULL DEFAULT 'Olá! Como posso ajudar hoje?',
-               theme_color TEXT NOT NULL DEFAULT '#6366f1',
-               position TEXT NOT NULL DEFAULT 'bottom-right',
-               agent_instructions TEXT NOT NULL DEFAULT '',
-               conversation_history TEXT NOT NULL DEFAULT '[]',
-               last_heartbeat_at TEXT,
-               last_verified_domain TEXT,
-               error_message TEXT DEFAULT '',
-               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-               FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-           )"""
-    )
+    conn.execute("DROP TABLE IF EXISTS website_integrations")
     email_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(email_integrations)").fetchall()
     }

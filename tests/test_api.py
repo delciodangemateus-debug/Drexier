@@ -80,6 +80,23 @@ def test_dashboard_uses_consecutive_24_hour_windows_and_week_schedule():
         "previous24h",
         "last24h",
     ]
+    assert [row["scheduled_at"] for row in dashboard["confirmed_bookings"]] == [
+        (now + timedelta(days=1)).isoformat(),
+        (now + timedelta(days=2)).isoformat(),
+    ]
+    assert all("with_whom" not in row for row in dashboard["confirmed_bookings"])
+
+
+def test_requested_weekday_and_morning_time_are_parsed_as_the_reserved_datetime():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from backend.services.email_service import extract_scheduled_at
+
+    now = datetime(2026, 11, 14, 12, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+    requested = "Quero a marcação para segunda-feira às 8 horas da manhã com o senhor Cordeiro."
+
+    assert extract_scheduled_at(requested, now) == "2026-11-16T08:00:00+00:00"
 
 
 def test_business_info_cards_persist_and_keep_multiple_custom_cards():

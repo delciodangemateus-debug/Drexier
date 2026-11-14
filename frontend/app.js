@@ -1615,66 +1615,69 @@ function openBookingsModal(confirmedList) {
   }
 
   const fragment = document.createDocumentFragment();
-  let currentDay = "";
   list.forEach(r => {
     const appointmentDate = new Date(r.scheduled_at);
     if (Number.isNaN(appointmentDate.getTime())) return;
-    const dayLabel = appointmentDate.toLocaleDateString("pt-PT", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric"
-    });
-    if (dayLabel !== currentDay) {
-      currentDay = dayLabel;
-      const dayHeading = document.createElement("h3");
-      dayHeading.className = "booking-day-heading";
-      dayHeading.textContent = dayLabel;
-      fragment.append(dayHeading);
-    }
-
-    const card = document.createElement("div");
-    card.className = "booking-week-item";
-    const dayDifference = Math.ceil((
-      Date.UTC(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate()) -
-      Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())
-    ) / 86400000);
-    const urgency = dayDifference <= 1
-      ? { className: "urgent", label: dayDifference <= 0 ? "Urgente · hoje" : "Urgente · falta 1 dia" }
-      : dayDifference <= 3
-        ? { className: "almost", label: `Quase · faltam ${dayDifference} dias` }
-        : dayDifference <= 5
-          ? { className: "approaching", label: `Atenção · faltam ${dayDifference} dias` }
-          : { className: "upcoming", label: `Pendente · faltam ${dayDifference} dias` };
-    const typeLabel = /purchase|compra|encomenda/i.test(r.request_type || "") ? "Compra" : "Marcação";
-    const details = String(r.details || "")
-      .replace(/^Assunto:\s*[^\n]*\n?/i, "")
-      .replace(/\nData e hora escolhidas pelo cliente:[\s\S]*$/i, "")
-      .trim();
-    const scheduledLabel = appointmentDate.toLocaleString("pt-PT", {
+    const dateLabel = appointmentDate.toLocaleDateString("pt-PT", {
+      timeZone: "Europe/Lisbon",
       day: "2-digit",
       month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
+      year: "numeric"
+    }).replace(/\//g, " / ");
+    const timeParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Lisbon",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    }).formatToParts(appointmentDate);
+    const getTimePart = type => timeParts.find(part => part.type === type)?.value;
+    const hour = getTimePart("hour");
+    const minute = getTimePart("minute");
+    const dayPeriod = getTimePart("dayPeriod");
+    if (!hour || !minute || !dayPeriod) return;
+    const timeLabel = `${hour}:${minute} ${dayPeriod === "AM" ? "A.M." : "P.M."}`;
+    const reservedAt = `${dateLabel} - ${timeLabel}`;
+
+    const card = document.createElement("article");
+    card.className = "booking-week-item";
+
+    const info = document.createElement("div");
+    info.className = "booking-week-info";
+
+    const summary = document.createElement("div");
+    summary.className = "booking-week-summary";
+
+    const clientName = document.createElement("button");
+    clientName.type = "button";
+    clientName.className = "booking-client-name";
+    clientName.textContent = r.name || r.contact_key || "Cliente";
+
+    const requestDetails = document.createElement("div");
+    requestDetails.className = "booking-request-details";
+    requestDetails.id = `booking-request-${Number(r.id)}`;
+    requestDetails.hidden = true;
+    requestDetails.textContent = r.details || "Não há mensagem do pedido registada.";
+    clientName.setAttribute("aria-controls", requestDetails.id);
+    clientName.setAttribute("aria-expanded", "false");
+    clientName.addEventListener("click", () => {
+      const isExpanded = clientName.getAttribute("aria-expanded") === "true";
+      clientName.setAttribute("aria-expanded", String(!isExpanded));
+      requestDetails.hidden = isExpanded;
     });
-    const validationLabel = r.status === "pending" ? "A aguardar validação" : "Validada";
-    card.innerHTML = `
-      <div class="booking-week-info">
-        <div class="booking-week-heading">
-          <strong class="booking-clean-name">${escapeHtml(r.name || r.contact_key)}</strong>
-          <span class="booking-urgency ${urgency.className}">${escapeHtml(urgency.label)}</span>
-        </div>
-        <span class="muted booking-week-contact">${escapeHtml(r.contact_key || "")}</span>
-        <div class="booking-week-description"><strong>${typeLabel}:</strong> ${escapeHtml(details || r.request_type || "Pedido")}</div>
-        <div class="booking-week-time">${escapeHtml(scheduledLabel)} · ${validationLabel}</div>
-      </div>
-      <button type="button" class="btn outline small booking-reminder-btn" data-request-id="${Number(r.id)}">
-        Lembrar com IA
-      </button>
-    `;
-    const reminderBtn = card.querySelector(".booking-reminder-btn");
-    reminderBtn?.addEventListener("click", async () => {
+
+    const schedule = document.createElement("span");
+    schedule.className = "booking-reserved-at";
+    schedule.textContent = reservedAt;
+
+    summary.append(clientName, schedule);
+    info.append(summary, requestDetails);
+
+    const reminderBtn = document.createElement("button");
+    reminderBtn.type = "button";
+    reminderBtn.className = "btn outline small booking-reminder-btn";
+    reminderBtn.dataset.requestId = String(Number(r.id));
+    reminderBtn.textContent = "Lembrar com IA";
+    reminderBtn.addEventListener("click", async () => {
       reminderBtn.disabled = true;
       reminderBtn.textContent = "A enviar…";
       try {
@@ -1687,6 +1690,7 @@ function openBookingsModal(confirmedList) {
         reminderBtn.textContent = "Lembrar com IA";
       }
     });
+    card.append(info, reminderBtn);
     fragment.append(card);
   });
 
@@ -1960,16 +1964,12 @@ function renderContactsList(contacts) {
     info.className = "contact-card-info";
 
     const hasEmail = c.contact_key.includes("@");
-    const isWebsite = c.contact_key.startsWith("web_");
     const name = document.createElement("div");
     name.className = "contact-card-name";
     name.textContent = c.name || c.contact_key;
 
     const channelBadge = document.createElement("span");
-    if (isWebsite) {
-      channelBadge.className = "contact-channel-badge website";
-      channelBadge.textContent = "Website";
-    } else if (hasEmail) {
+    if (hasEmail) {
       channelBadge.className = "contact-channel-badge email";
       channelBadge.textContent = "Gmail";
     } else {
@@ -4000,7 +4000,6 @@ $$("[data-setting]").forEach(b => b.addEventListener("click", () => {
   $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== `setting-${b.dataset.setting}`));
   if (b.dataset.setting === "integration") {
     loadEmailStatus();
-    loadWebsiteIntegrationStatus(true);
   }
   if (b.dataset.setting === "billing") {
     loadBillingStatus();
@@ -4671,593 +4670,9 @@ async function toggleAutoReply() {
 $("#btn-toggle-auto-reply")?.addEventListener("click", toggleAutoReply);
 $("#btn-toggle-auto-reply-messages")?.addEventListener("click", toggleAutoReply);
 
-/* ════════════════════════════════════════════════════════════
-   INTEGRAÇÃO DE WEBSITES (CHATBOT IA & HEAD SCRIPT)
-   ════════════════════════════════════════════════════════════ */
-
-let currentWebsiteIntegration = null;
-let isWebsiteLoading = false;
-let websitePollTimer = null;
-
-function updateWebsiteStatusBadge(status, errorMsg) {
-  const badge = $("#website-status-badge");
-  const pill = $("#pill-website-status");
-  const banner = $("#website-connection-banner");
-  const bannerTitle = $("#website-banner-title");
-  const bannerDesc = $("#website-banner-desc");
-
-  let label = "Pendente";
-  let badgeClass = "badge badge-pending";
-  let pillClass = "badge badge-pending";
-  let title = "Estado da Instalação: Pendente";
-  let desc = "O código exclusivo foi gerado. Cole-o na secção <head> do seu website para ativar a comunicação.";
-  let borderLeftColor = "#f59e0b";
-
-  if (status === "active") {
-    label = "Ativo";
-    badgeClass = "badge badge-connected";
-    pillClass = "badge badge-connected";
-    title = "Website Conectado e Ativo";
-    desc = "A ligação entre o seu website e o servidor Drexier está confirmada. O agente está pronto para atender os visitantes!";
-    borderLeftColor = "var(--lime-arcade)";
-  } else if (status === "disconnected") {
-    label = "Desconectado";
-    badgeClass = "badge badge-disconnected";
-    pillClass = "badge badge-disconnected";
-    title = "Website Desconectado";
-    desc = errorMsg || "A ligação com o website foi interrompida ou o código do widget foi removido.";
-    borderLeftColor = "var(--orange-arcade)";
-  } else if (status === "error") {
-    label = "Erro";
-    badgeClass = "badge badge-error";
-    pillClass = "badge badge-error";
-    title = "Falha na Validação da Ligação";
-    desc = errorMsg || "Ocorreu uma falha na validação do domínio ou na comunicação com o website.";
-    borderLeftColor = "#ef4444";
-  }
-
-  if (badge) {
-    badge.textContent = label;
-    badge.className = badgeClass;
-  }
-  if (pill) {
-    pill.textContent = label;
-    pill.className = pillClass;
-  }
-  if (banner) {
-    banner.style.borderLeftColor = borderLeftColor;
-  }
-  if (bannerTitle) bannerTitle.textContent = title;
-  if (bannerDesc) bannerDesc.textContent = desc;
-}
-
-function renderWebsiteActiveInstructions(history, initialPrompt, instructions, config) {
-  const textEl = $("#website-active-instructions-text");
-  const pillEl = $("#website-instructions-status-pill");
-  if (!textEl) return;
-
-  const list = Array.isArray(history) && history.length > 0 ? history : [];
-  const userMessages = list.filter(m => m.sender === "user").map(m => m.content);
-
-  const cfg = config || currentWebsiteIntegration || {};
-  const currentColor = cfg.theme_color || "#18181b";
-  const currentPos = cfg.position === "bottom-left" ? "Canto Inferior Esquerdo" : "Canto Inferior Direito";
-  const currentName = cfg.agent_name || "Agente Drexier";
-  const currentRadius = cfg.border_radius === "4px" ? "Cantos Retos (4px)" : (cfg.border_radius === "24px" ? "Cápsula (24px)" : "Arredondado Suave (16px)");
-  const currentShape = cfg.button_shape === "square" ? "Botão Quadrado" : (cfg.button_shape === "pill" ? "Botão Pílula" : "Botão Circular");
-  const currentMode = cfg.theme_mode === "dark" ? "Dark Mode (Escuro)" : "Light Clean (Neutro)";
-  const isNeutralDefault = (currentColor === "#18181b" || currentColor === "#111827") && (cfg.position || "bottom-right") === "bottom-right" && userMessages.length === 0;
-
-  if (pillEl) {
-    if (isNeutralDefault) {
-      pillEl.textContent = "Padrão Neutro";
-      pillEl.className = "badge";
-      pillEl.style.background = "var(--surface-interaction)";
-      pillEl.style.color = "var(--text-tertiary)";
-    } else {
-      const count = userMessages.length || (instructions ? 1 : 0);
-      pillEl.textContent = `${count} Diretriz(es) Ativa(s)`;
-      pillEl.className = "badge badge-active";
-      pillEl.style.background = "var(--surface-interaction)";
-      pillEl.style.color = "var(--text-primary)";
-    }
-  }
-
-  let html = `
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; margin-bottom:12px;">
-      <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 12px;">
-        <div class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Estilo &amp; Cor no HEAD</div>
-        <div style="font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; margin-top:3px;">
-          <span style="display:inline-block; width:14px; height:14px; border-radius:50%; background:${currentColor}; border:1.5px solid var(--border-arcade); flex-shrink:0;"></span>
-          <span>${currentColor === "#18181b" ? "Preto Neutro (#18181b)" : currentColor}</span>
-        </div>
-      </div>
-      <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 12px;">
-        <div class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Estrutura do Chat</div>
-        <div style="font-size:13px; font-weight:700; margin-top:3px;">${currentRadius} · ${currentMode}</div>
-      </div>
-      <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 12px;">
-        <div class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Posição &amp; Botão</div>
-        <div style="font-size:13px; font-weight:700; margin-top:3px;">${currentPos} · ${currentShape}</div>
-      </div>
-      <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 12px;">
-        <div class="muted" style="font-size:11px; text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Identidade do Agente</div>
-        <div style="font-size:13px; font-weight:700; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(currentName)}</div>
-      </div>
-    </div>
-  `;
-
-  if (userMessages.length > 0) {
-    html += `
-      <div style="margin-top:8px;">
-        <div class="muted" style="font-size:11.5px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.4px;">Instruções Criadas e Marcadas (Aplicadas ao HEAD):</div>
-        <div style="display:flex; flex-direction:column; gap:6px;">
-    `;
-    userMessages.forEach((msg) => {
-      html += `
-        <div style="display:flex; align-items:flex-start; gap:8px; background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:7px 10px; font-size:12.5px; line-height:1.4;">
-          <span style="display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:50%; background:var(--text-primary); color:var(--bg-main); font-size:10px; font-weight:900; flex-shrink:0; margin-top:1px;">✓</span>
-          <span style="color:var(--text-primary); font-weight:500;">${escapeHtml(msg)}</span>
-        </div>
-      `;
-    });
-    html += `</div></div>`;
-  } else if (instructions && instructions.trim()) {
-    html += `
-      <div style="margin-top:8px;">
-        <div class="muted" style="font-size:11.5px; font-weight:700; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.4px;">Diretrizes Marcadas:</div>
-        <div style="background:var(--surface-primary); border:1px solid var(--border-arcade); border-radius:var(--radius-sm); padding:8px 10px; font-size:12.5px; line-height:1.45; color:var(--text-primary); white-space:pre-wrap;">${escapeHtml(instructions)}</div>
-      </div>
-    `;
-  } else {
-    html += `
-      <div style="padding:10px 12px; background:var(--surface-primary); border:1px dashed var(--border-arcade); border-radius:var(--radius-sm); font-size:12.5px; line-height:1.45; color:var(--text-secondary); font-style:italic;">
-        Padrão neutro moderno ativo (branco, preto e cinza). Dite o estilo e a estrutura que desejar (ex: cantos retos, tema escuro, bordas bem arredondadas, botão quadrado ou circular) ou use as sugestões. O agente atualizará o código HEAD e a demonstração instantaneamente.
-      </div>
-    `;
-  }
-
-  textEl.innerHTML = html;
-}
-
-function updateWebsitePreview(config) {
-  if (!config) return;
-  const name = config.agent_name || "Agente Drexier";
-  const role = config.agent_role || "Online • Atendimento";
-  const color = config.theme_color || "#18181b"; // Padrão Neutro Preto
-  const pos = config.position || "bottom-right";
-  const greet = config.greeting_message || "Olá! Como posso ajudar hoje?";
-  const domain = config.allowed_domain || "seu-website.com";
-  const borderRadius = config.border_radius || "16px";
-  const buttonShape = config.button_shape || "circle";
-  const themeMode = config.theme_mode || "light";
-
-  const nameEl = $("#mock-agent-name");
-  const roleEl = $("#mock-agent-role");
-  const avatarEl = $("#mock-avatar");
-  const greetEl = $("#mock-greeting-bubble");
-  const urlEl = $("#website-preview-url-text");
-
-  if (nameEl) nameEl.textContent = name;
-  if (roleEl) roleEl.textContent = role;
-  if (avatarEl) avatarEl.textContent = (name.trim().charAt(0) || "D").toUpperCase();
-  if (greetEl) greetEl.textContent = greet;
-  if (urlEl) urlEl.textContent = "https://" + domain;
-
-  const header = $("#mock-chat-header");
-  const btn = $("#mock-chat-button");
-  const send = $("#btn-mock-send");
-  const chatWindow = $("#mock-chat-window");
-
-  if (header) header.style.backgroundColor = color;
-  if (btn) btn.style.backgroundColor = color;
-  if (send) send.style.backgroundColor = color;
-
-  // Aplica o estilo estrutural do chat ditado pelo utilizador
-  if (chatWindow) {
-    chatWindow.style.borderRadius = borderRadius;
-    if (themeMode === "dark") {
-      chatWindow.classList.add("mock-theme-dark");
-    } else {
-      chatWindow.classList.remove("mock-theme-dark");
-    }
-  }
-
-  if (btn) {
-    if (buttonShape === "square" || buttonShape === "quadrado") {
-      btn.style.borderRadius = "12px";
-    } else if (buttonShape === "pill" || buttonShape === "pilula") {
-      btn.style.borderRadius = "26px";
-    } else {
-      btn.style.borderRadius = "50%";
-    }
-  }
-
-  const mockWidget = $("#website-mock-widget");
-  if (mockWidget) {
-    mockWidget.className = pos === "bottom-left" ? "mock-widget-bottom-left" : "mock-widget-bottom-right";
-  }
-}
-
-async function loadWebsiteIntegrationStatus(badgeOnly = false) {
-  if (isWebsiteLoading) return;
-  isWebsiteLoading = true;
-  try {
-    const res = await api("/api/integrations/website");
-    currentWebsiteIntegration = res;
-
-    updateWebsiteStatusBadge(res.status || "pending", res.error_message);
-
-    if (badgeOnly) return;
-
-    const codeDisplay = $("#website-head-code-display");
-    if (codeDisplay) {
-      codeDisplay.textContent = res.head_code || (res.site_key ? `<!-- Drexier AI -->\n<script>\n  window.drexierSettings = { siteKey: "${res.site_key}" };\n</script>\n<script defer src="${window.location.origin}/widget.js"></script>` : "A aguardar geração do código...");
-    }
-
-    renderWebsiteActiveInstructions(res.conversation_history, res.initial_prompt, res.agent_instructions, res);
-
-    const fieldName = $("#website-field-agent-name");
-    const fieldRole = $("#website-field-agent-role");
-    const fieldColor = $("#website-field-theme-color");
-    const fieldPicker = $("#website-field-color-picker");
-    const fieldPos = $("#website-field-position");
-    const fieldDom = $("#website-field-allowed-domain");
-    const fieldGreet = $("#website-field-greeting");
-    const fieldInst = $("#website-field-instructions");
-
-    if (fieldName) fieldName.value = res.agent_name || "";
-    if (fieldRole) fieldRole.value = res.agent_role || "";
-    if (fieldColor) fieldColor.value = res.theme_color || "#18181b";
-    if (fieldPicker) fieldPicker.value = (res.theme_color && res.theme_color.startsWith("#") && res.theme_color.length === 7) ? res.theme_color : "#18181b";
-    if (fieldPos) fieldPos.value = res.position || "bottom-right";
-    if (fieldDom) fieldDom.value = res.allowed_domain || "";
-    if (fieldGreet) fieldGreet.value = res.greeting_message || "";
-    if (fieldInst) fieldInst.value = res.agent_instructions || "";
-
-    updateWebsitePreview(res);
-  } catch (err) {
-    console.warn("Falha ao carregar estado da integração de websites:", err);
-  } finally {
-    isWebsiteLoading = false;
-  }
-}
-
-async function sendWebsiteAIMessage(messageText) {
-  const input = $("#website-ai-input");
-  const text = (messageText || input?.value || "").trim();
-  if (!text) return;
-
-  if (input) input.value = "";
-
-  const sendBtn = $("#btn-website-ai-send");
-  if (sendBtn) {
-    sendBtn.disabled = true;
-    sendBtn.innerHTML = `<span>A atualizar...</span>`;
-  }
-
-  try {
-    const res = await api("/api/integrations/website/chat", {
-      method: "POST",
-      body: JSON.stringify({ message: text }),
-      timeoutMs: 35000
-    });
-
-    if (res.integration) {
-      currentWebsiteIntegration = res.integration;
-      updateWebsiteStatusBadge(res.integration.status || "pending", res.integration.error_message);
-      updateWebsitePreview(res.integration);
-
-      const codeDisplay = $("#website-head-code-display");
-      if (codeDisplay) codeDisplay.textContent = res.head_code;
-
-      renderWebsiteActiveInstructions(res.integration.conversation_history, null, res.integration.agent_instructions, res.integration);
-
-      const fieldName = $("#website-field-agent-name");
-      const fieldRole = $("#website-field-agent-role");
-      const fieldColor = $("#website-field-theme-color");
-      const fieldPicker = $("#website-field-color-picker");
-      const fieldPos = $("#website-field-position");
-      const fieldDom = $("#website-field-allowed-domain");
-      const fieldGreet = $("#website-field-greeting");
-      const fieldInst = $("#website-field-instructions");
-
-      if (fieldName && res.integration.agent_name) fieldName.value = res.integration.agent_name;
-      if (fieldRole && res.integration.agent_role) fieldRole.value = res.integration.agent_role;
-      if (fieldColor && res.integration.theme_color) fieldColor.value = res.integration.theme_color;
-      if (fieldPicker && res.integration.theme_color?.startsWith("#")) fieldPicker.value = res.integration.theme_color;
-      if (fieldPos && res.integration.position) fieldPos.value = res.integration.position;
-      if (fieldDom && res.integration.allowed_domain) fieldDom.value = res.integration.allowed_domain;
-      if (fieldGreet && res.integration.greeting_message) fieldGreet.value = res.integration.greeting_message;
-      if (fieldInst && res.integration.agent_instructions) fieldInst.value = res.integration.agent_instructions;
-    }
-    showNotice("Instrução lida e código HEAD atualizado com sucesso!");
-  } catch (err) {
-    showNotice(`Erro ao processar instrução: ${err.message}`, true);
-  } finally {
-    if (sendBtn) {
-      sendBtn.disabled = false;
-      sendBtn.innerHTML = `<svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Aplicar Instrução</span>`;
-    }
-  }
-}
-
-function switchIntegrationChannel(channel) {
-  $$("[data-channel]").forEach(b => {
-    const isAct = b.dataset.channel === channel;
-    b.classList.toggle("is-channel-active", isAct);
-    b.style.background = isAct ? "var(--surface-elevated)" : "transparent";
-    b.style.borderColor = isAct ? "var(--border-active)" : "transparent";
-  });
-
-  $("#channel-email-section")?.classList.toggle("hidden", channel !== "email");
-  $("#channel-website-section")?.classList.toggle("hidden", channel !== "website");
-
-  if (channel === "website") {
-    loadWebsiteIntegrationStatus();
-    startWebsitePolling();
-  } else {
-    stopWebsitePolling();
-    if (channel === "email") {
-      loadEmailStatus();
-    }
-  }
-}
-
-function startWebsitePolling() {
-  if (websitePollTimer) clearInterval(websitePollTimer);
-  websitePollTimer = setInterval(() => {
-    const webSec = $("#channel-website-section");
-    if (webSec && !webSec.classList.contains("hidden") && token && !document.hidden) {
-      loadWebsiteIntegrationStatus(true);
-    }
-  }, 6000);
-}
-
-function stopWebsitePolling() {
-  if (websitePollTimer) {
-    clearInterval(websitePollTimer);
-    websitePollTimer = null;
-  }
-}
-
-// Event Listeners da Integração de Websites
-$$("[data-channel]").forEach(btn => {
-  btn.addEventListener("click", () => {
-    switchIntegrationChannel(btn.dataset.channel);
-  });
+$$("[data-channel='email']").forEach(btn => {
+  btn.addEventListener("click", () => loadEmailStatus());
 });
-
-$("#btn-website-ai-undo")?.addEventListener("click", async () => {
-  const btn = $("#btn-website-ai-undo");
-  if (btn) btn.disabled = true;
-  try {
-    const res = await api("/api/integrations/website/chat/undo", { method: "POST" });
-    if (res.integration) {
-      currentWebsiteIntegration = res.integration;
-      renderWebsiteActiveInstructions(res.integration.conversation_history, null, res.integration.agent_instructions, res.integration);
-      updateWebsitePreview(res.integration);
-      const codeDisplay = $("#website-head-code-display");
-      if (codeDisplay) codeDisplay.textContent = res.integration.head_code;
-    }
-    showNotice("Última instrução retrocedida com sucesso!");
-  } catch (err) {
-    showNotice(`Erro ao retroceder instrução: ${err.message}`, true);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-});
-
-$("#btn-website-ai-clear")?.addEventListener("click", async () => {
-  if (!confirm("Tem certeza que deseja apagar todas as instruções e restaurar o estilo padrão neutro (branco, preto e cinza)? A chave única de integração será preservada.")) return;
-  const btn = $("#btn-website-ai-clear");
-  if (btn) btn.disabled = true;
-  try {
-    const res = await api("/api/integrations/website/chat/clear", { method: "POST" });
-    if (res.integration) {
-      currentWebsiteIntegration = res.integration;
-      renderWebsiteActiveInstructions(res.integration.conversation_history, null, res.integration.agent_instructions, res.integration);
-      updateWebsitePreview(res.integration);
-      const codeDisplay = $("#website-head-code-display");
-      if (codeDisplay) codeDisplay.textContent = res.integration.head_code;
-    }
-    showNotice("Instruções apagadas e restauradas para o padrão neutro!");
-  } catch (err) {
-    showNotice(`Erro ao apagar instruções: ${err.message}`, true);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-});
-
-$("#btn-website-ai-send")?.addEventListener("click", () => sendWebsiteAIMessage());
-$("#website-ai-input")?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    sendWebsiteAIMessage();
-  }
-});
-
-$$(".website-prompt-chip").forEach(chip => {
-  chip.addEventListener("click", () => {
-    const p = chip.dataset.prompt;
-    if (p) sendWebsiteAIMessage(p);
-  });
-});
-
-$("#btn-website-copy-code")?.addEventListener("click", async () => {
-  const code = $("#website-head-code-display")?.textContent || "";
-  if (!code) return;
-  try {
-    await navigator.clipboard.writeText(code);
-    const label = $("#label-copy-code");
-    if (label) {
-      const orig = label.textContent;
-      label.textContent = "Copiado!";
-      setTimeout(() => { label.textContent = orig; }, 2000);
-    }
-    showNotice("Código HEAD copiado para a área de transferência!");
-  } catch (err) {
-    showNotice("Falha ao copiar automaticamente. Selecione e copie o código.", true);
-  }
-});
-
-$("#btn-website-regenerate")?.addEventListener("click", async () => {
-  try {
-    const res = await api("/api/integrations/website/regenerate-code", {
-      method: "POST",
-      body: JSON.stringify({ reset_key: false })
-    });
-    if (res.head_code) {
-      const codeDisplay = $("#website-head-code-display");
-      if (codeDisplay) codeDisplay.textContent = res.head_code;
-    }
-    showNotice("Código HEAD regenerado com sucesso!");
-  } catch (err) {
-    showNotice(`Erro ao regenerar código: ${err.message}`, true);
-  }
-});
-
-$("#btn-website-save-manual")?.addEventListener("click", async () => {
-  const payload = {
-    agent_name: $("#website-field-agent-name")?.value,
-    agent_role: $("#website-field-agent-role")?.value,
-    theme_color: $("#website-field-theme-color")?.value,
-    position: $("#website-field-position")?.value,
-    allowed_domain: $("#website-field-allowed-domain")?.value,
-    greeting_message: $("#website-field-greeting")?.value,
-    agent_instructions: $("#website-field-instructions")?.value,
-  };
-  try {
-    const res = await api("/api/integrations/website/config", {
-      method: "PUT",
-      body: JSON.stringify(payload)
-    });
-    currentWebsiteIntegration = res;
-    updateWebsitePreview(res);
-    const codeDisplay = $("#website-head-code-display");
-    if (codeDisplay) codeDisplay.textContent = res.head_code;
-    showNotice("Configurações salvas e código atualizado com sucesso!");
-  } catch (err) {
-    showNotice(`Erro ao salvar alterações: ${err.message}`, true);
-  }
-});
-
-$("#btn-verify-website-connection")?.addEventListener("click", async () => {
-  const btn = $("#btn-verify-website-connection");
-  const label = $("#label-verify-btn");
-  if (btn) btn.disabled = true;
-  if (label) label.textContent = "A verificar...";
-  try {
-    const res = await api("/api/integrations/website/verify", { method: "POST" });
-    updateWebsiteStatusBadge(res.status, res.error_message);
-    if (res.status === "active") {
-      showNotice("Ligação confirmada com sucesso! O website está conectado e ativo.");
-    } else if (res.status === "pending") {
-      showNotice("Instalação pendente: o código ainda não foi detectado no website.", true);
-    } else if (res.status === "disconnected") {
-      showNotice("Website desconectado: o widget não foi detectado ou deixou de responder.", true);
-    } else {
-      showNotice(`Falha na verificação: ${res.error_message || "erro de comunicação"}`, true);
-    }
-  } catch (err) {
-    showNotice(`Erro na verificação da ligação: ${err.message}`, true);
-  } finally {
-    if (btn) btn.disabled = false;
-    if (label) label.textContent = "Verificar Ligação";
-  }
-});
-
-$("#website-field-color-picker")?.addEventListener("input", (e) => {
-  const val = e.target.value;
-  const txt = $("#website-field-theme-color");
-  if (txt) txt.value = val;
-  if (currentWebsiteIntegration) {
-    currentWebsiteIntegration.theme_color = val;
-    updateWebsitePreview(currentWebsiteIntegration);
-  }
-});
-
-$("#website-field-theme-color")?.addEventListener("input", (e) => {
-  const val = e.target.value.trim();
-  if (val.startsWith("#") && val.length === 7) {
-    const picker = $("#website-field-color-picker");
-    if (picker) picker.value = val;
-    if (currentWebsiteIntegration) {
-      currentWebsiteIntegration.theme_color = val;
-      updateWebsitePreview(currentWebsiteIntegration);
-    }
-  }
-});
-
-$("#website-field-position")?.addEventListener("change", (e) => {
-  if (currentWebsiteIntegration) {
-    currentWebsiteIntegration.position = e.target.value;
-    updateWebsitePreview(currentWebsiteIntegration);
-  }
-});
-
-// Mock preview controls
-$("#btn-mock-toggle")?.addEventListener("click", () => {
-  $("#mock-chat-window")?.classList.toggle("hidden");
-});
-$("#mock-chat-button")?.addEventListener("click", () => {
-  $("#mock-chat-window")?.classList.toggle("hidden");
-});
-$("#btn-mock-send")?.addEventListener("click", handleMockChatSend);
-$("#mock-chat-input")?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") handleMockChatSend();
-});
-
-async function handleMockChatSend() {
-  const input = $("#mock-chat-input");
-  const text = input?.value.trim();
-  if (!text) return;
-  input.value = "";
-
-  const msgs = $("#mock-messages");
-  if (!msgs) return;
-
-  const userB = document.createElement("div");
-  userB.className = "mock-bubble mock-bubble-visitor";
-  userB.style.backgroundColor = currentWebsiteIntegration?.theme_color || "#18181b";
-  userB.textContent = text;
-  msgs.appendChild(userB);
-
-  const typingB = document.createElement("div");
-  typingB.className = "mock-bubble mock-bubble-agent";
-  typingB.textContent = "...";
-  msgs.appendChild(typingB);
-  msgs.scrollTop = msgs.scrollHeight;
-
-  try {
-    if (currentWebsiteIntegration?.site_key) {
-      const res = await fetch("/api/widget/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          site_key: currentWebsiteIntegration.site_key,
-          visitor_id: "preview_tester",
-          visitor_name: "Testador Preview",
-          message: text
-        })
-      });
-      const data = await res.json();
-      typingB.textContent = data.reply || "Mensagem de teste recebida pelo agente com sucesso!";
-    } else {
-      setTimeout(() => {
-        typingB.textContent = "Olá! O seu agente Drexier responderá aos clientes com base nas diretrizes e inteligência configuradas.";
-      }, 500);
-    }
-  } catch (_) {
-    typingB.textContent = "Olá! O seu agente Drexier responderá aos clientes com base nas diretrizes e inteligência configuradas.";
-  }
-  msgs.scrollTop = msgs.scrollHeight;
-  // IMPORTANTE: NÃO recarrega nem altera o status da integração durante o teste no preview!
-}
-
-// Monitorização resiliente em segundo plano (tempo real inteligente)
-let livePollTimeoutId = null;
-let isPollingActive = false;
 
 function scheduleNextPoll(delayMs = 5000) {
   if (livePollTimeoutId) clearTimeout(livePollTimeoutId);

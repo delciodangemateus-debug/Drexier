@@ -27,6 +27,7 @@ logger = logging.getLogger("drexier.email_service")
 BUSINESS_TIMEZONE = ZoneInfo("Europe/Lisbon")
 # Cache em memória e deduplicação de mensagens recebidas (Anti-Loop & Anti-Ping-Pong)
 _PROCESSED_MESSAGE_IDS = set()
+_IN_FLIGHT_MESSAGES: Set[Tuple[str, str, str]] = set()
 _GOOGLE_SYNC_LOCKS: Dict[str, asyncio.Lock] = {}
 
 LOOP_ACKNOWLEDGMENT_PATTERNS = [
@@ -446,11 +447,11 @@ def is_genuine_customer_inquiry(
     headers_map = headers_map or {}
     label_ids = [lbl.upper() for lbl in (label_ids or [])]
 
-    # 1. Filtro por Categorias/Labels do Gmail
-    forbidden_labels = {"CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_UPDATES", "CATEGORY_FORUMS", "SPAM", "TRASH"}
+    # 1. Filtro por Categorias/Labels do Gmail (ignora spam e promoções; atualizações podem conter mensagens legítimas de formulários/clientes)
+    forbidden_labels = {"CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "SPAM", "TRASH"}
     found_forbidden = forbidden_labels.intersection(label_ids)
     if found_forbidden:
-        return False, f"Categoria de publicidade/atualização ({', '.join(found_forbidden)})"
+        return False, f"Categoria de publicidade ou spam ({', '.join(found_forbidden)})"
 
     # 2. Cabeçalhos de envio automatizado ou marketing
     if headers_map.get("list-unsubscribe"):
@@ -500,19 +501,23 @@ def detect_booking_or_purchase_intent(incoming_content: str, subject: str) -> Op
     """
     Identifica automaticamente se a mensagem do cliente contém intenção de marcação,
     agendamento, reserva ou compra/encomenda que necessita de validação do proprietário.
+    Aceita linguagem natural portuguesa sem exigir formatos rígidos de data/hora.
     """
     text = f"{subject}\n{incoming_content}".lower()
 
     booking_patterns = [
-        r"\b(marcar|marca[çc][aã]o|agendar|agendamento|reservar?|reserva)\b",
-        r"\b(disponibilidade\s+(para|no|na)|vaga\s+(para|no|na)|hor[aá]rio\s+(para|dispon[ií]vel))\b",
-        r"\b(segunda|ter[çc]a|quarta|quinta|sexta|s[aá]bado|domingo)\b.*(\b[aà]s\s+\d{1,2}(h|:\d{2})?|\bmanh[aã]|\btarde)",
-        r"\b(\d{1,2}/\d{1,2}|\d{1,2}\s+de\s+[a-z]+)\b.*(\b[aà]s\s+\d{1,2}|\bhor[aá]rio)"
+        # Verbos de marcação/agendamento (núcleo semântico)
+        r"\b(marcar|marca[çc][aã]o|agendar|agendamento|reservar?|reserva|combinar|visita)\b",
+        r"\b(disponibilidade\s+(para|no|na|em)|vaga\s+(para|no|na|em)|hor[aá]rio\s+(para|dispon[ií]vel))\b",
+        # Combinações naturais com dias ou horas
+        r"\b(segunda|ter[çc]a|quarta|quinta|sexta|s[aá]bado|domingo)(-feira)?\b.*(\b[aà]s\s+\d{1,2}(h|:\d{2})?|\bmanh[aã]|\btarde|\bnoite)",
+        r"\b(\d{1,2}[/-]\d{1,2}|\d{1,2}\s+de\s+[a-z]+)\b.*(\b[aà]s\s+\d{1,2}|\bhor[aá]rio)",
+        r"\b(amanhã|amanha|hoje|próxima?\s+semana|semana\s+que\s+vem)\b.*(\b[aà]s\s+\d{1,2}|\bconsulta|\batendimento|\bsess[aã]o|\breuni[aã]o|\bvisita)",
     ]
 
     purchase_patterns = [
         r"\b(comprar|compra|adquirir|encomendar?|encomenda)\b",
-        r"\b(fechar\s+(o\s+)?pedido|fechar\s+(o\s+)?or[çc]amento|quero\s+contratar|quero\s+o\s+produto)\b"
+        r"\b(fechar\s+(o\s+)?pedido|fechar\s+(o\s+)?or[çc]amento|quero\s+contratar|quero\s+o\s+produto|quero\s+comprar|quero\s+adquirir)\b",
     ]
 
     for pat in booking_patterns:
@@ -527,77 +532,137 @@ def detect_booking_or_purchase_intent(incoming_content: str, subject: str) -> Op
 
 
 def extract_scheduled_at(message: str, now: Optional[datetime] = None) -> Optional[str]:
-    """Extract a customer-provided Portuguese date and time as a UTC ISO timestamp."""
+    """
+    Extrai data e hora fornecidas em linguagem natural portuguesa e retorna
+    um timestamp ISO em UTC. Aceita formatos flexíveis sem exigir padrões rígidos.
+    Retorna None se a data ou a hora não forem especificadas, ou se forem no passado.
+    """
+    from datetime import timedelta
     local_now = (now or datetime.now(BUSINESS_TIMEZONE)).astimezone(BUSINESS_TIMEZONE)
     text = message.casefold()
 
+    # ── 1. Extrair hora ──────────────────────────────────────────────────────
+    # "14h30", "14:30", "às 14h", "pelas 9", "9h", "14h", "às 14"
+    hour: Optional[int] = None
+    minute: int = 0
+
     time_match = re.search(
-        r"\b(?:às|as|pelas?)?\s*(\d{1,2})\s*(?:h|:)\s*(\d{2})?\b",
+        r"\b(?:(?:às|as|pelas?)\s*)?(\d{1,2})\s*(?:h|:)\s*(\d{2})?\b",
         text,
     )
-    if not time_match:
-        return None
-    hour = int(time_match.group(1))
-    minute = int(time_match.group(2) or 0)
-    if hour > 23 or minute > 59:
+    if time_match:
+        h = int(time_match.group(1))
+        m = int(time_match.group(2) or 0)
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            hour, minute = h, m
+    else:
+        # Padrão flexível: "às 14", "pelas 15"
+        alt_time = re.search(r"\b(?:às|as|pelas?)\s*(\d{1,2})\b", text)
+        if alt_time:
+            h = int(alt_time.group(1))
+            if 0 <= h <= 23:
+                hour, minute = h, 0
+
+    # Hora implícita pelo período do dia (caso não haja hora numérica)
+    if hour is None:
+        if re.search(r"\b(de|pela)\s+manh[aã]\b", text):
+            hour, minute = 9, 0
+        elif re.search(r"\bao\s+almo[çc]o\b|\bna\s+hora\s+do\s+almo[çc]o\b", text):
+            hour, minute = 12, 30
+        elif re.search(r"\b([àa]|pela|de)\s+tarde\b", text):
+            hour, minute = 15, 0
+        elif re.search(r"\b(ao\s+)?(fim|final)\s+da\s+tarde\b", text):
+            hour, minute = 17, 30
+        elif re.search(r"\b([àa]|pela|de)\s+noite\b", text):
+            hour, minute = 20, 0
+
+    # Se ainda assim não houver hora especificada, retorna None (precisa de data E hora)
+    if hour is None:
         return None
 
+    # Ajuste tarde se usuário disser ex: "às 3 da tarde"
+    if hour < 12 and re.search(r"\b(da|à)\s+tarde\b", text):
+        hour += 12
+
+    # ── 2. Extrair data ──────────────────────────────────────────────────────
     scheduled_date = None
-    iso_match = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", text)
-    numeric_match = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?\b", text)
     month_names = {
         "janeiro": 1, "fevereiro": 2, "marco": 3, "março": 3, "abril": 4,
         "maio": 5, "junho": 6, "julho": 7, "agosto": 8, "setembro": 9,
         "outubro": 10, "novembro": 11, "dezembro": 12,
+        "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
+        "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
     }
 
     try:
+        iso_match = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", text)
+        numeric_match = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", text)
+        month_match = re.search(
+            r"\b(?:dia\s+)?(\d{1,2})\s+de\s+([a-zçã]+)(?:\s+de\s+(\d{4}))?\b",
+            text,
+        )
+        relative_days = re.search(r"\bdaqui\s+a?\s+(\d+)\s+(dias?|semanas?)\b", text)
+        next_week = re.search(r"\bpr[oó]xima\s+semana\b|\bsemana\s+que\s+vem\b", text)
+
         if iso_match:
             scheduled_date = datetime(
                 int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))
             ).date()
         elif numeric_match:
-            day, month = int(numeric_match.group(1)), int(numeric_match.group(2))
-            year = int(numeric_match.group(3) or local_now.year)
+            day = int(numeric_match.group(1))
+            month = int(numeric_match.group(2))
+            yr_raw = numeric_match.group(3)
+            year = int(yr_raw) if yr_raw else local_now.year
+            if yr_raw and len(yr_raw) == 2:
+                year = 2000 + year
+            if month > 12 and day <= 12:
+                day, month = month, day
             scheduled_date = datetime(year, month, day).date()
-            if not numeric_match.group(3) and scheduled_date < local_now.date():
+            if not yr_raw and scheduled_date < local_now.date():
                 scheduled_date = scheduled_date.replace(year=year + 1)
+        elif month_match:
+            day = int(month_match.group(1))
+            month = month_names.get(month_match.group(2))
+            if month is None:
+                return None
+            year = int(month_match.group(3) or local_now.year)
+            scheduled_date = datetime(year, month, day).date()
+            if not month_match.group(3) and scheduled_date < local_now.date():
+                scheduled_date = scheduled_date.replace(year=year + 1)
+        elif relative_days:
+            qty = int(relative_days.group(1))
+            unit = relative_days.group(2)
+            delta = timedelta(weeks=qty) if "semana" in unit else timedelta(days=qty)
+            scheduled_date = (local_now + delta).date()
+        elif re.search(r"\bdepois\s+de\s+amanhã\b|\bdepois\s+de\s+amanha\b", text):
+            scheduled_date = local_now.date() + timedelta(days=2)
+        elif "amanhã" in text or "amanha" in text:
+            scheduled_date = local_now.date() + timedelta(days=1)
+        elif re.search(r"\bhoje\b", text):
+            scheduled_date = local_now.date()
         else:
-            month_match = re.search(
-                r"\b(?:dia\s+)?(\d{1,2})\s+de\s+([a-zçã]+)(?:\s+de\s+(\d{4}))?\b",
-                text,
+            prefixed_next = bool(re.search(r"\bpr[oó]xim[ao]\b|\bque\s+vem\b", text))
+            weekdays = (
+                (("segunda",), 0), (("terça", "terca"), 1), (("quarta",), 2),
+                (("quinta",), 3), (("sexta",), 4), (("sábado", "sabado"), 5),
+                (("domingo",), 6),
             )
-            if month_match:
-                day = int(month_match.group(1))
-                month = month_names.get(month_match.group(2))
-                if month is None:
-                    return None
-                year = int(month_match.group(3) or local_now.year)
-                scheduled_date = datetime(year, month, day).date()
-                if not month_match.group(3) and scheduled_date < local_now.date():
-                    scheduled_date = scheduled_date.replace(year=year + 1)
-            elif "amanhã" in text or "amanha" in text:
-                from datetime import timedelta
-                scheduled_date = local_now.date() + timedelta(days=1)
-            elif re.search(r"\bhoje\b", text):
-                scheduled_date = local_now.date()
-            else:
-                weekdays = (
-                    (("segunda",), 0), (("terça", "terca"), 1), (("quarta",), 2),
-                    (("quinta",), 3), (("sexta",), 4), (("sábado", "sabado"), 5),
-                    (("domingo",), 6),
-                )
-                for names, weekday in weekdays:
-                    if any(re.search(rf"\b{re.escape(name)}(?:-feira)?\b", text) for name in names):
-                        from datetime import timedelta
-                        days_ahead = (weekday - local_now.weekday()) % 7
-                        scheduled_date = local_now.date() + timedelta(days=days_ahead or 7)
-                        break
+            for names, weekday in weekdays:
+                if any(re.search(rf"\b{re.escape(n)}(?:-feira)?\b", text) for n in names):
+                    days_ahead = (weekday - local_now.weekday()) % 7
+                    if days_ahead == 0 or prefixed_next:
+                        days_ahead = days_ahead or 7
+                    scheduled_date = local_now.date() + timedelta(days=days_ahead)
+                    break
+            if scheduled_date is None and next_week:
+                days_ahead = (0 - local_now.weekday()) % 7 + 7
+                scheduled_date = local_now.date() + timedelta(days=days_ahead)
     except ValueError:
         return None
 
     if scheduled_date is None:
         return None
+
     local_scheduled = datetime(
         scheduled_date.year, scheduled_date.month, scheduled_date.day,
         hour, minute, tzinfo=BUSINESS_TIMEZONE,
@@ -739,8 +804,8 @@ async def _sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[s
                     f"Falha ao atualizar estado da mensagem Gmail (HTTP {response.status_code})."
                 )
 
-        # Busca mensagens não lidas apenas da categoria principal, ignorando spam e promoções
-        query = "label:INBOX is:unread -category:promotions -category:social -category:updates -category:forums -label:spam -label:trash"
+        # Busca mensagens não lidas da caixa de entrada, ignorando spam e promoções
+        query = "label:INBOX is:unread -category:promotions -category:social -label:spam -label:trash"
         list_url = f"{GMAIL_API_BASE}/messages?q={urllib.parse.quote(query)}&maxResults=15"
         res = await client.get(list_url, headers=headers)
         if res.status_code != 200:
@@ -754,13 +819,13 @@ async def _sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[s
             msg_id = m.get("id")
             thread_id = m.get("threadId")
 
-            # Deduplicação imediata contra repetição por eventual lag do índice Gmail
+            # Deduplicação imediata contra repetição por eventual lag do índice Gmail ou concorrência
             processed_key = (
                 "google",
                 str(integration.get("id") or integration.get("email_address")),
                 str(msg_id),
             )
-            if processed_key in _PROCESSED_MESSAGE_IDS:
+            if processed_key in _PROCESSED_MESSAGE_IDS or processed_key in _IN_FLIGHT_MESSAGES:
                 await mark_message_read(str(msg_id))
                 continue
 
@@ -786,6 +851,19 @@ async def _sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[s
             msg_data = msg_res.json()
             label_ids = msg_data.get("labelIds", [])
 
+            # Ignora rascunhos ou emails enviados pelo próprio sistema/utilizador para evitar auto-looping
+            if "SENT" in label_ids or "DRAFT" in label_ids:
+                logger.info(f"[Anti-Loop] Mensagem Gmail {msg_id} possui label SENT/DRAFT. Marcando como lida.")
+                _PROCESSED_MESSAGE_IDS.add(processed_key)
+                with connect() as c:
+                    c.execute(
+                        """INSERT OR IGNORE INTO processed_email_messages (user_id, provider, provider_message_id)
+                           VALUES (?, 'google', ?)""",
+                        (user_dict["id"], str(msg_id)),
+                    )
+                await mark_message_read(str(msg_id))
+                continue
+
             # Filtro por data de recebimento: após pagamento e ligação da integração
             if cutoff_ts is not None:
                 try:
@@ -808,11 +886,49 @@ async def _sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[s
             message_id_header = headers_map.get("message-id", "")
 
             sender_email, customer_name = parse_sender_info(raw_from)
+            sender_lower = (sender_email or "").lower().strip()
 
-            # Ignora se for enviado pelo próprio utilizador ou pela conta Drexier
-            user_account_email = (user_dict.get("email") or "").lower().strip()
-            if not sender_email or sender_email == my_email or sender_email == user_account_email:
+            # Ignora se for enviado pelo próprio endereço oficial integrado (evita loop infinito com si mesmo)
+            if not sender_lower or sender_lower == my_email:
+                logger.info(f"[Anti-Loop] Mensagem Gmail {msg_id} enviada pelo próprio endereço ({sender_lower}). Marcando como lida.")
+                _PROCESSED_MESSAGE_IDS.add(processed_key)
+                with connect() as c:
+                    c.execute(
+                        """INSERT OR IGNORE INTO processed_email_messages (user_id, provider, provider_message_id)
+                           VALUES (?, 'google', ?)""",
+                        (user_dict["id"], str(msg_id)),
+                    )
+                await mark_message_read(str(msg_id))
                 continue
+
+            # Ignora respostas automáticas do servidor (auto-reply / out-of-office / bounce)
+            auto_submitted = headers_map.get("auto-submitted", "").lower()
+            x_autoreply = headers_map.get("x-autoreply", "").lower()
+            if auto_submitted in ("auto-replied", "auto-generated") or x_autoreply == "yes":
+                logger.info(f"[Anti-Loop] Mensagem Gmail {msg_id} é auto-resposta do servidor ({auto_submitted}). Ignorando.")
+                _PROCESSED_MESSAGE_IDS.add(processed_key)
+                with connect() as c:
+                    c.execute(
+                        """INSERT OR IGNORE INTO processed_email_messages (user_id, provider, provider_message_id)
+                           VALUES (?, 'google', ?)""",
+                        (user_dict["id"], str(msg_id)),
+                    )
+                await mark_message_read(str(msg_id))
+                continue
+
+            # Deduplicação pelo header RFC Message-ID
+            if message_id_header:
+                with connect() as c:
+                    prev_hdr = c.execute(
+                        """SELECT id FROM processed_email_messages
+                           WHERE user_id = ? AND provider = 'google' AND provider_message_id = ?""",
+                        (user_dict["id"], str(message_id_header)),
+                    ).fetchone()
+                if prev_hdr:
+                    logger.info(f"[Anti-Duplicação] Message-ID {message_id_header} já processado anteriormente. Ignorando.")
+                    _PROCESSED_MESSAGE_IDS.add(processed_key)
+                    await mark_message_read(str(msg_id))
+                    continue
 
             extracted_body = extract_gmail_body(payload)
             body_text = clean_email_body(extracted_body) or "(Email sem corpo de texto legível)"
@@ -829,39 +945,64 @@ async def _sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[s
 
             if not is_valid:
                 logger.info(f"[Filtro Anti-Spam] E-mail de {sender_email} ('{subject}') ignorado: {reject_reason}")
+                _PROCESSED_MESSAGE_IDS.add(processed_key)
+                with connect() as c:
+                    c.execute(
+                        """INSERT OR IGNORE INTO processed_email_messages (user_id, provider, provider_message_id)
+                           VALUES (?, 'google', ?)""",
+                        (user_dict["id"], str(msg_id)),
+                    )
                 # Remove unread para não verificar repetidamente
                 await mark_message_read(str(msg_id))
                 continue
 
-            # Processa e responde com a IA
-            reply_text = await process_and_reply_email(
-                user_dict=user_dict,
-                integration=integration,
-                customer_email=sender_email,
-                customer_name=customer_name,
-                subject=subject,
-                incoming_content=body_text,
-                thread_id=thread_id,
-                message_id_header=message_id_header,
-            )
-
-            with connect() as c:
-                c.execute(
-                    """INSERT INTO processed_email_messages
-                       (user_id, provider, provider_message_id)
-                       VALUES (?, 'google', ?)""",
-                    (user_dict["id"], str(msg_id)),
+            # Registra como em processamento para evitar corridas com outras sincronizações
+            _IN_FLIGHT_MESSAGES.add(processed_key)
+            try:
+                # Processa e responde com a IA
+                reply_text = await process_and_reply_email(
+                    user_dict=user_dict,
+                    integration=integration,
+                    customer_email=sender_email,
+                    customer_name=customer_name,
+                    subject=subject,
+                    incoming_content=body_text,
+                    thread_id=thread_id,
+                    message_id_header=message_id_header,
                 )
-            _PROCESSED_MESSAGE_IDS.add(processed_key)
-            # Remove a label UNREAD do Gmail para não responder repetidamente
-            await mark_message_read(str(msg_id))
 
-            processed_items.append({
-                "message_id": msg_id,
-                "from": sender_email,
-                "subject": subject,
-                "reply": reply_text
-            })
+                with connect() as c:
+                    c.execute(
+                        """INSERT OR IGNORE INTO processed_email_messages
+                           (user_id, provider, provider_message_id)
+                           VALUES (?, 'google', ?)""",
+                        (user_dict["id"], str(msg_id)),
+                    )
+                    if message_id_header:
+                        c.execute(
+                            """INSERT OR IGNORE INTO processed_email_messages
+                               (user_id, provider, provider_message_id)
+                               VALUES (?, 'google', ?)""",
+                            (user_dict["id"], str(message_id_header)),
+                        )
+                _PROCESSED_MESSAGE_IDS.add(processed_key)
+                if message_id_header:
+                    _PROCESSED_MESSAGE_IDS.add((
+                        "google",
+                        str(integration.get("id") or integration.get("email_address")),
+                        str(message_id_header),
+                    ))
+                # Remove a label UNREAD do Gmail para não responder repetidamente
+                await mark_message_read(str(msg_id))
+
+                processed_items.append({
+                    "message_id": msg_id,
+                    "from": sender_email,
+                    "subject": subject,
+                    "reply": reply_text
+                })
+            finally:
+                _IN_FLIGHT_MESSAGES.discard(processed_key)
 
     return processed_items
 
@@ -889,8 +1030,29 @@ async def process_and_reply_email(
             (user_id, customer_email)
         ).fetchone()
 
+        full_current_content = f"Assunto: {subject}\n\n{incoming_content}"
+        recent_msgs = []
+
         if contact:
             cid = contact["id"]
+            # SISTEMA DE DETECÇÃO ANTI-DUPLICAÇÃO E ANTI-LOOP
+            # Se a mensagem mais recente do cliente for idêntica e já houver resposta do agente logo a seguir,
+            # significa que esta mensagem exata já foi respondida com sucesso. NUNCA responde novamente!
+            recent_msgs = c.execute(
+                "SELECT id, sender, content FROM messages WHERE contact_id = ? AND user_id = ? ORDER BY id DESC LIMIT 2",
+                (cid, user_id)
+            ).fetchall()
+            if len(recent_msgs) >= 2:
+                if (
+                    recent_msgs[0]["sender"] == "agent"
+                    and recent_msgs[1]["sender"] == "customer"
+                    and recent_msgs[1]["content"] == full_current_content
+                ):
+                    logger.info(
+                        f"[Anti-Duplicação] Mensagem de {customer_email} com o mesmo conteúdo já foi respondida anteriormente pelo agente. Ignorando envio repetido."
+                    )
+                    return recent_msgs[0]["content"]
+
             new_name = customer_name or contact["name"] or ""
             c.execute(
                 "UPDATE contacts SET name = ?, last_message_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -903,13 +1065,12 @@ async def process_and_reply_email(
             )
             cid = cur.lastrowid
 
-        full_current_content = f"Assunto: {subject}\n\n{incoming_content}"
-
-        # Salva mensagem recebida do cliente
-        c.execute(
-            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'customer', ?)",
-            (user_id, cid, full_current_content)
-        )
+        # Salva mensagem recebida do cliente (se a tentativa anterior falhou antes do envio do agente, reutiliza o registro em vez de duplicar)
+        if not (recent_msgs and recent_msgs[0]["sender"] == "customer" and recent_msgs[0]["content"] == full_current_content):
+            c.execute(
+                "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'customer', ?)",
+                (user_id, cid, full_current_content)
+            )
 
         # Loop guard: Se for apenas confirmação breve ("obrigado", "ok") e a IA já respondeu antes
         last_agent_msg = c.execute(
