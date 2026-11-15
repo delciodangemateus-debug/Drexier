@@ -1096,7 +1096,7 @@ async def process_and_reply_email(
 
         # Base de conhecimento do negócio
         info = c.execute(
-            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ?",
+            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ? AND kind NOT IN ('subscription', 'assinatura', 'ai_report')",
             (user_id,)
         ).fetchall()
 
@@ -1479,7 +1479,7 @@ async def process_confirmation_action(
         history = [{"sender": r["sender"], "content": r["content"]} for r in reversed(history_rows)]
 
         info = c.execute(
-            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ?",
+            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ? AND kind NOT IN ('subscription', 'assinatura', 'ai_report')",
             (user_id,)
         ).fetchall()
 
@@ -1669,7 +1669,7 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
             (req["contact_id"], user_id),
         ).fetchall()
         info = c.execute(
-            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ?",
+            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ? AND kind NOT IN ('subscription', 'assinatura', 'ai_report')",
             (user_id,),
         ).fetchall()
 

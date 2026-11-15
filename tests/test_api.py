@@ -651,3 +651,83 @@ def test_conversation_reports_are_generated_on_demand_and_adopted_style_can_be_u
     profile = client.get("/api/me", headers=headers).json()
     assert profile["agent_adopted_style"] == ""
     assert profile["agent_instructions"] == "Postura personalizada"
+
+
+def test_full_ai_analysis_report_lifecycle_and_booking_removal(monkeypatch):
+    import time
+    from backend.services import analytics
+    email = f"full_reports_{int(time.time() * 1000)}@example.com"
+    password = "SecurePassword123"
+    signup_and_verify(client, {
+        "name": "Auto Mecânica Silva",
+        "email": email,
+        "password": password,
+        "confirm_password": password,
+        "business_type": "Oficina Automóvel e Manutenção de Carros",
+    })
+    auth = login_and_verify(client, email, password)
+    user_id = auth.json()["user_id"]
+    headers = {"Authorization": f"Bearer {auth.json()['token']}"}
+    _save_stored_subscription(user_id, {"status": "active", "plan_name": "Plano Business"})
+
+    # Add a business card
+    client.post("/api/business-info", json={
+        "kind": "servicos",
+        "title": "Serviços Mecânicos",
+        "content": "Revisão geral de veículos, mudança de óleo e pastilhas de travão",
+        "metadata": {}
+    }, headers=headers)
+
+    # Mock Gemini call
+    async def fake_gemini(*args, **kwargs):
+        return (
+            "## 1. Itens Mais Mencionados pelos Clientes\nRevisão de travões e troca de óleo para carros.\n\n"
+            "## 2. Itens e Serviços Mais Pedidos\nDiagnóstico de motor e alinhamento.\n\n"
+            "## 3. Taxa de Abandono e Análise de Conversas Incompletas\nTaxa de 20% com dúvidas de orçamento.\n\n"
+            "## 4. Padrões de Comportamento dos Clientes\nProcura por contacto rápido no WhatsApp.\n\n"
+            "## 5. Pontos Críticos e Oportunidades Imediatas\nOferecer marcação direta de revisão.\n\n"
+            "## 6. Conselhos Estratégicos para Melhorar as Vendas\nConfirmar agendamentos em menos de 5 minutos."
+        )
+
+    monkeypatch.setattr(analytics, "get_gemini_config", lambda: {
+        "api_key": "test-key", "model": "test-model", "base_url": "https://example.test",
+    })
+    monkeypatch.setattr(analytics, "call_gemini_api", fake_gemini)
+
+    # 1. Generate full analysis
+    gen = client.post("/api/reports/generate-full-analysis", json={}, headers=headers)
+    assert gen.status_code == 200
+    res = gen.json()
+    assert res["ok"] is True
+    analysis_id = res["analysis"]["id"]
+    assert "Itens Mais Mencionados" in res["analysis"]["report_content"]
+    assert "Oficina Automóvel" in res["analysis"]["business_type"]
+
+    # 2. List analyses
+    lst = client.get("/api/reports/analyses", headers=headers)
+    assert lst.status_code == 200
+    analyses = lst.json()["analyses"]
+    assert any(a["id"] == str(analysis_id) for a in analyses)
+
+    # 3. Delete analysis
+    del_res = client.delete(f"/api/reports/analyses/{analysis_id}", headers=headers)
+    assert del_res.status_code == 200
+    lst2 = client.get("/api/reports/analyses", headers=headers)
+    assert not any(a["id"] == str(analysis_id) for a in lst2.json()["analyses"])
+
+    # 4. Test booking removal from week
+    with connect() as c:
+        cur_c = c.execute("INSERT INTO contacts(user_id, name, contact_key) VALUES(?, 'Cliente Teste', 'test_key')", (user_id,))
+        cid = cur_c.lastrowid
+        cur_b = c.execute(
+            "INSERT INTO conversion_requests(user_id, contact_id, request_type, details, scheduled_at, status) "
+            "VALUES(?, ?, 'booking', 'Marcação teste', '2026-11-16 10:00:00', 'confirmed')",
+            (user_id, cid)
+        )
+        bid = cur_b.lastrowid
+
+    # Remove booking from week
+    rm_res = client.delete(f"/api/conversions/{bid}/remove-from-week", headers=headers)
+    assert rm_res.status_code == 200
+    assert rm_res.json()["ok"] is True
+

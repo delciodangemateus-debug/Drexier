@@ -1,6 +1,6 @@
 import asyncio, json, logging, re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request
 from fastapi.responses import FileResponse
@@ -22,6 +22,7 @@ from backend.services.analytics import (
     analyze_products_and_services,
     daily_acquisitions,
     generate_strategic_ai_report,
+    generate_full_analysis_report,
 )
 from backend.services.email_service import (
     sync_emails_for_user,
@@ -625,6 +626,107 @@ async def generate_ai_report(user=Depends(current_user)):
         report = await generate_strategic_ai_report(c, user["id"])
     return report
 
+# ── Store for full analysis reports (database + cache) ──────────────────────
+import uuid as _uuid
+_analyses_store: Dict[int, list] = {}
+
+@app.post("/api/reports/generate-full-analysis")
+async def generate_full_analysis(user=Depends(current_user)):
+    """Gera uma análise completa e detalhada de todas as conversas, adaptada ao perfil do negócio."""
+    uid = user["id"]
+    with connect() as c:
+        report = await generate_full_analysis_report(c, uid)
+        meta_dict = {
+            "generated_at": report["generated_at"],
+            "business_name": report.get("business_name", ""),
+            "business_type": report.get("business_type", ""),
+            "total_contacts_30d": report.get("total_contacts_30d", 0),
+            "total_contacts": report.get("total_contacts", 0),
+            "confirmed_orders": report.get("confirmed_orders", 0),
+            "abandonment_rate": report.get("abandonment_rate", 0),
+        }
+        cur = c.execute(
+            "INSERT INTO business_info(user_id, kind, title, content, metadata) VALUES(?,?,?,?,?)",
+            (uid, "ai_report", f"Análise — {report.get('business_type', 'Negócio')}", report["report_content"], json.dumps(meta_dict, ensure_ascii=False))
+        )
+        row_id = cur.lastrowid
+    
+    analysis_id = str(row_id) if row_id else str(_uuid.uuid4())
+    analysis_entry = {
+        "id": analysis_id,
+        "generated_at": report["generated_at"],
+        "business_name": report.get("business_name", ""),
+        "business_type": report.get("business_type", ""),
+        "total_contacts_30d": report.get("total_contacts_30d", 0),
+        "total_contacts": report.get("total_contacts", 0),
+        "confirmed_orders": report.get("confirmed_orders", 0),
+        "abandonment_rate": report.get("abandonment_rate", 0),
+        "report_content": report["report_content"],
+    }
+    _analyses_store.setdefault(uid, []).insert(0, analysis_entry)
+    return {"ok": True, "analysis": analysis_entry}
+
+@app.get("/api/reports/analyses")
+def list_analyses(user=Depends(current_user)):
+    """Devolve a lista de análises guardadas para o utilizador atual."""
+    uid = user["id"]
+    analyses = []
+    with connect() as c:
+        rows = c.execute(
+            "SELECT id, title, content, metadata, created_at FROM business_info WHERE user_id=? AND kind='ai_report' ORDER BY id DESC",
+            (uid,)
+        ).fetchall()
+        for r in rows:
+            meta = {}
+            if r["metadata"]:
+                try:
+                    meta = json.loads(r["metadata"]) if isinstance(r["metadata"], str) else (r["metadata"] or {})
+                except Exception:
+                    meta = {}
+            analyses.append({
+                "id": str(r["id"]),
+                "generated_at": meta.get("generated_at") or r.get("created_at") or "",
+                "business_name": meta.get("business_name", ""),
+                "business_type": meta.get("business_type", ""),
+                "total_contacts_30d": meta.get("total_contacts_30d", 0),
+                "total_contacts": meta.get("total_contacts", 0),
+                "confirmed_orders": meta.get("confirmed_orders", 0),
+                "abandonment_rate": meta.get("abandonment_rate", 0),
+                "report_content": r["content"],
+            })
+    if not analyses and uid in _analyses_store:
+        analyses = _analyses_store[uid]
+    return {"analyses": analyses}
+
+@app.delete("/api/reports/analyses/{analysis_id}")
+def delete_analysis(analysis_id: str, user=Depends(current_user)):
+    """Elimina uma análise da base de dados e da memória."""
+    uid = user["id"]
+    with connect() as c:
+        try:
+            aid = int(analysis_id)
+            c.execute("DELETE FROM business_info WHERE id=? AND user_id=? AND kind='ai_report'", (aid, uid))
+        except (ValueError, TypeError):
+            pass
+    store = _analyses_store.get(uid, [])
+    _analyses_store[uid] = [a for a in store if str(a["id"]) != str(analysis_id)]
+    return {"ok": True}
+
+@app.delete("/api/conversions/{booking_id}/remove-from-week")
+def remove_booking_from_week(booking_id: int, user=Depends(current_user)):
+    """Remove uma marcação da lista da semana resolvendo-a ou eliminando-a."""
+    invalidate_dashboard_cache(user["id"])
+    with connect() as c:
+        cur = c.execute(
+            "UPDATE conversion_requests SET status='resolved', resolved_at=CURRENT_TIMESTAMP "
+            "WHERE id=? AND user_id=? AND status IN ('confirmed','confirmed_manual')",
+            (booking_id, user["id"])
+        )
+        if not cur.rowcount:
+            cur = c.execute("DELETE FROM conversion_requests WHERE id=? AND user_id=?", (booking_id, user["id"]))
+    invalidate_dashboard_cache(user["id"])
+    return {"ok": True}
+
 @app.get("/api/agent/automation-level")
 def get_automation_level(user=Depends(current_user)):
     with connect() as c:
@@ -703,7 +805,7 @@ def delete_contact(contact_id: int, user=Depends(current_user)):
 @app.get("/api/business-info")
 def get_business_info(user=Depends(current_user)):
     with connect() as c:
-        rows=c.execute("SELECT * FROM business_info WHERE user_id=? AND kind NOT IN ('subscription', 'assinatura') ORDER BY updated_at DESC",(user["id"],)).fetchall()
+        rows=c.execute("SELECT * FROM business_info WHERE user_id=? AND kind NOT IN ('subscription', 'assinatura', 'ai_report') ORDER BY updated_at DESC",(user["id"],)).fetchall()
     return [dict(x) | {"metadata":json.loads(x["metadata"] or "{}")} for x in rows]
 
 @app.post("/api/business-info")
@@ -831,7 +933,7 @@ async def incoming(data:IncomingMessage,user=Depends(current_user),_sub=Depends(
         ).fetchall()
         history = [{"sender": r["sender"], "content": r["content"]} for r in reversed(history_rows)]
 
-        info = c.execute("SELECT kind,title,content FROM business_info WHERE user_id=?", (user["id"],)).fetchall()
+        info = c.execute("SELECT kind,title,content FROM business_info WHERE user_id=? AND kind NOT IN ('subscription', 'assinatura', 'ai_report')", (user["id"],)).fetchall()
         
         mandatory = {}
         try:

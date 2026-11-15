@@ -1682,7 +1682,38 @@ function openBookingsModal(confirmedList) {
         reminderBtn.textContent = "Lembrar com IA";
       }
     });
-    card.append(info, reminderBtn);
+
+    // Botão de lixeira para remover da lista da semana
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn-icon-danger booking-delete-btn";
+    deleteBtn.title = "Remover desta lista";
+    deleteBtn.setAttribute("aria-label", "Remover cliente desta lista");
+    deleteBtn.innerHTML = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
+    deleteBtn.addEventListener("click", async () => {
+      if (!confirm(`Remover ${r.name || r.contact_key || "este cliente"} da lista de marcações desta semana?`)) return;
+      deleteBtn.disabled = true;
+      try {
+        await api(`/api/conversions/${Number(r.id)}/remove-from-week`, { method: "DELETE" });
+        card.style.opacity = "0";
+        card.style.transition = "opacity 0.25s";
+        setTimeout(() => {
+          card.remove();
+          if (!modalBody.querySelector(".booking-week-item")) {
+            modalBody.innerHTML = '<div class="empty">Sem marcações na lista.</div>';
+          }
+          loadDashboard().catch(() => {});
+        }, 260);
+      } catch (err) {
+        showNotice(err.message, true);
+        deleteBtn.disabled = false;
+      }
+    });
+
+    const actionsDiv = document.createElement("div");
+    actionsDiv.className = "booking-week-actions";
+    actionsDiv.append(reminderBtn, deleteBtn);
+    card.append(info, actionsDiv);
     fragment.append(card);
   });
 
@@ -2251,93 +2282,223 @@ $("#conversion-form")?.addEventListener("submit", async e => {
 
 /* Relatórios */
 async function loadReports() {
-  let d;
+  // Carrega as análises guardadas em memória no servidor
   try {
-    d = await api("/api/analytics");
+    const res = await api("/api/reports/analyses");
+    renderAnalysesGrid(Array.isArray(res.analyses) ? res.analyses : []);
+  } catch (_err) {
+    // silencia; o grid ficará vazio
+    renderAnalysesGrid([]);
+  }
+  setupFullAnalysisButton();
+}
+
+/* ============================================================
+   SISTEMA DE ANÁLISES COMPLETAS IA — CARDS + MODAL
+   ============================================================ */
+
+function renderAnalysesGrid(analyses) {
+  const grid = $("#reports-analyses-grid");
+  const empty = $("#reports-analyses-empty");
+  if (!grid || !empty) return;
+
+  if (!analyses.length) {
+    grid.classList.add("hidden");
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  grid.classList.remove("hidden");
+  grid.innerHTML = "";
+
+  analyses.forEach(analysis => {
+    const card = document.createElement("article");
+    card.className = "analysis-report-card";
+    card.dataset.analysisId = analysis.id;
+
+    // Extrai o primeiro tema do relatório para preview
+    const previewText = extractAnalysisPreview(analysis.report_content);
+
+    card.innerHTML = `
+      <div class="analysis-card-header">
+        <div class="analysis-card-badge">
+          <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+          <span>Análise IA Drexier</span>
+        </div>
+        <button class="analysis-card-delete" data-analysis-id="${escapeHtml(analysis.id)}" title="Eliminar análise" aria-label="Eliminar análise">
+          <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+        </button>
+      </div>
+      <div class="analysis-card-body" role="button" tabindex="0" aria-label="Abrir análise detalhada">
+        <h3 class="analysis-card-title">Análise — ${escapeHtml(analysis.business_type || "Negócio")}</h3>
+        <p class="analysis-card-meta muted">${escapeHtml(analysis.generated_at)}</p>
+        <div class="analysis-card-stats">
+          <span class="analysis-stat-pill"><strong>${analysis.total_contacts_30d ?? 0}</strong> novos clientes (30d)</span>
+          <span class="analysis-stat-pill"><strong>${analysis.confirmed_orders ?? 0}</strong> conversões</span>
+          <span class="analysis-stat-pill ${(analysis.abandonment_rate ?? 0) > 60 ? 'pill-danger' : 'pill-ok'}"><strong>${analysis.abandonment_rate ?? 0}%</strong> abandono</span>
+        </div>
+        <p class="analysis-card-preview muted">${escapeHtml(previewText)}</p>
+        <span class="analysis-card-cta">Ver análise completa →</span>
+      </div>
+    `;
+
+    // Click no body abre o modal
+    const body = card.querySelector(".analysis-card-body");
+    body.addEventListener("click", () => openAnalysisModal(analysis));
+    body.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") openAnalysisModal(analysis); });
+
+    // Click no delete elimina
+    const delBtn = card.querySelector(".analysis-card-delete");
+    delBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm("Eliminar esta análise permanentemente?")) return;
+      delBtn.disabled = true;
+      try {
+        await api(`/api/reports/analyses/${analysis.id}`, { method: "DELETE" });
+        card.style.opacity = "0";
+        card.style.transform = "scale(0.95)";
+        card.style.transition = "opacity 0.25s, transform 0.25s";
+        setTimeout(() => {
+          card.remove();
+          if (!grid.children.length) {
+            grid.classList.add("hidden");
+            empty.classList.remove("hidden");
+          }
+        }, 260);
+      } catch (err) {
+        showNotice(err.message, true);
+        delBtn.disabled = false;
+      }
+    });
+
+    grid.append(card);
+  });
+}
+
+function extractAnalysisPreview(content) {
+  if (!content) return "Clique para ver a análise completa.";
+  // Remove headers markdown e pega as primeiras ~180 chars de texto
+  const clean = content.replace(/^#{1,3}\s.+$/gm, "").replace(/\*\*/g, "").trim();
+  const first = clean.split("\n").filter(l => l.trim().length > 10)[0] || "";
+  return first.length > 180 ? first.slice(0, 180) + "…" : first || "Clique para ver a análise completa.";
+}
+
+let _currentAnalysisForPdf = null;
+
+function openAnalysisModal(analysis) {
+  const modal = $("#analysis-detail-modal");
+  const modalBody = $("#analysis-modal-body");
+  const modalMeta = $("#analysis-modal-meta");
+  if (!modal || !modalBody) return;
+
+  _currentAnalysisForPdf = analysis;
+  modalMeta.textContent = `${analysis.generated_at} · ${analysis.business_type || ""}`;
+  renderAnalysisContent(modalBody, analysis.report_content);
+
+  modal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+
+function closeAnalysisModal() {
+  const modal = $("#analysis-detail-modal");
+  if (modal) modal.classList.add("hidden");
+  document.body.style.overflow = "";
+  _currentAnalysisForPdf = null;
+}
+
+function renderAnalysisContent(container, content) {
+  container.innerHTML = "";
+  if (!content) {
+    container.innerHTML = '<p class="muted">Sem conteúdo.</p>';
+    return;
+  }
+  const sections = content.split(/\n(?=#{1,3}\s)/);
+  sections.forEach(sec => {
+    const div = document.createElement("div");
+    div.className = "strategic-report-section";
+    div.innerHTML = sec
+      .replace(/^###\s+(.+)$/gm, "<h4>$1</h4>")
+      .replace(/^##\s+(.+)$/gm, "<h3>$1</h3>")
+      .replace(/^#\s+(.+)$/gm, "<h2>$1</h2>")
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/^•\s/gm, "• ")
+      .replace(/\n/g, "<br>");
+    container.append(div);
+  });
+}
+
+// Listeners do modal de análise
+$("#close-analysis-modal")?.addEventListener("click", closeAnalysisModal);
+$("#analysis-detail-modal")?.addEventListener("click", e => {
+  if (e.target === $("#analysis-detail-modal")) closeAnalysisModal();
+});
+$("#btn-analysis-modal-pdf")?.addEventListener("click", () => {
+  if (!_currentAnalysisForPdf) return;
+  const lines = [
+    `Análise IA Drexier — ${_currentAnalysisForPdf.business_type || "Negócio"}`,
+    `Gerada em: ${_currentAnalysisForPdf.generated_at}`,
+    `Clientes (30d): ${_currentAnalysisForPdf.total_contacts_30d ?? 0} | Conversões: ${_currentAnalysisForPdf.confirmed_orders ?? 0} | Abandono: ${_currentAnalysisForPdf.abandonment_rate ?? 0}%`,
+    "",
+    ...(_currentAnalysisForPdf.report_content || "").split("\n"),
+  ];
+  makeReportPdf(lines, `analise-drexier-${Date.now()}.pdf`);
+});
+
+$("#btn-analysis-modal-delete")?.addEventListener("click", async () => {
+  if (!_currentAnalysisForPdf) return;
+  const idToDelete = _currentAnalysisForPdf.id;
+  if (!confirm("Eliminar esta análise permanentemente?")) return;
+  const btn = $("#btn-analysis-modal-delete");
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/api/reports/analyses/${idToDelete}`, { method: "DELETE" });
+    closeAnalysisModal();
+    showNotice("Análise eliminada com sucesso.");
+    await loadReports();
   } catch (err) {
-    showNotice(err.message, true);
-    return;
+    showNotice(err.message || "Erro ao eliminar análise.", true);
+  } finally {
+    if (btn) btn.disabled = false;
   }
+});
 
-  setupConversationAnalysisReports();
-  // Configurar botão de relatório estratégico
-  setupStrategicAiReportButton();
+function setupFullAnalysisButton() {
+  const btn = $("#btn-generate-full-analysis");
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = "true";
 
-  // Gráfico histórico de aquisição
-  const el = $("#reports-chart");
-  el.innerHTML = "";
-  const vals = Array.isArray(d.acquisitions) ? d.acquisitions : [];
-  if (!vals.length) {
-    el.classList.add("empty");
-    el.textContent = "Ainda não existem dados de aquisição para este período.";
-    $("#chart-labels").innerHTML = "";
-    return;
-  }
-  el.classList.remove("empty");
-  const w = 760, h = 190, pad = 18, max = Math.max(1, ...vals.map(v => v.count));
-  const pts = vals.map((v, i) => ({
-    x: pad + i * (w - 2 * pad) / Math.max(1, vals.length - 1),
-    y: h - pad - (v.count / max) * (h - 2 * pad),
-    ...v
-  }));
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", "Aquisição diária de clientes");
-  [0.25, 0.5, 0.75].forEach(ratio => {
-    const guide = document.createElementNS(svg.namespaceURI, "line");
-    const y = pad + ratio * (h - 2 * pad);
-    guide.setAttribute("x1", String(pad));
-    guide.setAttribute("x2", String(w - pad));
-    guide.setAttribute("y1", String(y));
-    guide.setAttribute("y2", String(y));
-    guide.setAttribute("stroke", "#e5e9ef");
-    guide.setAttribute("stroke-width", "1");
-    svg.append(guide);
-  });
-  const poly = document.createElementNS(svg.namespaceURI, "polyline");
-  poly.setAttribute("points", pts.map(p => `${p.x},${p.y}`).join(" "));
-  poly.setAttribute("fill", "none");
-  poly.setAttribute("stroke", "#2563eb");
-  poly.setAttribute("stroke-width", "3");
-  poly.setAttribute("stroke-linecap", "round");
-  poly.setAttribute("stroke-linejoin", "round");
-  svg.append(poly);
-  pts.forEach(p => {
-    const circle = document.createElementNS(svg.namespaceURI, "circle");
-    circle.setAttribute("cx", p.x);
-    circle.setAttribute("cy", p.y);
-    circle.setAttribute("r", "4.5");
-    circle.setAttribute("fill", "#7657E8");
-    circle.setAttribute("stroke", "#171923");
-    circle.setAttribute("stroke-width", "2");
-    circle.style.cursor = "pointer";
-    circle.style.transition = "transform 0.15s ease, r 0.15s ease";
-    circle.addEventListener("mouseenter", e => {
-      circle.setAttribute("r", "7");
-      circle.setAttribute("fill", "#C9F36A");
-      showChartTooltip(e, `Etapa: ${p.date}`, `${p.count} ${p.count === 1 ? 'cliente' : 'clientes'}`);
-    });
-    circle.addEventListener("mousemove", e => {
-      const tip = getChartTooltip();
-      tip.style.left = `${e.clientX}px`;
-      tip.style.top = `${e.clientY - 14}px`;
-    });
-    circle.addEventListener("mouseleave", () => {
-      circle.setAttribute("r", "4.5");
-      circle.setAttribute("fill", "#7657E8");
-      hideChartTooltip();
-    });
-    svg.append(circle);
-  });
-  el.append(svg);
-  $("#chart-labels").innerHTML = "";
-  [...new Map([vals[0], vals[Math.floor(vals.length / 2)], vals[vals.length - 1]]
-    .filter(Boolean)
-    .map(v => [v.date, v])).values()].forEach(v => {
-    const s = document.createElement("span");
-    s.textContent = `${v.date} · ${v.count}`;
-    $("#chart-labels").append(s);
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  newBtn.addEventListener("click", async () => {
+    if (!paywallCheck()) return;
+    newBtn.disabled = true;
+    const span = newBtn.querySelector("span");
+    const orig = span ? span.textContent : newBtn.textContent;
+    if (span) span.textContent = "A analisar conversas…";
+    else newBtn.textContent = "A analisar conversas…";
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90000);
+      const res = await api("/api/reports/generate-full-analysis", {
+        method: "POST",
+        body: JSON.stringify({}),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
+      if (res.ok && res.analysis) {
+        showNotice("Análise gerada com sucesso!");
+        // Recarrega lista
+        const listRes = await api("/api/reports/analyses");
+        renderAnalysesGrid(Array.isArray(listRes.analyses) ? listRes.analyses : []);
+      } else {
+        showNotice("Não foi possível gerar a análise.", true);
+      }
+    } catch (err) {
+      showNotice(err.message || "Erro ao gerar análise.", true);
+    } finally {
+      newBtn.disabled = false;
+      if (span) span.textContent = orig;
+      else newBtn.textContent = orig;
+    }
   });
 }
 
