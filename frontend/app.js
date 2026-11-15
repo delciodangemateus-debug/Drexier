@@ -103,6 +103,7 @@ if (token) {
   try { document.documentElement.classList.add("is-authenticated"); } catch (_) {}
 }
 let me = null, selectedContact = null, infoCache = [], activePage = localStorage.getItem("drexier_active_page") || "dashboard";
+let livePollTimeoutId = null, isPollingActive = false;
 let businessInfoRevision = 0, businessInfoLoadSequence = 0;
 let currentAutomationLevel = localStorage.getItem("drexier_automation_level") || "full";
 const conversationMessagesCache = {};
@@ -1616,39 +1617,19 @@ function openBookingsModal(confirmedList) {
 
   const fragment = document.createDocumentFragment();
   list.forEach(r => {
-    const appointmentDate = new Date(r.scheduled_at);
-    if (Number.isNaN(appointmentDate.getTime())) return;
-    const dateLabel = appointmentDate.toLocaleDateString("pt-PT", {
-      timeZone: "Europe/Lisbon",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric"
-    }).replace(/\//g, " / ");
-    const timeParts = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Europe/Lisbon",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true
-    }).formatToParts(appointmentDate);
-    const getTimePart = type => timeParts.find(part => part.type === type)?.value;
-    const hour = getTimePart("hour");
-    const minute = getTimePart("minute");
-    const dayPeriod = getTimePart("dayPeriod");
-    if (!hour || !minute || !dayPeriod) return;
-    const timeLabel = `${hour}:${minute} ${dayPeriod === "AM" ? "A.M." : "P.M."}`;
-    const reservedAt = `${dateLabel} - ${timeLabel}`;
-
     const card = document.createElement("article");
     card.className = "booking-week-item";
 
     const info = document.createElement("div");
     info.className = "booking-week-info";
 
-    const summary = document.createElement("div");
-    summary.className = "booking-week-summary";
+    const summary = document.createElement("button");
+    summary.type = "button";
+    summary.className = "booking-week-toggle";
+    summary.setAttribute("aria-controls", `booking-request-${Number(r.id)}`);
+    summary.setAttribute("aria-expanded", "false");
 
-    const clientName = document.createElement("button");
-    clientName.type = "button";
+    const clientName = document.createElement("span");
     clientName.className = "booking-client-name";
     clientName.textContent = r.name || r.contact_key || "Cliente";
 
@@ -1656,20 +1637,31 @@ function openBookingsModal(confirmedList) {
     requestDetails.className = "booking-request-details";
     requestDetails.id = `booking-request-${Number(r.id)}`;
     requestDetails.hidden = true;
-    requestDetails.textContent = r.details || "Não há mensagem do pedido registada.";
-    clientName.setAttribute("aria-controls", requestDetails.id);
-    clientName.setAttribute("aria-expanded", "false");
-    clientName.addEventListener("click", () => {
-      const isExpanded = clientName.getAttribute("aria-expanded") === "true";
-      clientName.setAttribute("aria-expanded", String(!isExpanded));
+    const appointmentMessage = document.createElement("p");
+    appointmentMessage.className = "booking-appointment-message";
+    appointmentMessage.textContent = r.appointment_message || "Não há mensagem do pedido registada.";
+    requestDetails.append(appointmentMessage);
+
+    const conversationBtn = document.createElement("button");
+    conversationBtn.type = "button";
+    conversationBtn.className = "booking-conversation-link";
+    conversationBtn.textContent = "Abrir conversa completa";
+    conversationBtn.addEventListener("click", () => {
+      openBookingConversation(r.contact_id);
+    });
+    requestDetails.append(conversationBtn);
+
+    summary.addEventListener("click", () => {
+      const isExpanded = summary.getAttribute("aria-expanded") === "true";
+      summary.setAttribute("aria-expanded", String(!isExpanded));
       requestDetails.hidden = isExpanded;
     });
 
-    const schedule = document.createElement("span");
-    schedule.className = "booking-reserved-at";
-    schedule.textContent = reservedAt;
+    const validatedBadge = document.createElement("span");
+    validatedBadge.className = "booking-status-badge";
+    validatedBadge.textContent = "Validada";
 
-    summary.append(clientName, schedule);
+    summary.append(clientName, validatedBadge);
     info.append(summary, requestDetails);
 
     const reminderBtn = document.createElement("button");
@@ -1695,6 +1687,25 @@ function openBookingsModal(confirmedList) {
   });
 
   modalBody.append(fragment);
+}
+
+async function openBookingConversation(contactId) {
+  const id = Number(contactId);
+  if (!Number.isInteger(id)) return;
+
+  closeBookingsModal();
+  await navigate("messages");
+  if (!contactsCache.some(contact => Number(contact.id) === id)) {
+    await loadContacts();
+  }
+  if (!contactsCache.some(contact => Number(contact.id) === id)) {
+    showNotice("Não foi possível encontrar a conversa deste cliente.", true);
+    return;
+  }
+
+  await openConversation(id);
+  $("#messages-inbox-col")?.classList.remove("hidden");
+  $("#messages-canvas-col")?.classList.remove("active");
 }
 
 function closeBookingsModal() {
@@ -1792,6 +1803,15 @@ function renderPendingModalList(requests) {
     detailsBox.style.fontSize = "13px";
     detailsBox.style.lineHeight = "1.5";
     detailsBox.textContent = r.details || "Pedido aguardando validação do proprietário.";
+
+    if (r.status === "validating") {
+      const validationStatus = document.createElement("p");
+      validationStatus.className = "muted";
+      validationStatus.textContent = "Validação em andamento. Não é necessário enviar outra confirmação.";
+      card.append(header, detailsBox, validationStatus);
+      modalBody.append(card);
+      return;
+    }
 
     // Caixa de mensagem manual (expansível quando o utilizador quer escrever a própria resposta)
     const manualBox = document.createElement("div");

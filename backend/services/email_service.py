@@ -691,7 +691,10 @@ def capture_scheduled_request(
     if not request_type:
         return None
 
-    scheduled_at = extract_scheduled_at(incoming_content)
+    schedule_text = incoming_content
+    if waiting:
+        schedule_text = f"{waiting['details'] or ''}\n{incoming_content}"
+    scheduled_at = extract_scheduled_at(schedule_text)
     if not waiting and intent and scheduled_at:
         existing = conn.execute(
             """SELECT id, request_type, details FROM conversion_requests
@@ -713,6 +716,8 @@ def capture_scheduled_request(
         details = waiting["details"] or ""
         if scheduled_at:
             details = f"{details}\nData e hora escolhidas pelo cliente: {incoming_content[:200]}".strip()
+        else:
+            details = f"{details}\nInformação adicional do cliente: {incoming_content[:200]}".strip()
         conn.execute(
             """UPDATE conversion_requests SET details = ?, scheduled_at = ?, status = ?
                WHERE id = ? AND user_id = ?""",
@@ -1422,7 +1427,7 @@ async def process_confirmation_action(
     with connect() as c:
         req = c.execute(
             """SELECT r.id, r.request_type, r.details, r.contact_id, ct.name, ct.contact_key,
-                      r.scheduled_at
+                      r.scheduled_at, r.status
                FROM conversion_requests r
                JOIN contacts ct ON ct.id = r.contact_id
                WHERE r.id = ? AND r.user_id = ?""",
@@ -1430,6 +1435,15 @@ async def process_confirmation_action(
         ).fetchone()
         if not req:
             raise ValueError("Pedido de confirmação não encontrado.")
+        if req["status"] in ("confirmed", "confirmed_manual"):
+            return {
+                "ok": True,
+                "action": action,
+                "status": req["status"],
+                "already_confirmed": True,
+            }
+        if req["status"] != "pending":
+            raise ValueError("Este pedido não está pendente ou já está a ser validado.")
         if action in ("confirm", "confirm_manual") and not req["scheduled_at"]:
             scheduled_at = extract_scheduled_at(req["details"] or "")
             if not scheduled_at:
@@ -1511,10 +1525,13 @@ async def process_confirmation_action(
         # Tratado sem marcação (produto ou vaga indisponível)
         new_status = "treated"
         with connect() as c:
-            c.execute(
-                "UPDATE conversion_requests SET status = 'treated', resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+            updated = c.execute(
+                """UPDATE conversion_requests SET status = 'treated', resolved_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND user_id = ? AND status = 'pending'""",
                 (request_id, user_id)
             )
+            if not updated.rowcount:
+                raise ValueError("Este pedido não está mais pendente para ser tratado.")
         return {
             "ok": True,
             "action": action,
@@ -1551,6 +1568,26 @@ async def process_confirmation_action(
         if not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
 
+    with connect() as c:
+        claimed = c.execute(
+            """UPDATE conversion_requests SET status = 'validating'
+               WHERE id = ? AND user_id = ? AND status = 'pending'""",
+            (request_id, user_id),
+        )
+        if not claimed.rowcount:
+            current = c.execute(
+                "SELECT status FROM conversion_requests WHERE id = ? AND user_id = ?",
+                (request_id, user_id),
+            ).fetchone()
+            if current and current["status"] in ("confirmed", "confirmed_manual"):
+                return {
+                    "ok": True,
+                    "action": action,
+                    "status": current["status"],
+                    "already_confirmed": True,
+                }
+            raise ValueError("Este pedido não está pendente ou já está a ser validado.")
+
     # Envia a resposta oficial pelo Gmail conectado.
     try:
         await send_email(
@@ -1563,20 +1600,29 @@ async def process_confirmation_action(
             references=last_message_id,
         )
     except Exception as e:
+        with connect() as c:
+            c.execute(
+                """UPDATE conversion_requests SET status = 'pending'
+                   WHERE id = ? AND user_id = ? AND status = 'validating'""",
+                (request_id, user_id),
+            )
         logger.error(f"Erro ao enviar confirmação ({channel_name}): {e}")
         raise RuntimeError(f"Mensagem gerada, mas falha no envio: {str(e)}")
 
     # Só confirma o pedido no histórico depois de o canal aceitar a mensagem.
     with connect() as c:
+        updated = c.execute(
+            """UPDATE conversion_requests SET status = ?, resolved_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND user_id = ? AND status = 'validating'""",
+            (new_status, request_id, user_id),
+        )
+        if not updated.rowcount:
+            raise RuntimeError("A mensagem foi enviada, mas o estado do pedido mudou inesperadamente.")
         c.execute(
             "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, ?, ?)",
             (user_id, req["contact_id"], sender_role, reply_text)
         )
         c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (req["contact_id"],))
-        c.execute(
-            "UPDATE conversion_requests SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
-            (new_status, request_id, user_id)
-        )
 
     return {
         "ok": True,
@@ -1600,8 +1646,8 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
         ).fetchone()
         if not req or not req["scheduled_at"]:
             raise ValueError("Este pedido ainda não tem data e hora registadas.")
-        if req["status"] not in ("pending", "confirmed", "confirmed_manual", "resolved"):
-            raise ValueError("Este pedido não está disponível para envio de lembrete.")
+        if req["status"] not in ("confirmed", "confirmed_manual"):
+            raise ValueError("Só é possível enviar lembretes para marcações já validadas.")
 
         scheduled_at = _parse_utc_datetime(req["scheduled_at"])
         if scheduled_at is None or scheduled_at <= datetime.now(timezone.utc):

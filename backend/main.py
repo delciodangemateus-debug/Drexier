@@ -526,12 +526,12 @@ def dashboard(user=Depends(current_user)):
             (uid, yesterday_window_start, today_window_start),
         ).fetchone()["n"]
         pending=c.execute("SELECT COUNT(*) n FROM conversion_requests WHERE user_id=? AND status='pending'",(uid,)).fetchone()["n"]
-        pending_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,ct.name,ct.contact_key
+        pending_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,r.status,ct.name,ct.contact_key
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
-          WHERE r.user_id=? AND r.status='pending' ORDER BY r.created_at DESC""",(uid,)).fetchall()
-        booking_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,r.resolved_at,r.status,r.scheduled_at,ct.name,ct.contact_key
+          WHERE r.user_id=? AND r.status IN ('pending', 'validating') ORDER BY r.created_at DESC""",(uid,)).fetchall()
+        booking_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,r.resolved_at,r.status,r.scheduled_at,ct.id AS contact_id,ct.name,ct.contact_key
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
-          WHERE r.user_id=? AND r.status IN ('pending', 'confirmed', 'confirmed_manual', 'resolved')
+          WHERE r.user_id=? AND r.status IN ('confirmed', 'confirmed_manual')
           ORDER BY r.scheduled_at ASC""",(uid,)).fetchall()
 
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -540,13 +540,15 @@ def dashboard(user=Depends(current_user)):
     for row in booking_rows:
         item = dict(row)
         if not item["scheduled_at"]:
-            item["scheduled_at"] = extract_scheduled_at(item.get("details") or "")
-            if item["scheduled_at"]:
-                with connect() as c:
-                    c.execute(
-                        "UPDATE conversion_requests SET scheduled_at=? WHERE id=? AND user_id=?",
-                        (item["scheduled_at"], item["id"], uid),
-                    )
+            continue
+        details = item.get("details") or ""
+        schedule_marker = "Data e hora escolhidas pelo cliente:"
+        if schedule_marker in details:
+            item["appointment_message"] = details.rsplit(schedule_marker, 1)[-1].strip()
+        elif details.startswith("Assunto:") and "\n" in details:
+            item["appointment_message"] = details.split("\n", 1)[1].strip()
+        else:
+            item["appointment_message"] = details.strip()
         try:
             scheduled_at = datetime.fromisoformat(str(item["scheduled_at"]).replace("Z", "+00:00"))
             if scheduled_at.tzinfo is None:
@@ -883,10 +885,13 @@ async def conversion_action(request_id: int, data: ConversionActionIn, user=Depe
             action=data.action,
             custom_note=data.custom_note or ""
         )
+        invalidate_dashboard_cache(user["id"])
         return res
     except ValueError as e:
+        invalidate_dashboard_cache(user["id"])
         raise HTTPException(404, str(e))
     except Exception as e:
+        invalidate_dashboard_cache(user["id"])
         logger.error(f"Erro na ação de confirmação: {e}")
         raise HTTPException(500, str(e))
 

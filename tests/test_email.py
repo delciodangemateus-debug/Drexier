@@ -261,11 +261,11 @@ async def test_email_followup_records_requested_date_and_time(auth_client):
         }
         await process_and_reply_email(
             **params,
-            incoming_content="Gostaria de marcar uma consulta.",
+            incoming_content="Gostaria de marcar uma consulta para 22/12/2099.",
         )
         await process_and_reply_email(
             **params,
-            incoming_content="Amanhã às 14h.",
+            incoming_content="Às 14h.",
         )
 
     with connect() as c:
@@ -274,7 +274,7 @@ async def test_email_followup_records_requested_date_and_time(auth_client):
             (user_id,),
         ).fetchone()
     assert request["status"] == "pending"
-    assert request["scheduled_at"] == extract_scheduled_at("Amanhã às 14h.")
+    assert request["scheduled_at"] == "2099-12-22T14:00:00+00:00"
     assert "Data e hora escolhidas pelo cliente" in request["details"]
 
 
@@ -334,11 +334,30 @@ async def test_ai_reminder_rejects_phone_contact_without_email(auth_client):
         request_id = c.execute(
             """INSERT INTO conversion_requests
                (user_id, contact_id, request_type, details, status, scheduled_at)
-               VALUES (?, ?, 'booking', 'Consulta', 'pending', ?)""",
+               VALUES (?, ?, 'booking', 'Consulta', 'confirmed', ?)""",
             (user_id, contact_id, extract_scheduled_at("Amanhã às 14h")),
         ).lastrowid
 
     with pytest.raises(ValueError, match="não tem um endereço de e-mail"):
+        await send_ai_booking_reminder(user_id, request_id)
+
+
+@pytest.mark.anyio
+async def test_ai_reminder_rejects_unvalidated_request(auth_client):
+    _, _, user_id = auth_client
+    with connect() as c:
+        contact_id = c.execute(
+            "INSERT INTO contacts(user_id, name, contact_key) VALUES (?, 'Cliente', 'cliente@example.com')",
+            (user_id,),
+        ).lastrowid
+        request_id = c.execute(
+            """INSERT INTO conversion_requests
+               (user_id, contact_id, request_type, details, status, scheduled_at)
+               VALUES (?, ?, 'booking', 'Consulta', 'pending', ?)""",
+            (user_id, contact_id, extract_scheduled_at("Amanhã às 14h")),
+        ).lastrowid
+
+    with pytest.raises(ValueError, match="marcações já validadas"):
         await send_ai_booking_reminder(user_id, request_id)
 
 
@@ -474,7 +493,7 @@ async def test_confirmation_email_replies_in_thread_before_marking_confirmed(aut
                 "SELECT sender FROM messages WHERE contact_id = ?",
                 (contact_id,),
             ).fetchall()
-        assert request["status"] == "pending"
+        assert request["status"] == "validating"
         assert messages == []
         return {"status": "sent"}
 
@@ -511,6 +530,48 @@ async def test_confirmation_email_replies_in_thread_before_marking_confirmed(aut
     assert request["status"] == "confirmed"
     assert message["sender"] == "agent"
     assert message["content"] == "O seu pedido foi confirmado."
+
+
+@pytest.mark.anyio
+async def test_confirmed_request_cannot_send_a_second_confirmation(auth_client):
+    _, _, user_id = auth_client
+    with connect() as c:
+        contact_id = c.execute(
+            "INSERT INTO contacts(user_id, name, contact_key) VALUES (?, 'Cliente', 'cliente@example.com')",
+            (user_id,),
+        ).lastrowid
+        request_id = c.execute(
+            """INSERT INTO conversion_requests
+               (user_id, contact_id, request_type, details, status, scheduled_at)
+               VALUES (?, ?, 'booking', 'Consulta amanhã às 14h', 'pending', ?)""",
+            (user_id, contact_id, extract_scheduled_at("Amanhã às 14h")),
+        ).lastrowid
+        c.execute(
+            "INSERT INTO email_integrations(user_id, provider, email_address, status) VALUES (?, 'google', 'empresa@gmail.com', 'connected')",
+            (user_id,),
+        )
+
+    with patch(
+        "backend.services.email_service.draft_reply",
+        new_callable=AsyncMock,
+        return_value="A sua marcação está confirmada.",
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        first_result = await process_confirmation_action(user_id, request_id, "confirm")
+        repeated_result = await process_confirmation_action(user_id, request_id, "confirm")
+
+    assert first_result["status"] == "confirmed"
+    assert repeated_result["already_confirmed"] is True
+    mock_send.assert_awaited_once()
+    with connect() as c:
+        messages = c.execute(
+            "SELECT content FROM messages WHERE contact_id = ?",
+            (contact_id,),
+        ).fetchall()
+    assert [message["content"] for message in messages] == ["A sua marcação está confirmada."]
 
 
 def test_email_response_cutoff_starts_after_payment_and_connection():

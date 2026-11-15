@@ -75,16 +75,76 @@ def test_dashboard_uses_consecutive_24_hour_windows_and_week_schedule():
     dashboard = response.json()
     assert dashboard["today_contacts"] == 1
     assert dashboard["yesterday_contacts"] == 1
-    assert dashboard["bookings_count"] == 2
+    assert dashboard["bookings_count"] == 1
     assert [row["name"] for row in dashboard["confirmed_bookings"]] == [
         "previous24h",
-        "last24h",
     ]
     assert [row["scheduled_at"] for row in dashboard["confirmed_bookings"]] == [
         (now + timedelta(days=1)).isoformat(),
-        (now + timedelta(days=2)).isoformat(),
     ]
+    assert dashboard["confirmed_bookings"][0]["status"] == "confirmed"
     assert all("with_whom" not in row for row in dashboard["confirmed_bookings"])
+
+
+def test_dashboard_keeps_each_booking_and_exposes_only_its_request_message():
+    from datetime import datetime, timedelta, timezone
+    import time
+    from backend.main import _dashboard_cache
+
+    email = f"multiple_bookings_{int(time.time() * 1000)}@example.com"
+    password = "SecurePassword123"
+    signup_and_verify(client, {
+        "name": "Marcações múltiplas",
+        "email": email,
+        "password": password,
+        "confirm_password": password,
+        "business_type": "Serviços",
+    })
+    auth = login_and_verify(client, email, password)
+    user_id = auth.json()["user_id"]
+    headers = {"Authorization": f"Bearer {auth.json()['token']}"}
+    now = datetime.now(timezone.utc)
+
+    with connect() as c:
+        contact_id = c.execute(
+            "INSERT INTO contacts(user_id, name, contact_key) VALUES (?, 'Cliente X', ?)",
+            (user_id, f"{email}.cliente"),
+        ).lastrowid
+        c.execute(
+            """INSERT INTO conversion_requests
+               (user_id, contact_id, request_type, details, status, scheduled_at)
+               VALUES (?, ?, 'booking', ?, 'confirmed', ?)""",
+            (
+                user_id,
+                contact_id,
+                "Assunto: Marcação\nQuero marcar na quinta-feira às 10h.",
+                (now + timedelta(days=1)).isoformat(),
+            ),
+        )
+        c.execute(
+            """INSERT INTO conversion_requests
+               (user_id, contact_id, request_type, details, status, scheduled_at)
+               VALUES (?, ?, 'booking', ?, 'confirmed', ?)""",
+            (
+                user_id,
+                contact_id,
+                "Pedido inicial de marcação\nData e hora escolhidas pelo cliente: Na terça-feira às 14h.",
+                (now + timedelta(days=3)).isoformat(),
+            ),
+        )
+
+    _dashboard_cache.clear()
+    response = client.get("/api/dashboard", headers=headers)
+    assert response.status_code == 200
+    bookings = [
+        booking for booking in response.json()["confirmed_bookings"]
+        if booking["contact_id"] == contact_id
+    ]
+    assert len(bookings) == 2
+    assert [booking["appointment_message"] for booking in bookings] == [
+        "Quero marcar na quinta-feira às 10h.",
+        "Na terça-feira às 14h.",
+    ]
 
 
 def test_requested_weekday_and_morning_time_are_parsed_as_the_reserved_datetime():
@@ -97,6 +157,46 @@ def test_requested_weekday_and_morning_time_are_parsed_as_the_reserved_datetime(
     requested = "Quero a marcação para segunda-feira às 8 horas da manhã com o senhor Cordeiro."
 
     assert extract_scheduled_at(requested, now) == "2026-11-16T08:00:00+00:00"
+
+
+def test_dashboard_does_not_infer_booking_datetime_when_schedule_is_missing():
+    import time
+
+    email = f"unscheduled_booking_{int(time.time() * 1000)}@example.com"
+    password = "SecurePassword123"
+    signup_and_verify(client, {
+        "name": "Pedido sem horário",
+        "email": email,
+        "password": password,
+        "confirm_password": password,
+        "business_type": "Serviços",
+    })
+    auth = login_and_verify(client, email, password)
+    user_id = auth.json()["user_id"]
+    headers = {"Authorization": f"Bearer {auth.json()['token']}"}
+
+    with connect() as c:
+        contact_id = c.execute(
+            "INSERT INTO contacts(user_id, name, contact_key) VALUES (?, 'Cliente', ?)",
+            (user_id, f"{email}.cliente"),
+        ).lastrowid
+        request_id = c.execute(
+            """INSERT INTO conversion_requests
+               (user_id, contact_id, request_type, details, status, scheduled_at)
+               VALUES (?, ?, 'booking', 'A marcação foi pedida para amanhã às 14h.', 'pending', NULL)""",
+            (user_id, contact_id),
+        ).lastrowid
+
+    response = client.get("/api/dashboard", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["confirmed_bookings"] == []
+
+    with connect() as c:
+        request = c.execute(
+            "SELECT scheduled_at FROM conversion_requests WHERE id = ?",
+            (request_id,),
+        ).fetchone()
+    assert request["scheduled_at"] is None
 
 
 def test_business_info_cards_persist_and_keep_multiple_custom_cards():
