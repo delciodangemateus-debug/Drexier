@@ -643,7 +643,9 @@ async def generate_full_analysis(user=Depends(current_user)):
             "total_contacts_30d": report.get("total_contacts_30d", 0),
             "total_contacts": report.get("total_contacts", 0),
             "confirmed_orders": report.get("confirmed_orders", 0),
+            "conversion_rate": report.get("conversion_rate", 0),
             "abandonment_rate": report.get("abandonment_rate", 0),
+            "sample_size": report.get("sample_size", 0),
         }
         cur = c.execute(
             "INSERT INTO business_info(user_id, kind, title, content, metadata) VALUES(?,?,?,?,?)",
@@ -660,7 +662,9 @@ async def generate_full_analysis(user=Depends(current_user)):
         "total_contacts_30d": report.get("total_contacts_30d", 0),
         "total_contacts": report.get("total_contacts", 0),
         "confirmed_orders": report.get("confirmed_orders", 0),
+        "conversion_rate": report.get("conversion_rate", 0),
         "abandonment_rate": report.get("abandonment_rate", 0),
+        "sample_size": report.get("sample_size", 0),
         "report_content": report["report_content"],
     }
     _analyses_store.setdefault(uid, []).insert(0, analysis_entry)
@@ -691,7 +695,9 @@ def list_analyses(user=Depends(current_user)):
                 "total_contacts_30d": meta.get("total_contacts_30d", 0),
                 "total_contacts": meta.get("total_contacts", 0),
                 "confirmed_orders": meta.get("confirmed_orders", 0),
+                "conversion_rate": meta.get("conversion_rate", 0),
                 "abandonment_rate": meta.get("abandonment_rate", 0),
+                "sample_size": meta.get("sample_size", 0),
                 "report_content": r["content"],
             })
     if not analyses and uid in _analyses_store:

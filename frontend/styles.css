@@ -4548,26 +4548,61 @@ html:not(.is-authenticated) .sidebar,
 }
 
 .strategic-report-section {
-  margin-bottom: 24px;
-  padding-bottom: 20px;
-  border-bottom: 1.5px dashed #D1D5DB;
+  background: #FFFFFF;
+  border: 2px solid var(--border-arcade, #171923);
+  border-radius: 10px;
+  box-shadow: 3px 3px 0 var(--border-arcade, #171923);
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  line-height: 1.65;
+  color: #171923;
 }
 
 .strategic-report-section:last-child {
   margin-bottom: 0;
-  padding-bottom: 0;
-  border-bottom: none;
 }
 
 .strategic-report-section h3 {
   font-family: var(--font-display, 'Space Grotesk', sans-serif);
   font-size: 16px;
   font-weight: 800;
-  color: #7657E8;
+  color: #171923;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin: 0 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #E5E7EB;
+}
+
+.strategic-report-section h4 {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #4B5563;
+  margin: 14px 0 6px;
+}
+
+.report-bullet-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.report-bullet-dot {
+  color: var(--color-primary, #7657E8);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.report-paragraph {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #1F2937;
 }
 
 /* GRID DE PRODUTOS MAIS VENDIDOS */
@@ -4972,114 +5007,140 @@ html:not(.is-authenticated) .sidebar,
   margin-top: 4px;
 }
 
-/* Card individual de análise */
+/* Card individual de análise — Estilo Arcade Neo-Brutalista Claro */
 .analysis-report-card {
-  background: var(--bg-panel, #111827);
-  border: 1.5px solid var(--border-arcade, #1F2937);
-  border-radius: 12px;
+  background: var(--surface-primary, #FFFDF7);
+  border: 2px solid var(--border-arcade, #171923);
+  border-radius: var(--radius-lg, 12px);
   overflow: hidden;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  box-shadow: 4px 4px 0 var(--border-arcade, #171923);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  display: flex;
+  flex-direction: column;
 }
 .analysis-report-card:hover {
-  border-color: var(--color-primary, #7657E8);
-  box-shadow: 0 4px 24px rgba(118, 87, 232, 0.12);
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 var(--border-arcade, #171923);
+  border-color: var(--border-arcade, #171923);
 }
 
 .analysis-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid var(--border-arcade, #1F2937);
+  padding: 10px 14px;
+  background: var(--surface-interaction, #F2EDE2);
+  border-bottom: 2px solid var(--border-arcade, #171923);
 }
 
 .analysis-card-badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 11px;
-  font-weight: 600;
-  color: var(--color-primary, #7657E8);
+  font-weight: 800;
+  color: #171923;
+  background: var(--lime-arcade, #C9F36A);
+  border: 1.5px solid var(--border-arcade, #171923);
+  box-shadow: 1.5px 1.5px 0 var(--border-arcade, #171923);
+  padding: 3px 8px;
+  border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .analysis-card-delete {
-  background: none;
-  border: none;
+  background: #FFFDF7;
+  border: 1.5px solid var(--border-arcade, #171923);
+  box-shadow: 1.5px 1.5px 0 var(--border-arcade, #171923);
   cursor: pointer;
-  color: var(--text-muted, #6B7280);
+  color: #171923;
   display: flex;
   align-items: center;
+  justify-content: center;
   padding: 4px;
   border-radius: 6px;
-  transition: color 0.15s, background 0.15s;
+  transition: all 0.15s ease;
 }
 .analysis-card-delete:hover {
-  color: #EF4444;
-  background: rgba(239,68,68,0.08);
+  background: #FEE2E2;
+  color: #DC2626;
+  border-color: #DC2626;
+  box-shadow: 2px 2px 0 #DC2626;
 }
 
 .analysis-card-body {
-  padding: 14px;
+  padding: 16px;
   cursor: pointer;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .analysis-card-title {
-  font-size: 14px;
-  font-weight: 700;
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
+  font-size: 15px;
+  font-weight: 800;
   margin: 0 0 4px;
-  color: var(--text-primary, #F9FAFB);
+  color: var(--text-primary, #171923);
 }
 
 .analysis-card-meta {
-  font-size: 11px;
-  margin: 0 0 10px;
+  font-size: 11.5px;
+  color: var(--text-secondary, #52525B);
+  margin: 0 0 12px;
 }
 
 .analysis-card-stats {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .analysis-stat-pill {
   font-size: 11px;
+  font-weight: 700;
   padding: 3px 8px;
-  border-radius: 20px;
-  background: rgba(118, 87, 232, 0.08);
-  border: 1px solid rgba(118, 87, 232, 0.2);
-  color: var(--text-secondary, #9CA3AF);
+  border-radius: 6px;
+  background: #F4EFE6;
+  border: 1.5px solid var(--border-arcade, #171923);
+  box-shadow: 1.5px 1.5px 0 var(--border-arcade, #171923);
+  color: #171923;
 }
 .analysis-stat-pill.pill-danger {
-  background: rgba(239,68,68,0.08);
-  border-color: rgba(239,68,68,0.3);
-  color: #FCA5A5;
+  background: #FEE2E2;
+  color: #991B1B;
 }
 .analysis-stat-pill.pill-ok {
-  background: rgba(34,197,94,0.08);
-  border-color: rgba(34,197,94,0.25);
-  color: #86EFAC;
+  background: #DCFCE7;
+  color: #166534;
 }
 .analysis-stat-pill strong {
-  color: var(--text-primary, #F9FAFB);
+  color: inherit;
 }
 
 .analysis-card-preview {
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #374151;
+  margin: 0 0 14px;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  flex: 1;
 }
 
 .analysis-card-cta {
+  font-family: var(--font-display, 'Space Grotesk', sans-serif);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 800;
   color: var(--color-primary, #7657E8);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
   text-decoration: underline;
   text-underline-offset: 2px;
 }

@@ -2319,6 +2319,10 @@ function renderAnalysesGrid(analyses) {
     // Extrai o primeiro tema do relatório para preview
     const previewText = extractAnalysisPreview(analysis.report_content);
 
+    const convPct = analysis.conversion_rate !== undefined ? analysis.conversion_rate : Math.max(0, 100 - (analysis.abandonment_rate || 0));
+    const abandPct = analysis.abandonment_rate !== undefined ? analysis.abandonment_rate : Math.max(0, 100 - convPct);
+    const clientCount = analysis.total_contacts !== undefined ? analysis.total_contacts : (analysis.total_contacts_30d || 0);
+
     card.innerHTML = `
       <div class="analysis-card-header">
         <div class="analysis-card-badge">
@@ -2331,14 +2335,14 @@ function renderAnalysesGrid(analyses) {
       </div>
       <div class="analysis-card-body" role="button" tabindex="0" aria-label="Abrir análise detalhada">
         <h3 class="analysis-card-title">Análise — ${escapeHtml(analysis.business_type || "Negócio")}</h3>
-        <p class="analysis-card-meta muted">${escapeHtml(analysis.generated_at)}</p>
+        <p class="analysis-card-meta">${escapeHtml(analysis.generated_at)}</p>
         <div class="analysis-card-stats">
-          <span class="analysis-stat-pill"><strong>${analysis.total_contacts_30d ?? 0}</strong> novos clientes (30d)</span>
-          <span class="analysis-stat-pill"><strong>${analysis.confirmed_orders ?? 0}</strong> conversões</span>
-          <span class="analysis-stat-pill ${(analysis.abandonment_rate ?? 0) > 60 ? 'pill-danger' : 'pill-ok'}"><strong>${analysis.abandonment_rate ?? 0}%</strong> abandono</span>
+          <span class="analysis-stat-pill"><strong>${clientCount}</strong> clientes</span>
+          <span class="analysis-stat-pill pill-ok"><strong>${convPct}%</strong> conversão</span>
+          <span class="analysis-stat-pill ${abandPct > 50 ? 'pill-danger' : 'pill-ok'}"><strong>${abandPct}%</strong> abandono</span>
         </div>
-        <p class="analysis-card-preview muted">${escapeHtml(previewText)}</p>
-        <span class="analysis-card-cta">Ver análise completa →</span>
+        <p class="analysis-card-preview">${escapeHtml(previewText)}</p>
+        <span class="analysis-card-cta">Ver relatório corporativo completo →</span>
       </div>
     `;
 
@@ -2377,10 +2381,12 @@ function renderAnalysesGrid(analyses) {
 
 function extractAnalysisPreview(content) {
   if (!content) return "Clique para ver a análise completa.";
-  // Remove headers markdown e pega as primeiras ~180 chars de texto
-  const clean = content.replace(/^#{1,3}\s.+$/gm, "").replace(/\*\*/g, "").trim();
-  const first = clean.split("\n").filter(l => l.trim().length > 10)[0] || "";
-  return first.length > 180 ? first.slice(0, 180) + "…" : first || "Clique para ver a análise completa.";
+  // Remove títulos markdown e recupera primeiro parágrafo relevante
+  const lines = content.split("\n")
+    .map(l => l.replace(/^#{1,4}\s+/, "").replace(/\*\*/g, "").trim())
+    .filter(l => l.length > 15 && !l.startsWith("1.") && !l.startsWith("Tema"));
+  const first = lines[0] || content.slice(0, 160);
+  return first.length > 180 ? first.slice(0, 180) + "…" : first;
 }
 
 let _currentAnalysisForPdf = null;
@@ -2409,20 +2415,46 @@ function closeAnalysisModal() {
 function renderAnalysisContent(container, content) {
   container.innerHTML = "";
   if (!content) {
-    container.innerHTML = '<p class="muted">Sem conteúdo.</p>';
+    container.innerHTML = '<p class="muted">Sem conteúdo disponível para este relatório.</p>';
     return;
   }
-  const sections = content.split(/\n(?=#{1,3}\s)/);
+  const sections = content.split(/\n(?=##\s+)/);
   sections.forEach(sec => {
+    if (!sec.trim()) return;
     const div = document.createElement("div");
     div.className = "strategic-report-section";
-    div.innerHTML = sec
-      .replace(/^###\s+(.+)$/gm, "<h4>$1</h4>")
-      .replace(/^##\s+(.+)$/gm, "<h3>$1</h3>")
-      .replace(/^#\s+(.+)$/gm, "<h2>$1</h2>")
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/^•\s/gm, "• ")
-      .replace(/\n/g, "<br>");
+    
+    // Processa markdown e títulos dos 5 temas
+    let lines = sec.split("\n");
+    let html = "";
+    lines.forEach(l => {
+      const line = l.trim();
+      if (!line) {
+        html += "<br>";
+      } else if (line.startsWith("## ")) {
+        const title = line.replace(/^##\s+/, "").replace(/\*\*/g, "");
+        html += `<h3><span class="report-theme-badge">Tema</span> ${escapeHtml(title)}</h3>`;
+      } else if (line.startsWith("### ")) {
+        const sub = line.replace(/^###\s+/, "").replace(/\*\*/g, "");
+        html += `<h4>${escapeHtml(sub)}</h4>`;
+      } else if (line.startsWith("# ")) {
+        const h = line.replace(/^#\s+/, "").replace(/\*\*/g, "");
+        html += `<h2 style="font-size:18px; margin:0 0 10px; font-weight:800;">${escapeHtml(h)}</h2>`;
+      } else if (/^[•\-\*]\s+/.test(line)) {
+        let bText = line.replace(/^[•\-\*]\s+/, "");
+        let safe = escapeHtml(bText).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        html += `<div class="report-bullet-item"><span class="report-bullet-dot">•</span><div>${safe}</div></div>`;
+      } else if (/^\d+\.\s+/.test(line)) {
+        let numMatch = line.match(/^\d+\./)[0];
+        let safe = escapeHtml(line).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        html += `<div class="report-bullet-item"><span class="report-bullet-dot" style="font-size:12px; font-weight:bold; min-width:18px;">${numMatch}</span><div>${safe.replace(/^\d+\.\s*/, "")}</div></div>`;
+      } else {
+        let safe = escapeHtml(line).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        html += `<p class="report-paragraph">${safe}</p>`;
+      }
+    });
+
+    div.innerHTML = html;
     container.append(div);
   });
 }
@@ -2434,14 +2466,9 @@ $("#analysis-detail-modal")?.addEventListener("click", e => {
 });
 $("#btn-analysis-modal-pdf")?.addEventListener("click", () => {
   if (!_currentAnalysisForPdf) return;
-  const lines = [
-    `Análise IA Drexier — ${_currentAnalysisForPdf.business_type || "Negócio"}`,
-    `Gerada em: ${_currentAnalysisForPdf.generated_at}`,
-    `Clientes (30d): ${_currentAnalysisForPdf.total_contacts_30d ?? 0} | Conversões: ${_currentAnalysisForPdf.confirmed_orders ?? 0} | Abandono: ${_currentAnalysisForPdf.abandonment_rate ?? 0}%`,
-    "",
-    ...(_currentAnalysisForPdf.report_content || "").split("\n"),
-  ];
-  makeReportPdf(lines, `analise-drexier-${Date.now()}.pdf`);
+  const safeName = (_currentAnalysisForPdf.business_type || "drexier").toLowerCase().replace(/[^a-z0-9]/g, "-");
+  const filename = `relatorio-estrategico-${safeName}-${Date.now()}.pdf`;
+  makeCorporateReportPdf(_currentAnalysisForPdf, filename);
 });
 
 $("#btn-analysis-modal-delete")?.addEventListener("click", async () => {
@@ -2502,55 +2529,269 @@ function setupFullAnalysisButton() {
   });
 }
 
-function makeReportPdf(lines, filename) {
-  const wrapped = [];
-  lines.forEach(line => {
-    const ascii = String(line).normalize("NFD").replace(/\p{M}/gu, "").replace(/[^\x20-\x7E]/g, "");
-    for (let start = 0; start < Math.max(ascii.length, 1); start += 84) {
-      wrapped.push(ascii.slice(start, start + 84));
+function encodePdfWinAnsi(str) {
+  if (!str) return "";
+  const winAnsi = {
+    'á': '\\341', 'à': '\\340', 'ã': '\\343', 'â': '\\342', 'ä': '\\344',
+    'é': '\\351', 'è': '\\350', 'ê': '\\352', 'ë': '\\353',
+    'í': '\\355', 'ì': '\\354', 'î': '\\356', 'ï': '\\357',
+    'ó': '\\363', 'ò': '\\362', 'õ': '\\365', 'ô': '\\364', 'ö': '\\366',
+    'ú': '\\372', 'ù': '\\371', 'û': '\\373', 'ü': '\\374',
+    'ç': '\\347',
+    'Á': '\\301', 'À': '\\300', 'Ã': '\\303', 'Â': '\\302', 'Ä': '\\304',
+    'É': '\\311', 'È': '\\310', 'Ê': '\\312', 'Ë': '\\313',
+    'Í': '\\315', 'Ì': '\\314', 'Î': '\\316', 'Ï': '\\317',
+    'Ó': '\\323', 'Ò': '\\322', 'Õ': '\\325', 'Ô': '\\324', 'Ö': '\\326',
+    'Ú': '\\332', 'Ù': '\\331', 'Û': '\\333', 'Ü': '\\334',
+    'Ç': '\\307',
+    '—': '\\227', '–': '\\226', '•': '\\225', '€': '\\200', 'º': '\\272', 'ª': '\\252'
+  };
+  let res = "";
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === '\\' || ch === '(' || ch === ')') {
+      res += '\\' + ch;
+    } else if (winAnsi[ch]) {
+      res += winAnsi[ch];
+    } else {
+      const code = ch.charCodeAt(0);
+      if (code >= 32 && code <= 126) {
+        res += ch;
+      } else {
+        res += " ";
+      }
     }
-  });
-  const pages = [];
-  for (let i = 0; i < wrapped.length; i += 44) pages.push(wrapped.slice(i, i + 44));
-  if (!pages.length) pages.push(["Sem resultados para apresentar."]);
+  }
+  return res;
+}
 
+function wrapPdfText(text, maxChars) {
+  if (!text) return [];
+  const words = text.split(/\s+/);
+  const lines = [];
+  let current = "";
+  for (const w of words) {
+    if (!current) {
+      current = w;
+    } else if ((current + " " + w).length <= maxChars) {
+      current += " " + w;
+    } else {
+      lines.push(current);
+      current = w;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/* GERADOR DE PDF CORPORATIVO, ORGANIZADO E ESTILIZADO (PADRÃO DREXIER ENTERPRISE) */
+function makeCorporateReportPdf(analysis, filename) {
+  const pages = [];
+  let currentCmds = [];
+
+  function startPage(isFirst) {
+    currentCmds = [];
+    pages.push(currentCmds);
+
+    if (isFirst) {
+      // 1. BANNER CORPORATIVO TOPO (Deep Slate #171923)
+      currentCmds.push("0.09 0.10 0.14 rg", "40 752 515 48 re f");
+      // Badge Pill (Lime #C9F36A)
+      currentCmds.push("0.79 0.95 0.42 rg", "400 766 142 20 re f");
+      currentCmds.push("0.09 0.10 0.14 RG", "1 w", "400 766 142 20 re S");
+      currentCmds.push("BT", "/F2 8 Tf", "0.09 0.10 0.14 rg", "410 772 Td", `(${encodePdfWinAnsi("AUDITORIA COMERCIAL")}) Tj`, "ET");
+      
+      // Marca Drexier Enterprise
+      currentCmds.push("BT", "/F2 13 Tf", "1 1 1 rg", "54 772 Td", `(${encodePdfWinAnsi("DREXIER ENTERPRISE AI")}) Tj`, "ET");
+      currentCmds.push("BT", "/F1 7.5 Tf", "0.78 0.80 0.85 rg", "54 760 Td", `(${encodePdfWinAnsi("INTELIGÊNCIA COMERCIAL E AUDITORIA DE ATENDIMENTO")}) Tj`, "ET");
+
+      // 2. TÍTULO EXECUTIVO & METADADOS
+      currentCmds.push("BT", "/F2 15 Tf", "0.09 0.10 0.14 rg", "40 724 Td", `(${encodePdfWinAnsi("Relatório Executivo de Inteligência Comercial e Desempenho")}) Tj`, "ET");
+      const metaLine = `Negócio: ${analysis.business_name || "Empresa"}  ·  Segmento: ${analysis.business_type || "Serviços e Vendas"}  ·  Emitido em: ${analysis.generated_at || ""}`;
+      currentCmds.push("BT", "/F1 8.5 Tf", "0.40 0.42 0.48 rg", "40 708 Td", `(${encodePdfWinAnsi(metaLine)}) Tj`, "ET");
+
+      // 3. DASHBOARD DE KPIS EXECUTIVOS (3 CARDS LADO A LADO COM BORDA ESCURA)
+      const convPct = analysis.conversion_rate !== undefined ? analysis.conversion_rate : Math.max(0, 100 - (analysis.abandonment_rate || 0));
+      const abandPct = analysis.abandonment_rate !== undefined ? analysis.abandonment_rate : Math.max(0, 100 - convPct);
+      const totalCli = analysis.total_contacts !== undefined ? analysis.total_contacts : (analysis.total_contacts_30d || 0);
+
+      // Card 1: Universo de Clientes
+      currentCmds.push("0.98 0.97 0.95 rg", "40 644 162 52 re f");
+      currentCmds.push("0.09 0.10 0.14 RG", "1.5 w", "40 644 162 52 re S");
+      currentCmds.push("BT", "/F2 7 Tf", "0.45 0.45 0.50 rg", "50 682 Td", `(${encodePdfWinAnsi("CLIENTES ANALISADOS")}) Tj`, "ET");
+      currentCmds.push("BT", "/F2 14 Tf", "0.09 0.10 0.14 rg", "50 663 Td", `(${encodePdfWinAnsi(`${totalCli} clientes`)}) Tj`, "ET");
+      currentCmds.push("BT", "/F1 6.5 Tf", "0.55 0.55 0.60 rg", "50 652 Td", `(${encodePdfWinAnsi("Conversas auditadas na base")}) Tj`, "ET");
+
+      // Card 2: Conversões Confirmadas
+      currentCmds.push("0.98 0.97 0.95 rg", "216 644 162 52 re f");
+      currentCmds.push("0.09 0.10 0.14 RG", "1.5 w", "216 644 162 52 re S");
+      currentCmds.push("BT", "/F2 7 Tf", "0.45 0.45 0.50 rg", "226 682 Td", `(${encodePdfWinAnsi("CONVERSÕES CONFIRMADAS")}) Tj`, "ET");
+      currentCmds.push("BT", "/F2 14 Tf", "0.09 0.50 0.25 rg", "226 663 Td", `(${encodePdfWinAnsi(`${analysis.confirmed_orders || 0} confirmadas`)}) Tj`, "ET");
+      currentCmds.push("BT", "/F1 6.5 Tf", "0.55 0.55 0.60 rg", "226 652 Td", `(${encodePdfWinAnsi("Pedidos e marcações fechadas")}) Tj`, "ET");
+
+      // Card 3: Taxa de Conversão & Abandono
+      currentCmds.push("0.98 0.97 0.95 rg", "393 644 162 52 re f");
+      currentCmds.push("0.09 0.10 0.14 RG", "1.5 w", "393 644 162 52 re S");
+      currentCmds.push("BT", "/F2 7 Tf", "0.45 0.45 0.50 rg", "403 682 Td", `(${encodePdfWinAnsi("TAXA DE CONVERSÃO / ABANDONO")}) Tj`, "ET");
+      currentCmds.push("BT", "/F2 14 Tf", "0.46 0.34 0.91 rg", "403 663 Td", `(${encodePdfWinAnsi(`${convPct}%`)}) Tj`, "ET");
+      currentCmds.push("BT", "/F1 6.5 Tf", "0.55 0.55 0.60 rg", "403 652 Td", `(${encodePdfWinAnsi(`Abandono estimado: ${abandPct}%`)}) Tj`, "ET");
+
+      // Linha divisória fina
+      currentCmds.push("0.85 0.85 0.88 rg", "40 630 515 1 re f");
+    } else {
+      // Topo das páginas seguintes: cabeçalho discreto
+      currentCmds.push("BT", "/F2 8 Tf", "0.45 0.45 0.50 rg", "40 802 Td", `(${encodePdfWinAnsi(`Drexier AI · Relatório Estratégico Corporativo — ${analysis.business_name || "Empresa"}`)}) Tj`, "ET");
+      currentCmds.push("0.85 0.85 0.88 rg", "40 794 515 0.5 re f");
+    }
+  }
+
+  // Inicia primeira página
+  startPage(true);
+  let curY = 612;
+
+  // Processa as seções e linhas de conteúdo
+  const rawLines = (analysis.report_content || "").split("\n");
+  for (let i = 0; i < rawLines.length; i++) {
+    const raw = rawLines[i].trim();
+    if (!raw) {
+      curY -= 6;
+      continue;
+    }
+
+    // Título de Tema Principal (## ...)
+    if (raw.startsWith("## ")) {
+      const themeTitle = raw.replace(/^##\s+/, "").replace(/\*\*/g, "").trim();
+      if (curY < 120) {
+        startPage(false);
+        curY = 770;
+      } else {
+        curY -= 14;
+      }
+
+      // Banner estilizado de seção
+      currentCmds.push("0.46 0.34 0.91 rg", `40 ${curY - 3} 4 22 re f`); // barra roxa
+      currentCmds.push("0.95 0.95 0.97 rg", `44 ${curY - 3} 511 22 re f`); // fundo cinza suave
+      currentCmds.push("0.85 0.85 0.88 RG", "0.5 w", `40 ${curY - 3} 515 22 re S`); // contorno
+      currentCmds.push("BT", "/F2 10.5 Tf", "0.09 0.10 0.14 rg", `52 ${curY + 4} Td`, `(${encodePdfWinAnsi(themeTitle)}) Tj`, "ET");
+      curY -= 30;
+      continue;
+    }
+
+    // Subtítulo (### ...)
+    if (raw.startsWith("### ")) {
+      const subTitle = raw.replace(/^###\s+/, "").replace(/\*\*/g, "").trim();
+      if (curY < 85) {
+        startPage(false);
+        curY = 770;
+      } else {
+        curY -= 6;
+      }
+      currentCmds.push("BT", "/F2 9.5 Tf", "0.25 0.26 0.32 rg", `40 ${curY} Td`, `(${encodePdfWinAnsi(subTitle)}) Tj`, "ET");
+      curY -= 15;
+      continue;
+    }
+
+    // Itens de Lista / Marcadores (•, -, *)
+    if (/^[•\-\*]\s+/.test(raw) || /^\d+\.\s+/.test(raw)) {
+      const isNum = /^\d+\.\s+/.test(raw);
+      const marker = isNum ? raw.match(/^\d+\./)[0] : "•";
+      const clean = raw.replace(/^[•\-\*]\s+/, "").replace(/^\d+\.\s+/, "").replace(/\*\*/g, "").trim();
+      const wrapped = wrapPdfText(clean, 82);
+      for (let j = 0; j < wrapped.length; j++) {
+        if (curY < 60) {
+          startPage(false);
+          curY = 770;
+        }
+        if (j === 0) {
+          currentCmds.push("BT", `/F2 ${isNum ? 8 : 10} Tf`, "0.46 0.34 0.91 rg", `42 ${curY} Td`, `(${encodePdfWinAnsi(marker)}) Tj`, "ET");
+        }
+        currentCmds.push("BT", "/F1 8.8 Tf", "0.15 0.16 0.20 rg", `54 ${curY} Td`, `(${encodePdfWinAnsi(wrapped[j])}) Tj`, "ET");
+        curY -= 13;
+      }
+      curY -= 3;
+      continue;
+    }
+
+    // Parágrafo Normal
+    const cleanPara = raw.replace(/\*\*/g, "").trim();
+    const wrappedPara = wrapPdfText(cleanPara, 90);
+    for (let k = 0; k < wrappedPara.length; k++) {
+      if (curY < 60) {
+        startPage(false);
+        curY = 770;
+      }
+      currentCmds.push("BT", "/F1 8.8 Tf", "0.15 0.16 0.20 rg", `40 ${curY} Td`, `(${encodePdfWinAnsi(wrappedPara[k])}) Tj`, "ET");
+      curY -= 13;
+    }
+    curY -= 4;
+  }
+
+  // Rodapé em TODAS as páginas com paginação total
+  const totalPages = pages.length;
+  pages.forEach((pageCmds, idx) => {
+    pageCmds.push("0.85 0.85 0.88 rg", "40 38 515 0.5 re f");
+    pageCmds.push("BT", "/F1 7.5 Tf", "0.50 0.52 0.56 rg", "40 26 Td", `(${encodePdfWinAnsi("Drexier Enterprise AI · Documento Corporativo Confidencial · 100% Baseado em Dados Reais")}) Tj`, "ET");
+    const pageStr = `Página ${idx + 1} de ${totalPages}`;
+    pageCmds.push("BT", "/F2 7.5 Tf", "0.35 0.36 0.40 rg", "495 26 Td", `(${encodePdfWinAnsi(pageStr)}) Tj`, "ET");
+  });
+
+  // Monta objetos do arquivo PDF
+  const pageObjectIds = pages.map((_, i) => 6 + i * 2);
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    `<< /Type /Pages /Kids [${pages.map((_, i) => `${4 + i * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`,
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Type /Pages /Kids [${pageObjectIds.map(id => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>",
   ];
-  pages.forEach((pageLines, index) => {
-    const pageId = 4 + index * 2;
+
+  pages.forEach((cmds, idx) => {
+    const pageId = 6 + idx * 2;
     const contentId = pageId + 1;
-    const commands = ["BT", "/F1 12 Tf", "50 790 Td", "16 TL"];
-    pageLines.forEach(line => {
-      const escaped = line.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-      commands.push(`(${escaped}) Tj`, "T*");
-    });
-    commands.push("ET");
-    const content = commands.join("\n");
+    const streamContent = cmds.join("\n");
     objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`,
-      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${contentId} 0 R >>`
+    );
+    objects.push(
+      `<< /Length ${streamContent.length} >>\nstream\n${streamContent}\nendstream`
     );
   });
 
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
-  objects.forEach((object, index) => {
+  objects.forEach((obj, idx) => {
     offsets.push(pdf.length);
-    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    pdf += `${idx + 1} 0 obj\n${obj}\nendobj\n`;
   });
   const xrefOffset = pdf.length;
   pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  offsets.slice(1).forEach(offset => { pdf += `${String(offset).padStart(10, "0")} 00000 n \n`; });
+  offsets.slice(1).forEach(offset => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  const blob = new Blob([pdf], { type: "application/pdf" });
+  const fileUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  const fileUrl = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
   link.href = fileUrl;
   link.download = filename;
   link.click();
-  setTimeout(() => URL.revokeObjectURL(fileUrl), 1000);
+  setTimeout(() => URL.revokeObjectURL(fileUrl), 2000);
+}
+
+function makeReportPdf(lines, filename) {
+  // Wrapper para outras exportações simples
+  const analysisObj = {
+    business_name: "Drexier",
+    business_type: "Relatório Comercial",
+    generated_at: new Date().toLocaleDateString("pt-PT"),
+    total_contacts: lines.length,
+    confirmed_orders: 0,
+    conversion_rate: 100,
+    abandonment_rate: 0,
+    report_content: Array.isArray(lines) ? lines.join("\n") : String(lines)
+  };
+  makeCorporateReportPdf(analysisObj, filename);
 }
 
 function renderProductsReport(report) {
