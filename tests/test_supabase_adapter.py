@@ -148,6 +148,86 @@ def test_mutations_report_rows_returned_by_supabase():
     assert cursor.rowcount == 2
 
 
+class DashboardQuery:
+    def __init__(self, data):
+        self.data = data
+        self.filters = []
+        self.orders = []
+        self.selected = None
+
+    def select(self, columns):
+        self.selected = columns
+        return self
+
+    def eq(self, column, value):
+        self.filters.append(("eq", column, value))
+        return self
+
+    def in_(self, column, values):
+        self.filters.append(("in", column, tuple(values)))
+        return self
+
+    def order(self, column, desc=False):
+        self.orders.append((column, desc))
+        return self
+
+    def execute(self):
+        return type("Result", (), {"data": self.data})()
+
+
+class ConversionSupabaseClient:
+    def __init__(self, requests=None, contacts=None):
+        self.requests = requests or []
+        self.contacts = contacts or []
+        self.queries = []
+
+    def table(self, name):
+        data = {
+            "conversion_requests": self.requests,
+            "contacts": self.contacts,
+        }[name]
+        query = DashboardQuery(data)
+        self.queries.append((name, query))
+        return query
+
+
+def test_dashboard_week_board_query_filters_user_and_confirmed_status():
+    client = ConversionSupabaseClient()
+    cursor = SupabaseCursor(client)
+
+    cursor.execute(
+        """SELECT r.id,r.request_type,r.details,r.created_at,r.resolved_at,r.status,r.scheduled_at,
+                  ct.id AS contact_id,ct.name,ct.contact_key
+           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
+           WHERE r.user_id=? AND r.status IN ('confirmed', 'confirmed_manual')
+           ORDER BY r.scheduled_at ASC""",
+        (7,),
+    )
+
+    query = client.queries[0][1]
+    assert ("eq", "user_id", 7) in query.filters
+    assert ("in", "status", ("confirmed", "confirmed_manual")) in query.filters
+    assert not [f for f in query.filters if f[1] == "id"]
+    assert query.orders == [("scheduled_at", False)]
+
+
+def test_single_conversion_query_filters_request_id_and_user():
+    client = ConversionSupabaseClient()
+    cursor = SupabaseCursor(client)
+
+    cursor.execute(
+        """SELECT r.id, r.details, r.status
+           FROM conversion_requests r
+           JOIN contacts ct ON ct.id = r.contact_id
+           WHERE r.id = ? AND r.user_id = ?""",
+        (42, 7),
+    )
+
+    query = client.queries[0][1]
+    assert ("eq", "id", 42) in query.filters
+    assert ("eq", "user_id", 7) in query.filters
+
+
 def test_database_fails_closed_without_supabase_or_explicit_local_mode(monkeypatch):
     from backend import database
 

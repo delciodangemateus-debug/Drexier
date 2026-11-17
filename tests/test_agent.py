@@ -5,6 +5,7 @@ from backend.services.agent import (
     build_system_instruction,
     format_gemini_contents,
     call_gemini_api,
+    call_openai_compatible_api,
     draft_reply,
     ensure_complete_sentence
 )
@@ -30,6 +31,7 @@ def test_format_gemini_contents():
     assert "Como posso ajudar" in contents[1]["parts"][0]["text"]
     assert contents[2]["role"] == "user"
     assert "cafés especiais" in contents[2]["parts"][0]["text"]
+    assert "MENSAGEM ATUAL DO CLIENTE (responda somente a esta mensagem)" in contents[2]["parts"][0]["text"]
     assert "preço do expresso" in contents[2]["parts"][0]["text"]
 
 def test_build_system_instruction():
@@ -74,7 +76,7 @@ def test_call_gemini_api_success():
         assert reply is not None
         assert "Temos café Arábica" in reply
         assert "Gostaria de encomendar" in reply
-        assert mock_post.call_args.kwargs["json"]["generationConfig"]["temperature"] == 0.1
+        assert mock_post.call_args.kwargs["json"]["generationConfig"]["temperature"] == 0
 
 def test_draft_reply_with_gemini_mock():
     fake_response = MagicMock()
@@ -105,6 +107,15 @@ def test_draft_reply_with_gemini_mock():
             ))
             assert "Com certeza!" in reply
             assert "marcar a sua visita" in reply
+            current_turn = mock_post.call_args.kwargs["json"]["contents"][-1]["parts"][0]["text"]
+            assert "MENSAGEM ATUAL DO CLIENTE (responda somente a esta mensagem)" in current_turn
+            assert "Qual o horário na sexta?" in current_turn
+
+def test_draft_reply_fails_closed_for_an_empty_current_message():
+    with patch("backend.services.agent.get_gemini_config", side_effect=AssertionError("API must not be called")):
+        reply = asyncio.run(draft_reply(message="   ", info_rows=[]))
+
+    assert reply == UNKNOWN_REPLY
 
 def test_draft_reply_fallback_when_api_fails():
     with patch("backend.services.agent.get_gemini_config", return_value={
@@ -118,30 +129,30 @@ def test_draft_reply_fallback_when_api_fails():
                 message="Qual o horário na sexta?",
                 info_rows=[{"kind": "horarios", "title": "Horário", "content": "Sexta das 09h às 18h"}]
             ))
-            # Aciona fallback local seguro
-            assert "Horário" in reply or "09h" in reply
+            assert "Horário" in reply
+            assert "09h às 18h" in reply
 
-def test_local_fallback_does_not_choose_between_unrelated_matching_topics():
+def test_local_fallback_does_not_guess_when_customer_asks_about_multiple_topics():
     from backend.services.agent import local_fallback
 
     reply = local_fallback(
         "Qual é o horário e o preço?",
         [
-            {"kind": "horarios", "title": "Horário", "content": "Segunda a sexta, das 09h às 18h"},
-            {"kind": "precos", "title": "Preço", "content": "Consulta por 50€"}
+            {"kind": "horarios", "title": "Horários", "content": "Segunda a sexta, das 09h às 18h"},
+            {"kind": "precos", "title": "Preços", "content": "Consulta por 50€"}
         ]
     )
 
     assert reply == UNKNOWN_REPLY
 
-def test_local_fallback_uses_structured_business_metadata():
+def test_local_fallback_answers_one_explicit_topic_from_registered_metadata():
     from backend.services.agent import local_fallback
 
     reply = local_fallback(
         "Qual o horário na sexta?",
         [{
             "kind": "horarios",
-            "title": "Horário",
+            "title": "Horários de atendimento",
             "content": "",
             "metadata": {"items": [{"name": "Sexta-feira", "price": "09h às 18h"}]}
         }]
@@ -197,6 +208,31 @@ def test_call_gemini_api_handles_multiple_parts():
         assert "Parte um da resposta." in reply
         assert "Parte dois que completa o pensamento com sucesso!" in reply
 
+def test_openai_compatible_api_marks_the_current_customer_message():
+    fake_response = MagicMock()
+    fake_response.raise_for_status = MagicMock()
+    fake_response.json.return_value = {
+        "choices": [{"message": {"content": "O nosso horário é das 9h às 18h."}}]
+    }
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = fake_response
+        reply = asyncio.run(call_openai_compatible_api(
+            system_instruction="Responda à mensagem atual.",
+            history=[{"sender": "customer", "content": "Qual o preço?"}],
+            current_message="Qual é o horário hoje?",
+            api_key="test-key",
+            model="test-model",
+            base_url="https://example.com/v1",
+        ))
+
+    assert reply == "O nosso horário é das 9h às 18h."
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["messages"][-1]["role"] == "user"
+    assert "MENSAGEM ATUAL DO CLIENTE (responda somente a esta mensagem)" in payload["messages"][-1]["content"]
+    assert "Qual é o horário hoje?" in payload["messages"][-1]["content"]
+    assert payload["temperature"] == 0
+
 def test_compose_context_with_isolated_training_topics():
     from backend.services.agent import compose_context
     info_rows = [
@@ -221,3 +257,28 @@ def test_compose_context_with_isolated_training_topics():
     assert "TÓPICO ISOLADO DE TREINAMENTO: REGULAMENTO DE DEVOLUÇÕES 2026" in context
     assert "Artigo 1: As devoluções são aceites" in context
     assert "NUNCA misture, confunda ou aplique as cláusulas de um tópico a outro diferente" in context
+
+def test_local_fallback_handles_order_confirmation():
+    from backend.services.agent import local_fallback, UNKNOWN_REPLY
+
+    reply = local_fallback("Quero confirmar o pedido", [], business_name="Padaria Central")
+    assert reply != UNKNOWN_REPLY
+    assert "pedido foi registado com sucesso" in reply or "confirm" in reply.lower()
+
+    reply_en = local_fallback("I want to confirm my order", [], business_name="Bakery Central")
+    assert reply_en != UNKNOWN_REPLY
+    assert "order has been registered" in reply_en or "confirm" in reply_en.lower()
+
+def test_format_gemini_contents_deduplicates_current_message():
+    history = [
+        {"sender": "customer", "content": "Olá, boa tarde!"},
+        {"sender": "agent", "content": "Boa tarde! Como posso ajudar?"},
+        {"sender": "customer", "content": "Quero confirmar o pedido."}
+    ]
+    current = "Quero confirmar o pedido."
+    contents = format_gemini_contents(history, current)
+    # Garante que não repete a mensagem no histórico e no current_turn
+    assert len(contents) == 3
+    assert contents[-1]["role"] == "user"
+    assert "Quero confirmar o pedido." in contents[-1]["parts"][0]["text"]
+

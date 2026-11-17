@@ -1620,6 +1620,29 @@ $("#btn-open-pending-modal")?.addEventListener("click", () => openPendingConfirm
 /* ============================================================
    MODAL DE MARCAÇÕES ADQUIRIDAS E HISTÓRICO TRATADO
    ============================================================ */
+function formatBookingDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    const datePart = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Lisbon",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(date);
+    const timePart = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Europe/Lisbon",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(date);
+    return `${datePart} ${timePart}`;
+  } catch (err) {
+    return "";
+  }
+}
+
 function openBookingsModal(confirmedList) {
   const modal = $("#bookings-expand-modal");
   const modalBody = $("#bookings-modal-body");
@@ -1649,9 +1672,18 @@ function openBookingsModal(confirmedList) {
     summary.setAttribute("aria-controls", `booking-request-${Number(r.id)}`);
     summary.setAttribute("aria-expanded", "false");
 
+    const clientLine = document.createElement("span");
+    clientLine.className = "booking-client-line";
+
     const clientName = document.createElement("span");
     clientName.className = "booking-client-name";
     clientName.textContent = r.name || r.contact_key || "Cliente";
+
+    const scheduledAt = document.createElement("span");
+    scheduledAt.className = "booking-scheduled-at";
+    scheduledAt.textContent = formatBookingDateTime(r.scheduled_at);
+
+    clientLine.append(clientName, scheduledAt);
 
     const requestDetails = document.createElement("div");
     requestDetails.className = "booking-request-details";
@@ -1681,25 +1713,25 @@ function openBookingsModal(confirmedList) {
     validatedBadge.className = "booking-status-badge";
     validatedBadge.textContent = "Validada";
 
-    summary.append(clientName, validatedBadge);
+    summary.append(clientLine, validatedBadge);
     info.append(summary, requestDetails);
 
     const reminderBtn = document.createElement("button");
     reminderBtn.type = "button";
     reminderBtn.className = "btn outline small booking-reminder-btn";
     reminderBtn.dataset.requestId = String(Number(r.id));
-    reminderBtn.textContent = "Lembrar com IA";
+    reminderBtn.textContent = "Enviar lembrete";
     reminderBtn.addEventListener("click", async () => {
       reminderBtn.disabled = true;
       reminderBtn.textContent = "A enviar…";
       try {
         await api(`/api/conversions/${Number(r.id)}/remind`, { method: "POST" });
-        showNotice("Lembrete contextual enviado ao cliente com sucesso.");
+        showNotice("Lembrete enviado ao cliente com sucesso.");
         reminderBtn.textContent = "Lembrete enviado";
       } catch (err) {
         showNotice(err.message, true);
         reminderBtn.disabled = false;
-        reminderBtn.textContent = "Lembrar com IA";
+        reminderBtn.textContent = "Enviar lembrete";
       }
     });
 
@@ -1945,26 +1977,26 @@ function renderPendingModalList(requests) {
     const actions = document.createElement("div");
     actions.className = "pending-action-buttons";
 
-    // Opção 1: Validar Automaticamente com IA
+    // Confirmação transacional determinística do pedido
     const btnConfirmAI = document.createElement("button");
     btnConfirmAI.className = "btn-confirm-action";
-    btnConfirmAI.innerHTML = "Validar Automaticamente (IA)";
-    btnConfirmAI.title = "A IA gera e envia uma resposta formal validando o pedido imediatamente";
+    btnConfirmAI.textContent = "Confirmar pedido";
+    btnConfirmAI.title = "Envia uma confirmação baseada nos detalhes deste pedido";
     btnConfirmAI.onclick = async () => {
       btnConfirmAI.disabled = true;
-      btnConfirmAI.textContent = "A validar com IA...";
+      btnConfirmAI.textContent = "A confirmar pedido...";
       try {
         const res = await api(`/api/conversions/${r.id}/action`, {
           method: "POST",
           body: JSON.stringify({ action: "confirm", custom_note: "" })
         });
-        showNotice(res.detail || "Marcação validada e confirmada via IA com sucesso!");
+        showNotice(res.detail || "Pedido confirmado e cliente avisado.");
         await openPendingConfirmationsModal();
         await loadDashboard();
       } catch (err) {
         showNotice(err.message, true);
         btnConfirmAI.disabled = false;
-        btnConfirmAI.innerHTML = "Validar Automaticamente (IA)";
+        btnConfirmAI.textContent = "Confirmar pedido";
       }
     };
 

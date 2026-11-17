@@ -25,6 +25,7 @@ from backend.services.analytics import (
     generate_full_analysis_report,
 )
 from backend.services.email_service import (
+    BUSINESS_TIMEZONE,
     sync_emails_for_user,
     process_confirmation_action,
     send_ai_booking_reminder,
@@ -535,8 +536,11 @@ def dashboard(user=Depends(current_user)):
           WHERE r.user_id=? AND r.status IN ('confirmed', 'confirmed_manual')
           ORDER BY r.scheduled_at ASC""",(uid,)).fetchall()
 
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_end = today_start + timedelta(days=7)
+    local_today = now.astimezone(BUSINESS_TIMEZONE).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    today_start = local_today.astimezone(timezone.utc)
+    week_end = (local_today + timedelta(days=7)).astimezone(timezone.utc)
     bookings_rows = []
     for row in booking_rows:
         item = dict(row)

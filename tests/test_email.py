@@ -8,6 +8,8 @@ from backend.database import connect, init_db
 from backend.auth import create_token
 from backend.services.billing_service import _save_stored_subscription
 from backend.services.email_service import (
+    BUSINESS_TIMEZONE,
+    _parse_utc_datetime,
     capture_scheduled_request,
     clean_email_body,
     extract_scheduled_at,
@@ -215,7 +217,8 @@ async def test_semi_automation_replies_while_request_awaits_owner_confirmation(a
         )
 
     assert reply == "Qual data e hora prefere para a marcação?"
-    assert "Pergunte de forma cordial qual é a data e a hora pretendidas" in mock_draft.await_args.kwargs["message"]
+    assert mock_draft.await_args.kwargs["message"] == "Gostaria de marcar uma consulta amanhã."
+    assert "Há um pedido anterior do cliente aguardando data e hora" in mock_draft.await_args.kwargs["instructions"]
     mock_send.assert_awaited_once()
     with connect() as c:
         request = c.execute(
@@ -236,7 +239,7 @@ async def test_email_followup_records_requested_date_and_time(auth_client):
             "Qual data e hora prefere?",
             "Registei a sua preferência e vou encaminhar para confirmação.",
         ],
-    ), patch(
+    ) as mock_draft, patch(
         "backend.services.email_service.send_email",
         new_callable=AsyncMock,
         return_value={"status": "sent"},
@@ -267,6 +270,11 @@ async def test_email_followup_records_requested_date_and_time(auth_client):
             **params,
             incoming_content="Às 14h.",
         )
+
+    assert [call.kwargs["message"] for call in mock_draft.await_args_list] == [
+        "Gostaria de marcar uma consulta para 22/12/2099.",
+        "Às 14h.",
+    ]
 
     with connect() as c:
         request = c.execute(
@@ -311,16 +319,18 @@ async def test_ai_reminder_uses_context_and_sends_email(auth_client):
 
     assert result["ok"] is True
     assert result["channel"] == "email"
-    assert "Consulta de fisioterapia" in mock_draft.await_args.kwargs["message"]
-    assert "amanhã" in mock_draft.await_args.kwargs["message"]
+    mock_draft.assert_not_awaited()
     mock_send.assert_awaited_once()
+    sent_body = mock_send.await_args.kwargs["body_text"]
+    assert "Consulta de fisioterapia" in sent_body
+    assert "marcado para" in sent_body
     with connect() as c:
         message = c.execute(
             "SELECT sender, content FROM messages WHERE contact_id = ?",
             (contact_id,),
         ).fetchone()
     assert message["sender"] == "agent"
-    assert message["content"] == "Olá Ana, lembramos da sua consulta amanhã às 14h."
+    assert message["content"] == sent_body
 
 
 @pytest.mark.anyio
@@ -362,8 +372,28 @@ async def test_ai_reminder_rejects_unvalidated_request(auth_client):
 
 
 @pytest.mark.anyio
-async def test_full_automation_retries_failed_confirmation_email(auth_client):
+async def test_full_automation_asks_client_before_confirming_booking(auth_client):
     _, _, user_id = auth_client
+    message = {
+        "user_dict": {
+            "id": user_id,
+            "name": "Carlos Atendimento",
+            "business_type": "Serviços",
+            "mandatory_responses": '{"automation_level":"full"}',
+        },
+        "integration": {
+            "provider": "google",
+            "email_address": "empresa@gmail.com",
+            "auto_reply_enabled": 1,
+        },
+        "customer_email": "cliente@example.com",
+        "customer_name": "Cliente",
+        "subject": "Marcação",
+        "incoming_content": "Gostaria de marcar uma consulta amanhã às 14h.",
+        "thread_id": "gmail-thread",
+        "message_id_header": "<customer-message@example.com>",
+    }
+
     with patch(
         "backend.services.email_service.check_business_availability",
         return_value={"available": True},
@@ -371,48 +401,251 @@ async def test_full_automation_retries_failed_confirmation_email(auth_client):
         "backend.services.email_service.draft_reply",
         new_callable=AsyncMock,
         return_value="A sua marcação foi confirmada.",
-    ), patch(
+    ) as mock_draft, patch(
         "backend.services.email_service.send_email",
         new_callable=AsyncMock,
-        side_effect=[RuntimeError("provider unavailable"), {"status": "sent"}],
+        side_effect=[RuntimeError("provider unavailable"), {"status": "sent"}, {"status": "sent"}],
     ) as mock_send:
-        message = {
-            "user_dict": {
-                "id": user_id,
-                "name": "Carlos Atendimento",
-                "business_type": "Serviços",
-                "mandatory_responses": '{"automation_level":"full"}',
-            },
-            "integration": {
-                "provider": "google",
-                "email_address": "empresa@gmail.com",
-                "auto_reply_enabled": 1,
-            },
-            "customer_email": "cliente@example.com",
-            "customer_name": "Cliente",
-            "subject": "Marcação",
-            "incoming_content": "Gostaria de marcar uma consulta amanhã às 14h.",
-            "thread_id": "gmail-thread",
-            "message_id_header": "<customer-message@example.com>",
-        }
-
         with pytest.raises(RuntimeError, match="provider unavailable"):
             await process_and_reply_email(**message)
-        reply = await process_and_reply_email(**message)
 
-    assert "confirmada automaticamente" in reply
-    assert mock_send.await_count == 2
+        reply = await process_and_reply_email(**message)
+        assert "Confirmação da marcação solicitada" in reply
+        with connect() as c:
+            status = c.execute(
+                "SELECT status FROM conversion_requests WHERE user_id = ?", (user_id,)
+            ).fetchone()["status"]
+        assert status == "awaiting_client_confirmation"
+
+        reply = await process_and_reply_email(
+            **{**message, "incoming_content": "Sim, confirmo a marcação."}
+        )
+
+    assert "confirmada pelo cliente" in reply
+    mock_draft.assert_not_awaited()
+    assert mock_send.await_count == 3
+    bodies = [call.kwargs["body_text"] for call in mock_send.await_args_list]
+    assert "Deseja prosseguir e confirmar a marcação?" in bodies[1]
+    assert "O seu pedido foi confirmado." in bodies[2]
     with connect() as c:
         conversions = c.execute(
-            "SELECT status FROM conversion_requests WHERE user_id = ?",
+            "SELECT status, scheduled_at FROM conversion_requests WHERE user_id = ?",
             (user_id,),
         ).fetchall()
         agent_messages = c.execute(
             "SELECT content FROM messages WHERE user_id = ? AND sender = 'agent'",
             (user_id,),
         ).fetchall()
-    assert [row["status"] for row in conversions] == ["confirmed"]
-    assert [row["content"] for row in agent_messages] == ["A sua marcação foi confirmada."]
+    assert len(conversions) == 1
+    assert conversions[0]["status"] == "confirmed"
+    assert conversions[0]["scheduled_at"] is not None
+    assert len(agent_messages) == 2
+    assert "Gostaria de marcar uma consulta amanhã às 14h." in agent_messages[1]["content"]
+
+
+@pytest.mark.anyio
+async def test_semi_automation_does_not_ask_client_confirmation(auth_client):
+    _, _, user_id = auth_client
+    message = {
+        "user_dict": {
+            "id": user_id,
+            "name": "Carlos Atendimento",
+            "business_type": "Serviços",
+            "mandatory_responses": '{"automation_level":"semi"}',
+        },
+        "integration": {
+            "provider": "google",
+            "email_address": "empresa@gmail.com",
+            "auto_reply_enabled": 1,
+        },
+        "customer_email": "cliente@example.com",
+        "customer_name": "Cliente",
+        "subject": "Marcação",
+        "incoming_content": "Gostaria de marcar uma consulta amanhã às 14h.",
+        "thread_id": "gmail-thread",
+        "message_id_header": "<customer-message@example.com>",
+    }
+
+    with patch(
+        "backend.services.email_service.check_business_availability",
+        return_value={"available": True},
+    ), patch(
+        "backend.services.email_service.draft_reply",
+        new_callable=AsyncMock,
+        return_value="Recebemos o seu pedido e aguardamos validação.",
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        await process_and_reply_email(**message)
+
+    body = mock_send.await_args.kwargs["body_text"]
+    assert "Deseja prosseguir e confirmar a marcação?" not in body
+    with connect() as c:
+        status = c.execute(
+            "SELECT status FROM conversion_requests WHERE user_id = ?", (user_id,)
+        ).fetchone()["status"]
+    assert status == "pending"
+
+
+@pytest.mark.anyio
+async def test_full_automation_confirmation_adds_booking_to_week_board(auth_client):
+    from backend.main import _dashboard_cache
+
+    client, token, user_id = auth_client
+    params = {
+        "user_dict": {
+            "id": user_id,
+            "name": "Carlos Atendimento",
+            "business_type": "Serviços",
+            "mandatory_responses": '{"automation_level":"full"}',
+        },
+        "integration": {
+            "provider": "google",
+            "email_address": "empresa@gmail.com",
+            "auto_reply_enabled": 1,
+        },
+        "customer_email": "cliente@example.com",
+        "customer_name": "Cliente",
+        "subject": "Marcação",
+        "thread_id": "gmail-thread",
+        "message_id_header": "<customer-message@example.com>",
+    }
+
+    with patch(
+        "backend.services.email_service.check_business_availability",
+        return_value={"available": True},
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ):
+        await process_and_reply_email(
+            **{**params, "incoming_content": "Quero marcar para sexta-feira às 13 horas."}
+        )
+        await process_and_reply_email(
+            **{**params, "incoming_content": "Combinado, pode confirmar."}
+        )
+
+    _dashboard_cache.clear()
+    response = client.get("/api/dashboard", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    bookings = [
+        booking for booking in response.json()["confirmed_bookings"]
+        if booking["contact_key"] == "cliente@example.com"
+    ]
+    assert len(bookings) == 1
+    assert bookings[0]["status"] == "confirmed"
+    assert bookings[0]["scheduled_at"] is not None
+
+
+def _full_automation_params(user_id):
+    return {
+        "user_dict": {
+            "id": user_id,
+            "name": "Carlos Atendimento",
+            "business_type": "Serviços",
+            "mandatory_responses": '{"automation_level":"full"}',
+        },
+        "integration": {
+            "provider": "google",
+            "email_address": "empresa@gmail.com",
+            "auto_reply_enabled": 1,
+        },
+        "customer_email": "cliente@example.com",
+        "customer_name": "Cliente",
+        "subject": "Marcação",
+        "thread_id": "gmail-thread",
+        "message_id_header": "<customer-message@example.com>",
+    }
+
+
+@pytest.mark.anyio
+async def test_confirmation_is_consumed_after_automation_level_changes(auth_client):
+    _, _, user_id = auth_client
+    params = _full_automation_params(user_id)
+
+    with patch(
+        "backend.services.email_service.check_business_availability",
+        return_value={"available": True},
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ):
+        await process_and_reply_email(
+            **{**params, "incoming_content": "Quero marcar para quinta feira às 15h."}
+        )
+        params["user_dict"]["mandatory_responses"] = '{"automation_level":"semi"}'
+        reply = await process_and_reply_email(
+            **{**params, "incoming_content": "Pode ser."}
+        )
+
+    assert "confirmada pelo cliente" in reply
+    with connect() as c:
+        status = c.execute(
+            "SELECT status FROM conversion_requests WHERE user_id = ?", (user_id,)
+        ).fetchone()["status"]
+    assert status == "confirmed"
+
+
+@pytest.mark.anyio
+async def test_confirmation_reply_updates_schedule_before_confirming(auth_client):
+    _, _, user_id = auth_client
+    params = _full_automation_params(user_id)
+
+    with patch(
+        "backend.services.email_service.check_business_availability",
+        return_value={"available": True},
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        await process_and_reply_email(
+            **{**params, "incoming_content": "Quero marcar para quinta feira às 15h."}
+        )
+        await process_and_reply_email(
+            **{**params, "incoming_content": "Sim, mas quinta feira às 16h."}
+        )
+
+    with connect() as c:
+        scheduled_at = c.execute(
+            "SELECT scheduled_at FROM conversion_requests WHERE user_id = ?", (user_id,)
+        ).fetchone()["scheduled_at"]
+    confirmed_body = mock_send.await_args.kwargs["body_text"]
+    assert "16:00" in confirmed_body
+    assert _parse_utc_datetime(scheduled_at).astimezone(BUSINESS_TIMEZONE).hour == 16
+
+
+@pytest.mark.anyio
+async def test_time_only_reply_does_not_repeat_confirmation_question(auth_client):
+    _, _, user_id = auth_client
+    params = _full_automation_params(user_id)
+
+    with patch(
+        "backend.services.email_service.check_business_availability",
+        return_value={"available": True},
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        await process_and_reply_email(
+            **{**params, "incoming_content": "Quero marcar para quinta feira às 15h."}
+        )
+        await process_and_reply_email(**{**params, "incoming_content": "Às 16h."})
+        reply = await process_and_reply_email(**{**params, "incoming_content": "Sim"})
+
+    assert "confirmada pelo cliente" in reply
+    bodies = [call.kwargs["body_text"] for call in mock_send.await_args_list]
+    assert "16:00" in bodies[-1]
+    with connect() as c:
+        status = c.execute(
+            "SELECT status FROM conversion_requests WHERE user_id = ?", (user_id,)
+        ).fetchone()["status"]
+    assert status == "confirmed"
 
 
 @pytest.mark.anyio
@@ -438,7 +671,7 @@ async def test_confirmation_email_failure_keeps_request_pending(auth_client):
         "backend.services.email_service.draft_reply",
         new_callable=AsyncMock,
         return_value="O seu pedido foi confirmado.",
-    ), patch(
+    ) as mock_draft, patch(
         "backend.services.email_service.send_email",
         new_callable=AsyncMock,
         side_effect=RuntimeError("provider unavailable"),
@@ -457,6 +690,7 @@ async def test_confirmation_email_failure_keeps_request_pending(auth_client):
         ).fetchall()
     assert request["status"] == "pending"
     assert messages == []
+    mock_draft.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -501,7 +735,7 @@ async def test_confirmation_email_replies_in_thread_before_marking_confirmed(aut
         "backend.services.email_service.draft_reply",
         new_callable=AsyncMock,
         return_value="O seu pedido foi confirmado.",
-    ), patch(
+    ) as mock_draft, patch(
         "backend.services.email_service.send_email",
         new_callable=AsyncMock,
         side_effect=send_email_while_pending,
@@ -509,11 +743,18 @@ async def test_confirmation_email_replies_in_thread_before_marking_confirmed(aut
         result = await process_confirmation_action(user_id, request_id, "confirm")
 
     assert result["ok"] is True
+    mock_draft.assert_not_awaited()
+    expected_reply = (
+        "Olá, Cliente.\n\n"
+        "O seu pedido foi confirmado.\n\n"
+        "Detalhes do pedido: Produto X para amanhã às 14h\n\n"
+        "Com os melhores cumprimentos,\nCarlos Atendimento"
+    )
     mock_send.assert_awaited_once_with(
         integration=mock_send.await_args.kwargs["integration"],
         to_email="cliente@example.com",
         subject="Re: Pedido do cliente",
-        body_text="O seu pedido foi confirmado.",
+        body_text=expected_reply,
         thread_id="gmail-thread",
         in_reply_to="<customer-message@example.com>",
         references="<customer-message@example.com>",
@@ -529,7 +770,7 @@ async def test_confirmation_email_replies_in_thread_before_marking_confirmed(aut
         ).fetchone()
     assert request["status"] == "confirmed"
     assert message["sender"] == "agent"
-    assert message["content"] == "O seu pedido foi confirmado."
+    assert message["content"] == expected_reply
 
 
 @pytest.mark.anyio
@@ -555,7 +796,7 @@ async def test_confirmed_request_cannot_send_a_second_confirmation(auth_client):
         "backend.services.email_service.draft_reply",
         new_callable=AsyncMock,
         return_value="A sua marcação está confirmada.",
-    ), patch(
+    ) as mock_draft, patch(
         "backend.services.email_service.send_email",
         new_callable=AsyncMock,
         return_value={"status": "sent"},
@@ -565,13 +806,16 @@ async def test_confirmed_request_cannot_send_a_second_confirmation(auth_client):
 
     assert first_result["status"] == "confirmed"
     assert repeated_result["already_confirmed"] is True
+    mock_draft.assert_not_awaited()
     mock_send.assert_awaited_once()
     with connect() as c:
         messages = c.execute(
             "SELECT content FROM messages WHERE contact_id = ?",
             (contact_id,),
         ).fetchall()
-    assert [message["content"] for message in messages] == ["A sua marcação está confirmada."]
+    assert len(messages) == 1
+    assert messages[0]["content"].startswith("Olá, Cliente.\n\nO seu pedido foi confirmado.")
+    assert "Consulta amanhã às 14h" in messages[0]["content"]
 
 
 def test_email_response_cutoff_starts_after_payment_and_connection():
@@ -967,5 +1211,150 @@ async def test_email_from_user_account_email_is_processed(auth_client):
         assert reply == "Olá! Sim, temos viaturas disponíveis nessa faixa."
         assert mock_send.await_count == 1
         assert mock_draft.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_purchase_intent_does_not_require_schedule(auth_client):
+    from backend.services.email_service import capture_scheduled_request, detect_booking_or_purchase_intent
+    _, _, user_id = auth_client
+    with connect() as c:
+        contact_id = c.execute(
+            "INSERT INTO contacts(user_id, name, contact_key) VALUES (?, 'Comprador', 'comprador@example.com')",
+            (user_id,)
+        ).lastrowid
+        intent = detect_booking_or_purchase_intent("Quero comprar 2 unidades do produto.", "Compra")
+        assert intent is not None
+        assert intent["type"] == "purchase"
+
+        req = capture_scheduled_request(c, user_id, contact_id, "Quero comprar 2 unidades do produto.", "Compra", intent)
+        assert req is not None
+        assert req["status"] == "pending"
+        assert req["request_type"] == "purchase"
+
+
+def test_ensure_date_time_question_preserves_helpful_reply():
+    from backend.services.email_service import ensure_date_time_question
+
+    # Se já tem data e hora, não altera
+    has_both = "O nosso agendamento está disponível para a data de amanhã à hora das 15h."
+    assert ensure_date_time_question(has_both) == has_both
+
+    # Se não tem, preserva o conteúdo respondido pela IA e anexa a pergunta
+    ai_answer = "Sim, temos disponibilidade para consultas de fisioterapia."
+    result = ensure_date_time_question(ai_answer)
+    assert "Sim, temos disponibilidade para consultas de fisioterapia." in result
+    assert "qual é a data e a hora que prefere" in result
+
+
+def test_extract_scheduled_at_ignores_the_email_sent_time():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime(2026, 11, 17, 15, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+    expected = "2026-11-19T15:00:00+00:00"
+
+    messages = [
+        "Quero a marcação para quinta feira as 15 horas",
+        "Enviei o email hoje às 10h. Quero a marcação para quinta feira às 15 horas.",
+        "Quero a marcação para quinta feira às 15 horas. Enviei o email hoje às 10h.",
+        "Data: 17/11/2026 às 10h\nQuero a marcação para quinta feira às 15 horas",
+    ]
+    for message in messages:
+        assert extract_scheduled_at(message, now) == expected
+
+    assert extract_scheduled_at("Quero a marcação para 19/11/2026 às 15h", now) == expected
+    assert extract_scheduled_at("Enviei o email hoje às 10h.", now) is None
+
+
+def test_extract_scheduled_at_ignores_metadata_when_booking_cue_and_time_are_apart():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime(2026, 11, 17, 15, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+    expected = "2026-11-19T15:00:00+00:00"
+
+    assert extract_scheduled_at(
+        "Quero marcar. Enviei este email às 10h. Quinta feira às 15h.", now
+    ) == expected
+    assert extract_scheduled_at(
+        "Gostaria de agendar. Enviei o email hoje às 9h, quinta-feira às 15h.", now
+    ) == expected
+
+
+def test_extract_scheduled_at_accepts_a_bare_day_number():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime(2026, 11, 17, 15, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+
+    assert extract_scheduled_at("Quero marcar para o dia 19 às 14h30.", now) == (
+        "2026-11-19T14:30:00+00:00"
+    )
+    assert extract_scheduled_at("Quero marcar para 19 às 14h.", now) == (
+        "2026-11-19T14:00:00+00:00"
+    )
+    assert extract_scheduled_at("Quero marcar para o dia 3 às 10h.", now) == (
+        "2026-12-03T10:00:00+00:00"
+    )
+
+
+def test_booking_reply_uses_the_registered_schedule_only():
+    from backend.services.email_service import _build_request_status_reply
+
+    details = (
+        "Assunto: Marcação\n"
+        "Em 17/11/2026 às 10h, Cliente escreveu:\n"
+        "> mensagem antiga\n"
+        "Quero a marcação para quinta feira às 15 horas"
+    )
+    reply = _build_request_status_reply(
+        customer_name="Cliente",
+        business_name="Studio",
+        details=details,
+        confirmed=True,
+        scheduled_at="2026-11-19T15:00:00+00:00",
+    )
+
+    assert "19/11/2026 às 15:00" in reply
+    assert "17/11/2026 às 10h" not in reply
+
+
+@pytest.mark.anyio
+async def test_reminder_uses_registered_schedule_and_not_email_metadata(auth_client):
+    _, _, user_id = auth_client
+    scheduled_at = extract_scheduled_at("19/11/2099 às 15h")
+    details = (
+        "Em 17/11/2026 às 10h, Cliente escreveu:\n"
+        "> mensagem antiga\n"
+        "Quero a marcação para quinta feira às 15 horas"
+    )
+    with connect() as c:
+        contact_id = c.execute(
+            "INSERT INTO contacts(user_id, name, contact_key) VALUES (?, 'Cliente', 'cliente@example.com')",
+            (user_id,),
+        ).lastrowid
+        request_id = c.execute(
+            """INSERT INTO conversion_requests
+               (user_id, contact_id, request_type, details, status, scheduled_at)
+               VALUES (?, ?, 'booking', ?, 'confirmed', ?)""",
+            (user_id, contact_id, details, scheduled_at),
+        ).lastrowid
+        c.execute(
+            "INSERT INTO email_integrations(user_id, provider, email_address, status) VALUES (?, 'google', 'empresa@gmail.com', 'connected')",
+            (user_id,),
+        )
+
+    with patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        result = await send_ai_booking_reminder(user_id, request_id)
+
+    assert result["ok"] is True
+    body = mock_send.await_args.kwargs["body_text"]
+    assert "Data e hora da marcação: 19/11/2099 às 15:00" in body
+    assert "17/11/2026 às 10h" not in body
+
 
 

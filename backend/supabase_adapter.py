@@ -157,22 +157,27 @@ class SupabaseCursor:
                 "id, request_type, details, created_at, resolved_at, scheduled_at, status, user_id, contact_id"
             )
             where_part = clean_sql.split("WHERE", 1)[1] if "WHERE" in clean_sql else ""
-            if "r.id" in where_part or "id = ?" in where_part.replace(" ", ""):
-                req_id = p[0]
-                query = query.eq("id", req_id)
+            where_part = where_part.split("ORDER BY", 1)[0].strip()
+            if re.search(r"\br\.id\s*=\s*\?", where_part, re.IGNORECASE):
+                query = query.eq("id", p[0])
                 if len(p) > 1:
                     query = query.eq("user_id", p[1])
-            elif "status='pending'" in where_part.replace(" ", ""):
-                uid = p[0]
-                query = query.eq("user_id", uid).eq("status", "pending")
-            elif re.search(r"r\.status\s+IN\s*\(", where_part, re.IGNORECASE):
-                uid = p[0]
-                statuses_match = re.search(r"r\.status\s+IN\s*\(([^)]*)\)", where_part, re.IGNORECASE)
-                statuses = re.findall(r"'([^']+)'", statuses_match.group(1)) if statuses_match else []
-                query = query.eq("user_id", uid).in_("status", statuses)
             else:
-                uid = p[0]
-                query = query.eq("user_id", uid)
+                if p:
+                    query = query.eq("user_id", p[0])
+                statuses_match = re.search(
+                    r"\br\.status\s+IN\s*\(([^)]*)\)", where_part, re.IGNORECASE
+                )
+                if statuses_match:
+                    statuses = re.findall(r"'([^']+)'", statuses_match.group(1))
+                    if statuses:
+                        query = query.in_("status", statuses)
+                else:
+                    status_match = re.search(
+                        r"\br\.status\s*=\s*'([^']+)'", where_part, re.IGNORECASE
+                    )
+                    if status_match:
+                        query = query.eq("status", status_match.group(1))
 
             order_match = re.search(r"ORDER BY\s+(?:r\.)?(\w+)(?:\s+(ASC|DESC))?", clean_sql, re.IGNORECASE)
             order_column = order_match.group(1) if order_match else "created_at"
