@@ -86,6 +86,53 @@ def test_dashboard_uses_consecutive_24_hour_windows_and_week_schedule():
     assert all("with_whom" not in row for row in dashboard["confirmed_bookings"])
 
 
+def test_delete_pending_conversion_only_deletes_owners_unconfirmed_requests():
+    import time
+
+    email = f"delete_pending_{int(time.time() * 1000)}@example.com"
+    password = "SecurePassword123"
+    signup_and_verify(client, {
+        "name": "Pedidos Pendentes",
+        "email": email,
+        "password": password,
+        "confirm_password": password,
+        "business_type": "Serviços",
+    })
+    auth = login_and_verify(client, email, password)
+    user_id = auth.json()["user_id"]
+    headers = {"Authorization": f"Bearer {auth.json()['token']}"}
+
+    with connect() as c:
+        contact_id = c.execute(
+            "INSERT INTO contacts(user_id, name, contact_key) VALUES(?, 'Cliente', 'pending-delete@example.com')",
+            (user_id,),
+        ).lastrowid
+        pending_id = c.execute(
+            "INSERT INTO conversion_requests(user_id, contact_id, request_type, details) VALUES(?, ?, 'booking', 'Pedido pendente')",
+            (user_id, contact_id),
+        ).lastrowid
+        validating_id = c.execute(
+            "INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status) VALUES(?, ?, 'booking', 'Pedido em validação', 'validating')",
+            (user_id, contact_id),
+        ).lastrowid
+        confirmed_id = c.execute(
+            "INSERT INTO conversion_requests(user_id, contact_id, request_type, details, status) VALUES(?, ?, 'booking', 'Pedido confirmado', 'confirmed')",
+            (user_id, contact_id),
+        ).lastrowid
+
+    deleted = client.delete(f"/api/conversions/{pending_id}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.json()["ok"] is True
+    validating_deleted = client.delete(f"/api/conversions/{validating_id}", headers=headers)
+    assert validating_deleted.status_code == 200
+    assert client.delete(f"/api/conversions/{pending_id}", headers=headers).status_code == 404
+    assert client.delete(f"/api/conversions/{confirmed_id}", headers=headers).status_code == 404
+
+    with connect() as c:
+        remaining = c.execute("SELECT id FROM conversion_requests WHERE user_id=?", (user_id,)).fetchall()
+    assert [row["id"] for row in remaining] == [confirmed_id]
+
+
 def test_dashboard_keeps_each_booking_and_exposes_only_its_request_message():
     from datetime import datetime, timedelta, timezone
     import time

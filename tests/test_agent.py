@@ -45,6 +45,8 @@ def test_build_system_instruction():
     assert "Cafetaria" in instruction
     assert "Café Arábica: 15€" in instruction
     assert "DIRIGIR a conversa" in instruction
+    assert "A ÚLTIMA mensagem do cliente é sempre a pergunta a responder" in instruction
+    assert "Não acrescente produtos, ofertas" in instruction
     assert "Seja amigável e convide para provar na loja." in instruction
 
 def test_call_gemini_api_success():
@@ -72,6 +74,7 @@ def test_call_gemini_api_success():
         assert reply is not None
         assert "Temos café Arábica" in reply
         assert "Gostaria de encomendar" in reply
+        assert mock_post.call_args.kwargs["json"]["generationConfig"]["temperature"] == 0.1
 
 def test_draft_reply_with_gemini_mock():
     fake_response = MagicMock()
@@ -117,6 +120,35 @@ def test_draft_reply_fallback_when_api_fails():
             ))
             # Aciona fallback local seguro
             assert "Horário" in reply or "09h" in reply
+
+def test_local_fallback_does_not_choose_between_unrelated_matching_topics():
+    from backend.services.agent import local_fallback
+
+    reply = local_fallback(
+        "Qual é o horário e o preço?",
+        [
+            {"kind": "horarios", "title": "Horário", "content": "Segunda a sexta, das 09h às 18h"},
+            {"kind": "precos", "title": "Preço", "content": "Consulta por 50€"}
+        ]
+    )
+
+    assert reply == UNKNOWN_REPLY
+
+def test_local_fallback_uses_structured_business_metadata():
+    from backend.services.agent import local_fallback
+
+    reply = local_fallback(
+        "Qual o horário na sexta?",
+        [{
+            "kind": "horarios",
+            "title": "Horário",
+            "content": "",
+            "metadata": {"items": [{"name": "Sexta-feira", "price": "09h às 18h"}]}
+        }]
+    )
+
+    assert "Sexta-feira" in reply
+    assert "09h às 18h" in reply
 
 def test_ensure_complete_sentence():
     # Frase já completa preserva pontuação

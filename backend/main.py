@@ -939,7 +939,7 @@ async def incoming(data:IncomingMessage,user=Depends(current_user),_sub=Depends(
         ).fetchall()
         history = [{"sender": r["sender"], "content": r["content"]} for r in reversed(history_rows)]
 
-        info = c.execute("SELECT kind,title,content FROM business_info WHERE user_id=? AND kind NOT IN ('subscription', 'assinatura', 'ai_report')", (user["id"],)).fetchall()
+        info = c.execute("SELECT kind,title,content,metadata FROM business_info WHERE user_id=? AND kind NOT IN ('subscription', 'assinatura', 'ai_report')", (user["id"],)).fetchall()
         
         mandatory = {}
         try:
@@ -1011,6 +1011,18 @@ def resolve_conversion(request_id:int,user=Depends(current_user)):
           (request_id,user["id"]))
     if not cur.rowcount: raise HTTPException(404,"Pedido pendente não encontrado.")
     return {"ok":True}
+
+@app.delete("/api/conversions/{request_id}")
+def delete_pending_conversion(request_id: int, user=Depends(current_user)):
+    with connect() as c:
+        cur = c.execute(
+            "DELETE FROM conversion_requests WHERE id=? AND user_id=? AND status IN ('pending','validating')",
+            (request_id, user["id"])
+        )
+    if not cur.rowcount:
+        raise HTTPException(404, "Pedido pendente não encontrado.")
+    invalidate_dashboard_cache(user["id"])
+    return {"ok": True}
 
 @app.post("/api/variants")
 def create_variant(data:dict,user=Depends(current_user),_sub=Depends(require_active_subscription)):

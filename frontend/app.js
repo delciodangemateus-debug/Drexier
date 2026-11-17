@@ -1554,6 +1554,26 @@ function renderDashboardData(d) {
         btnGroup.style.display = "flex";
         btnGroup.style.gap = "8px";
 
+        const btnDelete = document.createElement("button");
+        btnDelete.type = "button";
+        btnDelete.className = "btn-icon-danger pending-delete-btn";
+        btnDelete.title = "Eliminar pedido";
+        btnDelete.setAttribute("aria-label", `Eliminar pedido de ${r.name || r.contact_key}`);
+        btnDelete.innerHTML = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
+        btnDelete.onclick = async e => {
+          e.stopPropagation();
+          if (!confirm("Eliminar este pedido? Esta ação não pode ser desfeita.")) return;
+          btnDelete.disabled = true;
+          try {
+            await api(`/api/conversions/${Number(r.id)}`, { method: "DELETE" });
+            await loadDashboard();
+            showNotice("Pedido eliminado com sucesso.");
+          } catch (err) {
+            showNotice(err.message, true);
+            btnDelete.disabled = false;
+          }
+        };
+
         const btnManage = document.createElement("button");
         btnManage.className = "btn primary small";
         btnManage.textContent = "Validar com IA";
@@ -1576,7 +1596,7 @@ function renderDashboardData(d) {
           }
         };
 
-        btnGroup.append(btnManage, btnResolve);
+        btnGroup.append(btnDelete, btnManage, btnResolve);
         card.onclick = () => openPendingConfirmationsModal();
         card.append(info, btnGroup);
         fragment.append(card);
@@ -1823,7 +1843,34 @@ function renderPendingModalList(requests) {
     typeBadge.style.color = "var(--color-primary)";
     typeBadge.textContent = r.request_type || "Marcação/Pedido";
 
-    header.append(clientInfo, typeBadge);
+    const headerActions = document.createElement("div");
+    headerActions.className = "pending-action-header-actions";
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn-icon-danger pending-delete-btn";
+    deleteBtn.title = "Eliminar pedido";
+    deleteBtn.setAttribute("aria-label", `Eliminar pedido de ${r.name || r.contact_key}`);
+    deleteBtn.innerHTML = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
+    deleteBtn.addEventListener("click", async () => {
+      if (!confirm("Eliminar este pedido? Esta ação não pode ser desfeita.")) return;
+      deleteBtn.disabled = true;
+      try {
+        await api(`/api/conversions/${Number(r.id)}`, { method: "DELETE" });
+        card.remove();
+        if (!modalBody.querySelector(".pending-action-card")) {
+          modalBody.innerHTML = '<div class="empty">Nenhum pedido pendente de validação no momento. Todos os pedidos e agendamentos foram tratados.</div>';
+        }
+        await loadDashboard();
+        showNotice("Pedido eliminado com sucesso.");
+      } catch (err) {
+        showNotice(err.message, true);
+        deleteBtn.disabled = false;
+      }
+    });
+
+    headerActions.append(typeBadge, deleteBtn);
+    header.append(clientInfo, headerActions);
 
     const detailsBox = document.createElement("div");
     detailsBox.className = "modal-text-block";

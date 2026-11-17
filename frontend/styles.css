@@ -1852,6 +1852,16 @@ textarea {
   margin-bottom: 12px;
 }
 
+.pending-action-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pending-delete-btn {
+  flex-shrink: 0;
+}
+
 .pending-action-type {
   font-family: var(--font-mono);
   font-size: 11px;

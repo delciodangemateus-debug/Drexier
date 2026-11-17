@@ -254,6 +254,9 @@ DIRETRIZ MANDATÓRIA DE FORMATAÇÃO E CITAÇÕES (SEM ASTERISCOS):
 
 MISSÃO E POSTURA:
 1. Você responde às mensagens dos clientes e é responsável por DIRIGIR a conversa ativamente com foco no objetivo do negócio (esclarecer dúvidas, agendamentos, atendimento e vendas).
+   - A ÚLTIMA mensagem do cliente é sempre a pergunta a responder. Use o histórico apenas para entender referências; não responda novamente a uma pergunta antiga.
+   - Responda diretamente e apenas ao que foi perguntado. Não acrescente produtos, ofertas, agendamentos ou perguntas de venda que não sejam necessários para responder.
+   - Se a informação exata não estiver na base de conhecimento, diga claramente que não a tem. Nunca preencha lacunas com suposições ou informações de outro assunto.
 2. ADAPTAÇÃO AO CONTEXTO DA MENSAGEM (NUNCA ATIRAR PRODUTOS NA CARA DO CLIENTE):
    - Você NÃO deve se basear cegamente em despejar dados, preços ou produtos da Base de Negócio logo na primeira mensagem se o cliente não perguntou por eles.
    - Responda estritamente e com empatia ao que o cliente disse ou perguntou.
@@ -390,7 +393,7 @@ async def call_gemini_api(
         },
         "contents": contents,
         "generationConfig": {
-            "temperature": 0.55,
+            "temperature": 0.1,
             "maxOutputTokens": 2500,
             "topP": 0.95
         }
@@ -467,7 +470,7 @@ async def call_openai_compatible_api(
                 json={
                     "model": model,
                     "messages": messages,
-                    "temperature": 0.35,
+                    "temperature": 0.1,
                     "max_tokens": 2000
                 }
             )
@@ -532,20 +535,35 @@ def local_fallback(message: str, info_rows: List[Any], business_name: str = "nos
     for row in info_rows:
         title = row["title"] if isinstance(row, dict) else row["title"]
         content = row["content"] if isinstance(row, dict) else row["content"]
-        text = f"{title}: {content}".strip()
+        kind = row.get("kind", "") if isinstance(row, dict) else row["kind"]
+        metadata = row.get("metadata", {}) if isinstance(row, dict) else row["metadata"]
+        context_entry = compose_context([{
+            "kind": kind,
+            "title": title,
+            "content": content,
+            "metadata": metadata,
+        }])
+        text = f"{title}: {content}\n{context_entry}".strip()
         hay = text.lower()
         score = sum(1 for w in words if w in hay)
         if score:
-            scored.append((score, text))
+            display_text = f"{title}: {content}".strip()
+            if not content and context_entry:
+                display_text = context_entry
+            scored.append((score, display_text))
 
     if not scored:
         return unknown_msg
 
     scored.sort(key=lambda item: item[0], reverse=True)
-    best_item = scored[0][1]
+    best_score = scored[0][0]
+    best_matches = [item[1] for item in scored if item[0] == best_score]
+    if len(best_matches) != 1:
+        return unknown_msg
+    best_item = best_matches[0]
     if lang == "en":
-        return f"Hello! Regarding your inquiry:\n• {best_item}\n\nPlease let us know if you would like more information or to make a booking!"
-    return f"Olá! Relativamente ao que perguntou:\n• {best_item}\n\nFicamos à sua inteira disposição se desejar saber mais ou agendar!"
+        return f"Regarding your question: {best_item}"
+    return f"Sobre a sua pergunta: {best_item}"
 
 def _detect_injection_attempt(message: str) -> bool:
     """
