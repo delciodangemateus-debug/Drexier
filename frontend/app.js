@@ -1419,7 +1419,7 @@ function renderDashboardData(d) {
     { title: "Novos Clientes (24h)", val: `${today} (24h anteriores: ${yest})`, desc: "Novos contactos nas últimas 24 horas, comparados com as 24 horas imediatamente anteriores." },
     { title: "Clientes na Base", val: contacts, desc: "Número acumulado de contactos únicos que iniciaram conversa com o seu negócio." },
     { title: "Vendas & Pedidos", val: pending, desc: "Intenções de compra recolhidas pelo agente aguardando a sua validação ou confirmação." },
-    { title: "Marcações da Semana", val: bookingsCount, desc: "Pedidos e marcações com data e hora registadas para os próximos sete dias." },
+    { title: "Marcações da Semana", val: bookingsCount, desc: "Pedidos e marcações com data e hora registadas para qualquer data futura." },
     { title: "Taxa de Conversão", val: mConv ? mConv.textContent : "0%", desc: "Proporção de contactos que evoluíram para intenção de compra ou marcação de serviço." }
   ];
 
@@ -1654,7 +1654,7 @@ function openBookingsModal(confirmedList) {
 
   const list = Array.isArray(confirmedList) ? confirmedList : [];
   if (!list.length) {
-    modalBody.innerHTML = '<div class="empty">Ainda não existem marcações para os próximos sete dias com data e hora registadas. A IA pedirá esses dados ao cliente quando necessário.</div>';
+    modalBody.innerHTML = '<div class="empty">Ainda não existem marcações futuras com data e hora registadas. A IA pedirá esses dados ao cliente quando necessário.</div>';
     return;
   }
 

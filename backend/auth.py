@@ -47,8 +47,36 @@ def decode_password_reset_token(token: str):
 def decode_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("purpose") == "password_reset":
+        if payload.get("purpose") in ("password_reset", "booking"):
             return None
         return int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        return None
+
+
+def create_booking_token(user_id: int, contact_id: int, email: str, name: str = "") -> str:
+    exp = datetime.now(timezone.utc) + timedelta(days=60)
+    payload = {
+        "sub": str(user_id),
+        "contact_id": int(contact_id),
+        "email": str(email),
+        "name": str(name or ""),
+        "purpose": "booking",
+        "exp": exp,
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_booking_token(token: str) -> dict:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") != "booking":
+            return None
+        return {
+            "user_id": int(payload["sub"]),
+            "contact_id": int(payload["contact_id"]),
+            "email": str(payload.get("email", "")),
+            "name": str(payload.get("name", "")),
+        }
     except (JWTError, KeyError, ValueError):
         return None

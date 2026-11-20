@@ -11,6 +11,8 @@ from backend.supabase_client import get_supabase_status
 from backend.auth import (
     create_password_reset_token,
     decode_password_reset_token,
+    create_booking_token,
+    decode_booking_token,
     hash_password,
     verify_password,
     create_token,
@@ -31,6 +33,8 @@ from backend.services.email_service import (
     send_ai_booking_reminder,
     send_owner_reply,
     extract_scheduled_at,
+    generate_booking_options,
+    handle_booking_selection,
 )
 from backend.services.resend_email import (
     get_resend_config,
@@ -136,6 +140,14 @@ def get_app_js():
 def get_i18n_js():
     return FileResponse(ROOT / "frontend" / "i18n.js")
 
+@app.get("/booking")
+@app.get("/agendamento")
+def get_booking_page():
+    booking_file = ROOT / "frontend" / "booking.html"
+    if not booking_file.exists():
+        booking_file = ROOT / "dist" / "booking.html"
+    return FileResponse(booking_file)
+
 def current_user(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Sessão necessária.")
@@ -212,6 +224,13 @@ class DeleteAccountIn(BaseModel):
 
 class AutomationLevelIn(BaseModel):
     level: str = Field(pattern="^(full|semi|disabled)$")
+
+class BookingSelectIn(BaseModel):
+    token: str
+    slot_label: str
+    scheduled_at: str
+    customer_name: Optional[str] = None
+    notes: Optional[str] = None
 
 class AgentSettings(BaseModel):
     instructions: str = ""
@@ -498,6 +517,66 @@ def delete_account(data: DeleteAccountIn, user=Depends(current_user)):
         ),
     }
 
+# ── Endpoints Públicos de Marcação por Opções (Acesso do Cliente) ─────────────
+@app.get("/api/booking/options")
+def get_booking_options(token: str):
+    data = decode_booking_token(token)
+    if not data:
+        raise HTTPException(400, "Link de agendamento inválido ou expirado.")
+    user_id = data["user_id"]
+    contact_id = data["contact_id"]
+    with connect() as c:
+        user = c.execute(
+            "SELECT name, business_type, business_description, mandatory_responses FROM users WHERE id=?",
+            (user_id,)
+        ).fetchone()
+        if not user:
+            raise HTTPException(404, "Negócio não encontrado.")
+        contact = c.execute(
+            "SELECT name, contact_key FROM contacts WHERE id=? AND user_id=?",
+            (contact_id, user_id)
+        ).fetchone()
+        info_rows = c.execute(
+            "SELECT kind, title, content FROM business_info WHERE user_id=?",
+            (user_id,)
+        ).fetchall()
+
+    business_name = user["name"] or "Drexier"
+    c_name = (contact["name"] if contact else "") or data.get("name") or ""
+    c_email = (contact["contact_key"] if contact else "") or data.get("email") or ""
+
+    options = generate_booking_options(info_rows)
+    return {
+        "ok": True,
+        "business_name": business_name,
+        "business_type": user["business_type"] or "Serviços",
+        "customer_name": c_name,
+        "customer_email": c_email,
+        "options": options,
+    }
+
+
+@app.post("/api/booking/select")
+async def select_booking_option(payload: BookingSelectIn):
+    data = decode_booking_token(payload.token)
+    if not data:
+        raise HTTPException(400, "Token de agendamento inválido ou expirado.")
+    user_id = data["user_id"]
+    contact_id = data["contact_id"]
+    customer_email = data["email"]
+
+    res = await handle_booking_selection(
+        user_id=user_id,
+        contact_id=contact_id,
+        customer_email=customer_email,
+        customer_name=payload.customer_name or data.get("name") or "",
+        slot_label=payload.slot_label,
+        scheduled_at=payload.scheduled_at,
+        notes=payload.notes or "",
+    )
+    return res
+
+
 _dashboard_cache = {}  # uid -> (timestamp, data)
 DASHBOARD_CACHE_TTL = 3.0
 
@@ -540,7 +619,7 @@ def dashboard(user=Depends(current_user)):
         hour=0, minute=0, second=0, microsecond=0
     )
     today_start = local_today.astimezone(timezone.utc)
-    week_end = (local_today + timedelta(days=7)).astimezone(timezone.utc)
+    # Marcações atemporais: incluem todas as marcações com data futura (>= today_start)
     bookings_rows = []
     for row in booking_rows:
         item = dict(row)
@@ -560,7 +639,8 @@ def dashboard(user=Depends(current_user)):
                 scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
         except (TypeError, ValueError):
             continue
-        if today_start <= scheduled_at.astimezone(timezone.utc) < week_end:
+        if scheduled_at.astimezone(timezone.utc) >= today_start:
+            item["name"] = item.get("name") or item.get("contact_key") or "Cliente"
             bookings_rows.append(item)
     bookings_count = len(bookings_rows)
     res = {"messages_answered":total_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
@@ -747,7 +827,7 @@ def get_automation_level(user=Depends(current_user)):
                 mandatory = json.loads(row["mandatory_responses"])
             except Exception:
                 mandatory = {}
-        level = mandatory.get("automation_level", "semi")
+        level = mandatory.get("automation_level", "full")
         return {"level": level}
 
 @app.post("/api/agent/automation-level")

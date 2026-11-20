@@ -51,6 +51,24 @@ def test_build_system_instruction():
     assert "Não acrescente produtos, ofertas" in instruction
     assert "Seja amigável e convide para provar na loja." in instruction
 
+def test_full_automation_prompt_never_mentions_team_validation():
+    instruction = build_system_instruction(
+        business_context="[PRODUTO] Café Arábica: 15€",
+        mandatory_responses={"automation_level": "full"},
+    )
+    assert "MODO TOTALMENTE AUTOMÁTICO" in instruction
+    assert "NUNCA diga que o pedido aguarda validação" in instruction
+    assert "NUNCA volte a perguntar qual é a data" in instruction
+    assert "validação e confirmação da nossa equipe" not in instruction
+    assert "automation_level" not in instruction
+
+    semi_instruction = build_system_instruction(
+        business_context="[PRODUTO] Café Arábica: 15€",
+        mandatory_responses={"automation_level": "semi"},
+    )
+    assert "validação e confirmação da nossa equipe" in semi_instruction
+
+
 def test_call_gemini_api_success():
     fake_response = MagicMock()
     fake_response.status_code = 200

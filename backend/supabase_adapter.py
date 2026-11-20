@@ -205,7 +205,7 @@ class SupabaseCursor:
                     "status": r.get("status", "pending"),
                     "resolved_at": r.get("resolved_at"),
                     "contact_id": r["contact_id"],
-                    "name": ct.get("name", ""),
+                    "name": ct.get("name") or ct.get("contact_key") or "Cliente",
                     "contact_key": ct.get("contact_key", "")
                 }))
             self._rows = rows
@@ -435,15 +435,54 @@ class SupabaseCursor:
             set_clause = m_up.group(2)
             where_clause = m_up.group(3)
 
-            set_assignments = [s.strip() for s in set_clause.split(",")]
+            # Tokeniza o SET respeitando parênteses (evita partir em vírgulas dentro de COALESCE/funções)
+            set_assignments: List[str] = []
+            depth = 0
+            current_tok = []
+            for ch in set_clause:
+                if ch == "(":
+                    depth += 1
+                    current_tok.append(ch)
+                elif ch == ")":
+                    depth -= 1
+                    current_tok.append(ch)
+                elif ch == "," and depth == 0:
+                    set_assignments.append("".join(current_tok).strip())
+                    current_tok = []
+                else:
+                    current_tok.append(ch)
+            if current_tok:
+                set_assignments.append("".join(current_tok).strip())
+
             update_data: Dict[str, Any] = {}
             param_idx = 0
 
             for assign in set_assignments:
-                parts = assign.split("=")
-                col = parts[0].strip()
-                val_token = parts[1].strip()
-                if val_token == "?":
+                # Separa só no primeiro "=" fora de parênteses
+                eq_pos = None
+                depth2 = 0
+                for i, ch in enumerate(assign):
+                    if ch == "(":
+                        depth2 += 1
+                    elif ch == ")":
+                        depth2 -= 1
+                    elif ch == "=" and depth2 == 0:
+                        eq_pos = i
+                        break
+                if eq_pos is None:
+                    continue
+                col = assign[:eq_pos].strip()
+                val_token = assign[eq_pos + 1:].strip()
+
+                # COALESCE(?, col) → usa o parâmetro se não for None, senão salta (não sobrescreve)
+                coalesce_m = re.match(r"COALESCE\s*\(\s*\?\s*,\s*[\w.]+\s*\)", val_token, re.IGNORECASE)
+                if coalesce_m:
+                    val = p[param_idx]
+                    param_idx += 1
+                    if val is None:
+                        # COALESCE com NULL: não inclui no update (preserva valor actual)
+                        continue
+                elif val_token == "?":
                     val = p[param_idx]
                     param_idx += 1
                 elif val_token.upper() == "NULL":

@@ -440,7 +440,8 @@ async def test_full_automation_asks_client_before_confirming_booking(auth_client
     assert conversions[0]["status"] == "confirmed"
     assert conversions[0]["scheduled_at"] is not None
     assert len(agent_messages) == 2
-    assert "Gostaria de marcar uma consulta amanhã às 14h." in agent_messages[1]["content"]
+    assert "O seu pedido foi confirmado." in agent_messages[1]["content"]
+    assert "Nome registado:" in agent_messages[1]["content"]
 
 
 @pytest.mark.anyio
@@ -538,6 +539,61 @@ async def test_full_automation_confirmation_adds_booking_to_week_board(auth_clie
     assert len(bookings) == 1
     assert bookings[0]["status"] == "confirmed"
     assert bookings[0]["scheduled_at"] is not None
+
+
+@pytest.mark.anyio
+async def test_full_automation_uses_date_from_subject_and_shows_confirmed_booking(auth_client):
+    client, token, user_id = auth_client
+    params = _full_automation_params(user_id)
+
+    with patch(
+        "backend.services.email_service.check_business_availability",
+        return_value={"available": True},
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        await process_and_reply_email(**{
+            **params,
+            "subject": "Marcação quinta às 16h",
+            "incoming_content": "Olá, gostaria de marcar uma consulta.",
+        })
+        confirmation_body = mock_send.await_args.kwargs["body_text"]
+        assert "Deseja prosseguir e confirmar a marcação?" in confirmation_body
+        assert "qual é a data" not in confirmation_body.lower()
+
+        reply = await process_and_reply_email(**{**params, "incoming_content": "Sim, confirmo."})
+
+    assert "confirmada pelo cliente" in reply
+    with connect() as c:
+        row = c.execute(
+            "SELECT status, scheduled_at FROM conversion_requests WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    assert row["status"] == "confirmed"
+    assert row["scheduled_at"] is not None
+
+    response = client.get("/api/dashboard", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    bookings = [
+        booking for booking in response.json()["confirmed_bookings"]
+        if booking["contact_key"] == "cliente@example.com"
+    ]
+    assert len(bookings) == 1
+    assert bookings[0]["scheduled_at"] == row["scheduled_at"]
+
+
+def test_missing_schedule_question_only_asks_for_the_missing_field():
+    from backend.services.email_service import ensure_date_time_question
+
+    date_only = ensure_date_time_question("A sua marcação está registada.", need_date=False, need_time=True)
+    assert "qual é a hora que prefere" in date_only
+    assert "qual é a data" not in date_only
+
+    time_only = ensure_date_time_question("A sua marcação está registada.", need_date=True, need_time=False)
+    assert "qual é a data que prefere" in time_only
+    assert "qual é a hora" not in time_only
 
 
 def _full_automation_params(user_id):
@@ -744,17 +800,15 @@ async def test_confirmation_email_replies_in_thread_before_marking_confirmed(aut
 
     assert result["ok"] is True
     mock_draft.assert_not_awaited()
-    expected_reply = (
-        "Olá, Cliente.\n\n"
-        "O seu pedido foi confirmado.\n\n"
-        "Detalhes do pedido: Produto X para amanhã às 14h\n\n"
-        "Com os melhores cumprimentos,\nCarlos Atendimento"
-    )
+    sent_body = mock_send.await_args.kwargs["body_text"]
+    assert "Olá, Cliente." in sent_body
+    assert "O seu pedido foi confirmado." in sent_body
+    assert "Nome registado: Cliente." in sent_body
     mock_send.assert_awaited_once_with(
         integration=mock_send.await_args.kwargs["integration"],
         to_email="cliente@example.com",
         subject="Re: Pedido do cliente",
-        body_text=expected_reply,
+        body_text=sent_body,
         thread_id="gmail-thread",
         in_reply_to="<customer-message@example.com>",
         references="<customer-message@example.com>",
@@ -770,7 +824,8 @@ async def test_confirmation_email_replies_in_thread_before_marking_confirmed(aut
         ).fetchone()
     assert request["status"] == "confirmed"
     assert message["sender"] == "agent"
-    assert message["content"] == expected_reply
+    assert "O seu pedido foi confirmado." in message["content"]
+    assert "Nome registado: Cliente." in message["content"]
 
 
 @pytest.mark.anyio
@@ -815,7 +870,7 @@ async def test_confirmed_request_cannot_send_a_second_confirmation(auth_client):
         ).fetchall()
     assert len(messages) == 1
     assert messages[0]["content"].startswith("Olá, Cliente.\n\nO seu pedido foi confirmado.")
-    assert "Consulta amanhã às 14h" in messages[0]["content"]
+    assert "Nome registado: Cliente." in messages[0]["content"]
 
 
 def test_email_response_cutoff_starts_after_payment_and_connection():
@@ -1355,6 +1410,352 @@ async def test_reminder_uses_registered_schedule_and_not_email_metadata(auth_cli
     body = mock_send.await_args.kwargs["body_text"]
     assert "Data e hora da marcação: 19/11/2099 às 15:00" in body
     assert "17/11/2026 às 10h" not in body
+
+
+def test_detect_client_confirmation_variations():
+    from backend.services.email_service import detect_client_confirmation
+
+    assert detect_client_confirmation("Sim") == "positive"
+    assert detect_client_confirmation("Sim, confirmo") == "positive"
+    assert detect_client_confirmation("Sim, no dia 20 às 15h") == "positive"
+    assert detect_client_confirmation("Sim, confirmo no dia 20") == "positive"
+    assert detect_client_confirmation("Pode agendar") == "positive"
+    assert detect_client_confirmation("Por mim está ótimo") == "positive"
+    assert detect_client_confirmation("Pode avançar com a marcação") == "positive"
+    assert detect_client_confirmation("Confirmado") == "positive"
+    assert detect_client_confirmation("Com certeza, confirmo") == "positive"
+    assert detect_client_confirmation("Não confirmo") == "negative"
+    assert detect_client_confirmation("Não quero agendar") == "negative"
+    assert detect_client_confirmation("Prefiro cancelar") == "negative"
+
+
+@pytest.mark.anyio
+async def test_full_automation_no_loop_and_confirms_date_on_week_board(auth_client):
+    client, token, user_id = auth_client
+    params = {
+        "user_dict": {
+            "id": user_id,
+            "name": "Clínica Drexier",
+            "business_type": "Saúde",
+            "mandatory_responses": '{"automation_level":"full"}',
+        },
+        "integration": {
+            "provider": "google",
+            "email_address": "clinica@gmail.com",
+            "auto_reply_enabled": 1,
+        },
+        "customer_email": "paciente@example.com",
+        "customer_name": "Ana Silva",
+        "subject": "Agendamento de Consulta",
+        "thread_id": "thread-123",
+        "message_id_header": "<msg-1@example.com>",
+    }
+
+    with patch(
+        "backend.services.email_service.check_business_availability",
+        return_value={"available": True, "reason": "Horário disponível"},
+    ), patch(
+        "backend.services.email_service.send_email",
+        new_callable=AsyncMock,
+        return_value={"status": "sent"},
+    ) as mock_send:
+        # Turno 1: Cliente manifesta intenção sem data/hora
+        reply1 = await process_and_reply_email(
+            **{**params, "incoming_content": "Olá, boa tarde! Gostaria de agendar uma consulta."}
+        )
+        assert (
+            "data e a hora" in reply1
+            or "indique o dia" in reply1
+            or "data e hor" in reply1.lower()
+            or ("dia" in reply1.lower() and "hor" in reply1.lower())
+            or ("data" in reply1.lower() and "hor" in reply1.lower())
+        )
+
+        # Turno 2: Cliente informa data e hora com citação típica do Gmail
+        reply2 = await process_and_reply_email(
+            **{
+                **params,
+                "incoming_content": (
+                    "Pode ser sexta-feira às 15h.\n\n"
+                    "No dia quarta-feira, 18 de novembro de 2026 às 08:00, Clínica Drexier escreveu:\n"
+                    "> Para registar a sua marcação, qual é a data e a hora que prefere?"
+                ),
+                "message_id_header": "<msg-2@example.com>",
+            }
+        )
+        # NÃO entra em loop pedindo data e hora novamente; avança para pedir confirmação
+        assert "qual é a data e a hora que prefere" not in reply2
+        assert "Deseja prosseguir e confirmar a marcação?" in reply2 or "Confirmação da marcação solicitada" in reply2
+
+        # Turno 3: Cliente confirma positivamente (com "Sim, no dia...")
+        reply3 = await process_and_reply_email(
+            **{
+                **params,
+                "incoming_content": (
+                    "Sim, confirmo no dia e hora indicados, obrigado!\n\n"
+                    "No dia quarta-feira, 18 de novembro de 2026 às 08:05, Clínica Drexier escreveu:\n"
+                    "> Temos disponibilidade..."
+                ),
+                "message_id_header": "<msg-3@example.com>",
+            }
+        )
+        # A IA confirma explicitamente o agendamento para a data
+        bodies = [call.kwargs["body_text"] for call in mock_send.await_args_list]
+        last_body = bodies[-1]
+        assert "O seu pedido foi confirmado." in last_body
+        assert "O seu agendamento foi confirmado para" in last_body
+        assert "15:00" in last_body
+
+    # Verifica que a marcação está registada no dashboard como confirmed_bookings
+    response = client.get("/api/dashboard", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    d = response.json()
+    assert d["bookings_count"] >= 1
+    matching = [b for b in d["confirmed_bookings"] if b["contact_key"] == "paciente@example.com"]
+    assert len(matching) == 1
+    assert matching[0]["status"] == "confirmed"
+    assert matching[0]["scheduled_at"] is not None
+
+
+def test_email_sending_headers_are_completely_blocked_from_scheduling():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime(2026, 11, 20, 10, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+
+    header_cases_without_booking = [
+        "De João Silva, para Clínica, data 20/11/2026 às 15h. Olá, queria agendar.",
+        "De xxxx , para xxxx , data 20/11/2026 15h Olá, queria agendar.",
+        "De: xxxx , para: xxxx , data: 20/11/2026 15:00\nOlá, gostaria de agendar.",
+        "Enviadas: sexta-feira, 20 de novembro de 2026 15:00\nOlá, queria agendar.",
+        "Data de envio: 20/11/2026 às 15h\nOlá, gostaria de agendar uma consulta.",
+        "Date: Fri, 20 Nov 2026 15:00:00\nOlá, gostaria de agendar.",
+        "No dia 20/11/2026 às 15:00, Fulano escreveu:\nOlá, gostaria de agendar.",
+        "Em 20 de nov. de 2026, às 15:00, Cliente escreveu:\nOlá, gostaria de marcar consulta.",
+        "On 20/11/2026 at 14:00, John wrote:\nHello, want to book appointment.",
+    ]
+    for case in header_cases_without_booking:
+        # Nenhum destes emails deve usar a data/hora do cabeçalho como marcação
+        assert extract_scheduled_at(case, now) is None, f"Falhou para caso: {case}"
+
+    # Quando o cliente especifica uma data no corpo juntamente com cabeçalhos de envio:
+    with_custom_choice = (
+        "De: Cliente <cli@ex.com>\n"
+        "Data: 20/11/2026 10:00\n"
+        "Para: Empresa <emp@ex.com>\n"
+        "Assunto: Agendamento\n\n"
+        "Olá, gostaria de marcar consulta para 15 de dezembro às 14h."
+    )
+    extracted = extract_scheduled_at(with_custom_choice, now)
+    assert extracted == "2026-12-15T14:00:00+00:00"
+
+
+def test_email_reply_quote_headers_below_message_are_completely_ignored():
+    from backend.services.email_service import clean_email_body, strip_email_headers
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime(2026, 11, 20, 10, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+
+    msg = (
+        "Olá, gostaria de saber os preços e marcar para amanhã às 14h.\n\n"
+        "em sex., 20 de nov  de 2026 as 10: 38, Délcio Mateus (delciomateus42@gmail.com ) escreveu :\n"
+        "> Olá Délcio, confirmamos para sexta às 10h.\n"
+        "> Qualquer dúvida disponha."
+    )
+    cleaned = clean_email_body(msg)
+    assert cleaned == "Olá, gostaria de saber os preços e marcar para amanhã às 14h."
+    assert "Délcio Mateus" not in cleaned
+    assert "10: 38" not in cleaned
+
+    stripped = strip_email_headers(msg)
+    assert stripped == "Olá, gostaria de saber os preços e marcar para amanhã às 14h."
+    assert "Délcio Mateus" not in stripped
+
+    # O agendamento é feito para amanhã às 14h, e NUNCA para 20 de nov às 10:38 da citação
+    extracted = extract_scheduled_at(msg, now)
+    assert extracted == "2026-11-21T14:00:00+00:00"
+
+
+def test_bookings_are_atemporal_for_any_future_date():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime(2026, 11, 20, 10, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+
+    # Marcação para daqui a 2 meses
+    res2m = extract_scheduled_at("Quero agendar para daqui a 2 meses às 16h.", now)
+    assert res2m is not None
+    assert "2027-01-" in res2m
+    assert "16:00:00" in res2m
+
+    # Marcação para próximo mês
+    res_pm = extract_scheduled_at("Quero marcar para o próximo mês às 11h.", now)
+    assert res_pm is not None
+    assert "2026-12-" in res_pm
+    assert "11:00:00" in res_pm
+
+    # Marcação para data específica bem no futuro
+    res_fut = extract_scheduled_at("Por favor agende para 20 de maio de 2027 às 10h.", now)
+    assert res_fut == "2027-05-20T09:00:00+00:00"
+
+
+def test_create_mime_message_includes_booking_button():
+    booking_url = "https://drexier.loca.lt/booking?token=test_token_123"
+    msg = create_mime_message(
+        sender="suporte@drexier.com",
+        to="cliente@exemplo.com",
+        subject="Re: Informações de Marcação",
+        body_text="Olá! Temos vários horários disponíveis.",
+        booking_url=booking_url,
+    )
+    # Verifica texto puro
+    payloads = msg.get_payload()
+    plain_text = payloads[0].get_payload(decode=True).decode("utf-8")
+    assert booking_url in plain_text
+    assert "Para escolher o seu horário de marcação" in plain_text
+
+    # Verifica HTML com botão
+    html_text = payloads[1].get_payload(decode=True).decode("utf-8")
+    assert booking_url in html_text
+    assert "Escolher Horário de Marcação" in html_text
+    assert "background-color: #2563eb" in html_text
+
+
+def test_generate_booking_options_structure():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from backend.services.email_service import generate_booking_options
+    base = datetime(2026, 11, 20, 10, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+    options = generate_booking_options(base_dt=base)
+    assert len(options) >= 2
+    # Primeira opção na próxima segunda-feira 23/11/2026 às 08:00
+    assert options[0]["date"] == "23/11/2026"
+    assert "Opção 1" in options[0]["label"]
+    assert "08:00" in options[0]["time"]
+    assert options[1]["date"] == "23/11/2026"
+    assert "13:00" in options[1]["time"]
+
+
+@pytest.mark.anyio
+async def test_public_booking_options_and_selection_full_auto(auth_client):
+    from backend.auth import create_booking_token
+    client, token, user_id = auth_client
+
+    # Configura utilizador no modo totalmente automático ('full')
+    with connect() as c:
+        c.execute(
+            "UPDATE users SET mandatory_responses=? WHERE id=?",
+            (json.dumps({"automation_level": "full"}), user_id)
+        )
+        cur = c.execute(
+            "INSERT INTO contacts (user_id, name, contact_key) VALUES (?, ?, ?)",
+            (user_id, "Délcio Mateus", "delcio@exemplo.com")
+        )
+        contact_id = cur.lastrowid
+
+    booking_tok = create_booking_token(user_id, contact_id, "delcio@exemplo.com", "Délcio Mateus")
+
+    # 1. Carregar opções através do endpoint público
+    resp_opts = client.get(f"/api/booking/options?token={booking_tok}")
+    assert resp_opts.status_code == 200
+    opts_data = resp_opts.json()
+    assert opts_data["ok"] is True
+    assert len(opts_data["options"]) > 0
+    first_opt = opts_data["options"][0]
+
+    # 2. Cliente seleciona a opção 1
+    resp_sel = client.post("/api/booking/select", json={
+        "token": booking_tok,
+        "slot_label": first_opt["label"],
+        "scheduled_at": first_opt["iso"],
+        "customer_name": "Délcio Mateus"
+    })
+    assert resp_sel.status_code == 200
+    sel_data = resp_sel.json()
+    assert sel_data["ok"] is True
+    assert sel_data["mode"] == "full"
+    assert sel_data["status"] == "confirmed"
+
+    # 3. Verifica que foi registrado no quadro de marcações do dashboard
+    dash = client.get("/api/dashboard", headers={"Authorization": f"Bearer {token}"}).json()
+    assert dash["bookings_count"] >= 1
+    matching = [b for b in dash["confirmed_bookings"] if b["contact_id"] == contact_id]
+    assert len(matching) == 1
+    assert "23/11/2026" in str(matching[0]["scheduled_at"]) or "2026-11-23" in str(matching[0]["scheduled_at"])
+
+
+@pytest.mark.anyio
+async def test_public_booking_selection_semi_auto_and_approval_moves_to_board(auth_client):
+    from backend.auth import create_booking_token
+    client, token, user_id = auth_client
+
+    # Configura utilizador no modo semi-automático ('semi') com integração conectada
+    with connect() as c:
+        c.execute(
+            "UPDATE users SET mandatory_responses=? WHERE id=?",
+            (json.dumps({"automation_level": "semi"}), user_id)
+        )
+        c.execute(
+            "INSERT INTO email_integrations (user_id, provider, email_address, status) VALUES (?, 'google', 'empresa@gmail.com', 'connected') ON CONFLICT(user_id) DO UPDATE SET status='connected'",
+            (user_id,)
+        )
+        cur = c.execute(
+            "INSERT INTO contacts (user_id, name, contact_key) VALUES (?, ?, ?)",
+            (user_id, "Ana Costa", "ana@exemplo.com")
+        )
+        contact_id = cur.lastrowid
+
+    booking_tok = create_booking_token(user_id, contact_id, "ana@exemplo.com", "Ana Costa")
+
+    # Cliente escolhe uma opção
+    slot_label = "Opção 2: Dia 23/11/2026 às 13:00"
+    slot_iso = "2026-11-23T13:00:00+00:00"
+    resp_sel = client.post("/api/booking/select", json={
+        "token": booking_tok,
+        "slot_label": slot_label,
+        "scheduled_at": slot_iso,
+        "customer_name": "Ana Costa"
+    })
+    assert resp_sel.status_code == 200
+    sel_data = resp_sel.json()
+    assert sel_data["ok"] is True
+    assert sel_data["mode"] == "semi"
+    assert sel_data["status"] == "pending"
+
+    # 1. Deve constar nos pedidos aguardando validação do dashboard
+    dash = client.get("/api/dashboard", headers={"Authorization": f"Bearer {token}"}).json()
+    pending_list = dash["pending_requests"]
+    matching_pending = [p for p in pending_list if "Ana Costa" in (p.get("name") or "") or p.get("contact_key") == "ana@exemplo.com"]
+    assert len(matching_pending) == 1
+    req_id = matching_pending[0]["id"]
+
+    # 2. O proprietário aprova/valida no dashboard
+    with patch("backend.services.email_service.send_email", new_callable=AsyncMock) as mock_send:
+        resp_act = client.post(
+            f"/api/conversions/{req_id}/action",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"action": "confirm", "custom_note": ""}
+        )
+        assert resp_act.status_code == 200
+        # Confirma que enviou mensagem ao cliente dizendo que foi confirmada com sucesso e os detalhes
+        mock_send.assert_called_once()
+        body_sent = mock_send.call_args.kwargs["body_text"]
+        assert "confirmado com sucesso" in body_sent
+        assert "Ana Costa" in body_sent
+        assert "23/11/2026" in body_sent
+
+    # 3. Agora a marcação foi adicionada ao card de marcações
+    dash_after = client.get("/api/dashboard", headers={"Authorization": f"Bearer {token}"}).json()
+    confirmed_list = dash_after["confirmed_bookings"]
+    matching_confirmed = [b for b in confirmed_list if b["id"] == req_id]
+    assert len(matching_confirmed) == 1
+    assert matching_confirmed[0]["name"] == "Ana Costa"
+    dash_after = client.get("/api/dashboard", headers={"Authorization": f"Bearer {token}"}).json()
+    confirmed_list = dash_after["confirmed_bookings"]
+    matching_confirmed = [b for b in confirmed_list if b["id"] == req_id]
+    assert len(matching_confirmed) == 1
+    assert matching_confirmed[0]["name"] == "Ana Costa"
+
+
+
 
 
 

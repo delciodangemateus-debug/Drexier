@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agendamento de Marcação - Drexier</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #111827;
+      --card-border: #1f2937;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-light: rgba(37, 99, 235, 0.15);
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --success: #10b981;
+      --success-light: rgba(16, 185, 129, 0.15);
+      --warning: #f59e0b;
+      --warning-light: rgba(245, 158, 11, 0.15);
+      --radius: 12px;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+    .booking-container {
+      width: 100%;
+      max-width: 620px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 32px 24px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+    }
+    .brand-header {
+      text-align: center;
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .brand-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .brand-title span.badge {
+      font-size: 11px;
+      background: var(--primary-light);
+      color: #60a5fa;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      border: 1px solid rgba(96, 165, 250, 0.3);
+    }
+    .business-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+    .business-name {
+      font-size: 17px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 4px;
+    }
+    .business-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #e5e7eb;
+      margin-bottom: 8px;
+    }
+    input[type="text"], input[type="date"], input[type="time"] {
+      width: 100%;
+      padding: 12px 14px;
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #ffffff;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus, input[type="date"]:focus, input[type="time"]:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .options-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .option-card {
+      background: #1a2234;
+      border: 2px solid #2d3748;
+      border-radius: 10px;
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .option-card:hover {
+      border-color: #3b82f6;
+      background: #1e293b;
+      transform: translateY(-1px);
+    }
+    .option-card.selected {
+      border-color: #3b82f6;
+      background: var(--primary-light);
+      box-shadow: 0 0 0 1px #3b82f6;
+    }
+    .option-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .opt-tag {
+      font-size: 11px;
+      font-weight: 700;
+      color: #60a5fa;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .opt-time {
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+    .opt-date {
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .custom-slot-box {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px dashed #374151;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 24px;
+    }
+    .custom-slot-box.active {
+      border-color: #3b82f6;
+      background: var(--primary-light);
+    }
+    .custom-slot-toggle {
+      font-size: 13px;
+      font-weight: 500;
+      color: #93c5fd;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .custom-inputs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .btn-submit {
+      width: 100%;
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      padding: 14px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-submit:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+    .btn-submit:active:not(:disabled) {
+      transform: scale(0.99);
+    }
+    .btn-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .result-screen {
+      text-align: center;
+      padding: 20px 10px;
+    }
+    .result-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    .result-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      color: #ffffff;
+    }
+    .result-desc {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    .result-details {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      text-align: left;
+      margin-bottom: 24px;
+    }
+    .result-details-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    .result-details-row:last-child {
+      margin-bottom: 0;
+    }
+    .result-details-label {
+      color: var(--text-muted);
+    }
+    .result-details-val {
+      color: #ffffff;
+      font-weight: 600;
+    }
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      border-top: 3px solid #ffffff;
+      width: 20px;
+      height: 20px;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .error-box {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid #ef4444;
+      color: #fca5a5;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="booking-container">
+    <div class="brand-header">
+      <div class="brand-title">
+        📅 Drexier <span class="badge">Agendamento</span>
+      </div>
+    </div>
+
+    <div id="loading-state" style="text-align: center; padding: 40px 0;">
+      <div class="spinner" style="margin: 0 auto 16px auto; width: 32px; height: 32px;"></div>
+      <p style="color: var(--text-muted); font-size: 14px;">A carregar opções de marcação...</p>
+    </div>
+
+    <div id="error-screen" style="display: none; text-align: center; padding: 30px 10px;">
+      <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+      <h2 style="font-size: 20px; margin-bottom: 8px;" id="error-title">Link Indisponível</h2>
+      <p style="color: var(--text-muted); font-size: 14px; line-height: 1.6;" id="error-desc">
+        O link de agendamento é inválido ou já expirou. Por favor, aceda através do botão oficial enviado para o seu e-mail.
+      </p>
+    </div>
+
+    <div id="booking-form" style="display: none;">
+      <div class="business-card">
+        <div class="business-name" id="business-name">Drexier</div>
+        <div class="business-subtitle" id="business-desc">Selecione uma data e horário pretendidos para o seu agendamento.</div>
+      </div>
+
+      <div class="error-box" id="form-error"></div>
+
+      <div class="form-group">
+        <label for="customer-name">O seu nome completo para o registo:</label>
+        <input type="text" id="customer-name" placeholder="Ex: Délcio Mateus" required>
+      </div>
+
+      <div class="section-title">
+        <span>🕒 Opções de Horários Disponíveis:</span>
+      </div>
+
+      <div class="options-grid" id="options-container">
+        <!-- Renderizado dinamicamente -->
+      </div>
+
+      <div class="custom-slot-box" id="custom-slot-box">
+        <div class="custom-slot-toggle" id="custom-slot-toggle">
+          <span>⚙️ Outra data ou horário personalizado</span>
+        </div>
+        <div class="custom-inputs" id="custom-inputs" style="display: none;">
+          <div>
+            <label for="custom-date" style="font-size: 12px;">Data pretendida:</label>
+            <input type="date" id="custom-date">
+          </div>
+          <div>
+            <label for="custom-time" style="font-size: 12px;">Horário:</label>
+            <input type="time" id="custom-time">
+          </div>
+        </div>
+      </div>
+
+      <button type="button" class="btn-submit" id="btn-submit" disabled>
+        <span>Confirmar Opção Selecionada</span>
+      </button>
+    </div>
+
+    <div id="result-screen" style="display: none;" class="result-screen">
+      <div class="result-icon" id="result-icon">✅</div>
+      <h2 class="result-title" id="result-title">Marcação Registada com Sucesso!</h2>
+      <p class="result-desc" id="result-desc">
+        A sua marcação foi confirmada no quadro de agendamentos.
+      </p>
+
+      <div class="result-details">
+        <div class="result-details-row">
+          <span class="result-details-label">Nome registado:</span>
+          <span class="result-details-val" id="res-name">-</span>
+        </div>
+        <div class="result-details-row">
+          <span class="result-details-label">Data e Horário:</span>
+          <span class="result-details-val" id="res-schedule">-</span>
+        </div>
+        <div class="result-details-row">
+          <span class="result-details-label">Estado:</span>
+          <span class="result-details-val" id="res-status">-</span>
+        </div>
+      </div>
+
+      <p style="font-size: 13px; color: #93c5fd;" id="result-note">
+        Enviámos um e-mail com os detalhes do agendamento.
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+
+    let bookingData = null;
+    let selectedOption = null;
+    let isCustom = false;
+
+    const loadingState = document.getElementById('loading-state');
+    const errorScreen = document.getElementById('error-screen');
+    const bookingForm = document.getElementById('booking-form');
+    const resultScreen = document.getElementById('result-screen');
+    const optionsContainer = document.getElementById('options-container');
+    const btnSubmit = document.getElementById('btn-submit');
+    const customerNameInput = document.getElementById('customer-name');
+    const formError = document.getElementById('form-error');
+
+    const customSlotToggle = document.getElementById('custom-slot-toggle');
+    const customInputs = document.getElementById('custom-inputs');
+    const customSlotBox = document.getElementById('custom-slot-box');
+    const customDateInput = document.getElementById('custom-date');
+    const customTimeInput = document.getElementById('custom-time');
+
+    function showError(msg) {
+      loadingState.style.display = 'none';
+      bookingForm.style.display = 'none';
+      resultScreen.style.display = 'none';
+      errorScreen.style.display = 'block';
+      if (msg) document.getElementById('error-desc').textContent = msg;
+    }
+
+    async function loadOptions() {
+      if (!token) {
+        showError("Nenhum token de agendamento fornecido. Por favor, aceda através do botão enviado no seu e-mail.");
+        return;
+      }
+      try {
+        const res = await fetch(`/api/booking/options?token=${encodeURIComponent(token)}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Link inválido ou expirado.");
+        }
+        bookingData = await res.json();
+        renderForm();
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+
+    function renderForm() {
+      loadingState.style.display = 'none';
+      bookingForm.style.display = 'block';
+
+      if (bookingData.business_name) {
+        document.getElementById('business-name').textContent = bookingData.business_name;
+      }
+      if (bookingData.customer_name) {
+        customerNameInput.value = bookingData.customer_name;
+      }
+
+      optionsContainer.innerHTML = '';
+      const options = bookingData.options || [];
+
+      options.forEach((opt, idx) => {
+        const card = document.createElement('div');
+        card.className = 'option-card';
+        card.dataset.id = opt.id;
+        card.innerHTML = `
+          <div class="option-header">
+            <span class="opt-tag">Opção ${idx + 1}</span>
+            <span class="opt-time">⏰ ${opt.time}</span>
+          </div>
+          <div class="opt-date">📅 ${opt.date}</div>
+        `;
+
+        card.addEventListener('click', () => {
+          isCustom = false;
+          customSlotBox.classList.remove('active');
+          document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
+          selectedOption = opt;
+          btnSubmit.disabled = false;
+        });
+
+        optionsContainer.appendChild(card);
+      });
+
+      // Se houver opções, seleciona a primeira por defeito para conveniência
+      if (options.length > 0) {
+        const firstCard = optionsContainer.children[0];
+        firstCard.classList.add('selected');
+        selectedOption = options[0];
+        btnSubmit.disabled = false;
+      }
+    }
+
+    customSlotToggle.addEventListener('click', () => {
+      const isVisible = customInputs.style.display === 'grid';
+      customInputs.style.display = isVisible ? 'none' : 'grid';
+      if (!isVisible) {
+        document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+        customSlotBox.classList.add('active');
+        isCustom = true;
+        checkCustomValidity();
+      }
+    });
+
+    function checkCustomValidity() {
+      if (isCustom) {
+        const d = customDateInput.value;
+        const t = customTimeInput.value;
+        btnSubmit.disabled = !(d && t);
+      }
+    }
+
+    customDateInput.addEventListener('change', checkCustomValidity);
+    customTimeInput.addEventListener('change', checkCustomValidity);
+
+    btnSubmit.addEventListener('click', async () => {
+      formError.style.display = 'none';
+      const name = customerNameInput.value.trim();
+      if (!name) {
+        formError.textContent = "Por favor, indique o seu nome completo para a marcação.";
+        formError.style.display = 'block';
+        customerNameInput.focus();
+        return;
+      }
+
+      let slotLabel = "";
+      let slotIso = "";
+
+      if (isCustom) {
+        const d = customDateInput.value;
+        const t = customTimeInput.value;
+        if (!d || !t) {
+          formError.textContent = "Por favor, selecione a data e o horário pretendidos.";
+          formError.style.display = 'block';
+          return;
+        }
+        const parts = d.split('-'); // YYYY-MM-DD
+        const formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        slotLabel = `Opção personalizada: Dia ${formattedDate} às ${t}`;
+        slotIso = `${d}T${t}:00Z`;
+      } else {
+        if (!selectedOption) {
+          formError.textContent = "Por favor, selecione uma das opções disponíveis.";
+          formError.style.display = 'block';
+          return;
+        }
+        slotLabel = selectedOption.label;
+        slotIso = selectedOption.iso;
+      }
+
+      btnSubmit.disabled = true;
+      btnSubmit.innerHTML = `<span class="spinner"></span> A registar marcação...`;
+
+      try {
+        const res = await fetch('/api/booking/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: token,
+            slot_label: slotLabel,
+            scheduled_at: slotIso,
+            customer_name: name
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Erro ao registar a marcação.");
+        }
+
+        const data = await res.json();
+        showSuccess(data);
+      } catch (err) {
+        formError.textContent = err.message;
+        formError.style.display = 'block';
+        btnSubmit.disabled = false;
+        btnSubmit.innerHTML = `<span>Confirmar Opção Selecionada</span>`;
+      }
+    });
+
+    function showSuccess(data) {
+      bookingForm.style.display = 'none';
+      resultScreen.style.display = 'block';
+
+      document.getElementById('res-name').textContent = data.customer_name || customerNameInput.value.trim();
+      document.getElementById('res-schedule').textContent = data.date_str || data.slot_label;
+
+      if (data.mode === 'full') {
+        document.getElementById('result-icon').textContent = "✅";
+        document.getElementById('result-title').textContent = "Marcação Confirmada com Sucesso!";
+        document.getElementById('result-desc').textContent = "A sua marcação foi registada diretamente no quadro de marcações do negócio.";
+        document.getElementById('res-status').textContent = "Confirmada";
+        document.getElementById('res-status').style.color = "#10b981";
+        document.getElementById('result-note').textContent = "Enviámos um e-mail de confirmação com todos os detalhes da marcação.";
+      } else {
+        document.getElementById('result-icon').textContent = "📋";
+        document.getElementById('result-title').textContent = "Pedido de Marcação Enviado!";
+        document.getElementById('result-desc').textContent = "A sua intenção de agendamento foi enviada e aguarda validação da equipa.";
+        document.getElementById('res-status').textContent = "Aguardando Validação";
+        document.getElementById('res-status').style.color = "#f59e0b";
+        document.getElementById('result-note').textContent = "Assim que a marcação for adicionada às marcações da semana, receberá um e-mail de confirmação oficial com os detalhes.";
+      }
+    }
+
+    loadOptions();
+  </script>
+</body>
+</html>
