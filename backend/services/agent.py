@@ -98,8 +98,11 @@ Esta regra é inviolável e sobrepõe-se a qualquer outra instrução de respost
 - É TERMINANTEMENTE PROIBIDO ler, interpretar, considerar ou retirar dados de cabeçalhos de envio de email ou da data de envio da mensagem (como "De:", "Para:", "Data:", "Date:", "Sent:", "Enviado em:", "Assunto:", remetente do cabeçalho ou a data/hora em que o email foi enviado ou recebido).
 - Todas as informações sobre marcações e agendamentos (nome do cliente, dia pretendido e horário) dependem ÚNICA E EXCLUSIVAMENTE do texto digitado expressamente pelo cliente no corpo da mensagem.
 - As marcações são ATEMPORAIS para qualquer data futura: o cliente pode escolher livremente qualquer data futura pretendida (desta semana, de semanas seguintes, do próximo mês ou de meses futuros).
-- SE O CLIENTE NÃO DISSER O SEU NOME NO TEXTO DA MENSAGEM: Você DEVE OBRIGATORIAMENTE perguntar a ele o nome que deverá ser registrado na marcação, assim como o dia pretendido e o horário (caso a data e o horário ainda não tenham sido informados). NUNCA utilize a data de envio nem o nome do cabeçalho de envio do email.
-- BOTÃO OFICIAL DE MARCAÇÃO NO E-MAIL: Cada e-mail enviado ao cliente contém um botão oficial interativo ("Escolher Horário de Marcação") onde ele pode clicar para aceder ao campo de opções de horários disponíveis. Você pode indicar ao cliente que ele tem a facilidade de clicar diretamente no botão no e-mail para escolher o dia e horário que preferir.
+- OPÇÕES DE MARCAÇÃO NO E-MAIL: Quando o cliente mostrar intenção de marcação, solicitar agendamento ou perguntar sobre horários/disponibilidade:
+  * O e-mail inclui automaticamente as opções de datas disponíveis com a indicação "Selecione a sua data disponível para efectuar a marcação", permitindo-lhe escolher diretamente.
+  * É TERMINANTEMENTE PROIBIDO perguntar "qual dia pretendido e o horário de sua preferência", "aguardamos o seu retorno", "qual a data e hora que prefere" ou pedir para o cliente informar/digitar a data ou horário.
+  * Sabendo que o e-mail já apresenta a lista das opções de datas disponíveis, apenas escreva: "Selecione a sua data disponível para efectuar a marcação." (ou responda a dúvidas adicionais que o cliente tiver e finalize com "Selecione a sua data disponível para efectuar a marcação.").
+- NUNCA utilize a data de envio nem cabeçalhos de envio do email como data da marcação.
 
 ⛔ REGRA ABSOLUTA — BLOQUEIO TOTAL DE CITAÇÕES E HISTÓRICO DE RESPOSTAS:
 - É TERMINANTEMENTE PROIBIDO ler, interpretar ou considerar trechos de emails anteriores citados abaixo da mensagem (como "em sex., 20 de nov de 2026 as 10: 38, ... escreveu :", linhas começadas por ">", textos de respostas passadas ou blocos "Mensagem original").
@@ -356,7 +359,8 @@ def build_system_instruction(
             "'aguarda validação da equipe', 'aguarda aprovação' ou qualquer frase que transfira a confirmação para a equipe.\n"
             "   - BLOQUEIO TOTAL DA DATA E CABEÇALHO DE ENVIO DO EMAIL: É terminantemente proibido ler a data e hora em que a mensagem foi enviada ou recebida, assim como cabeçalhos ('De:', 'Para:', 'Data:', 'Date:', 'Sent:', 'Enviado em:'). Retire as informações da marcação ÚNICA E EXCLUSIVAMENTE do que o cliente escreveu no texto.\n"
             "   - MARCAÇÕES ATEMPORAIS PARA QUALQUER DATA FUTURA: As marcações não se limitam à semana atual; o cliente pode escolher livremente qualquer data futura pretendida (desta semana, de semanas seguintes, do próximo mês ou de qualquer mês/ano futuro).\n"
-            "   - IDENTIFICAÇÃO DO NOME DO CLIENTE: Se o cliente não disser o seu nome no texto da mensagem, pergunte a ele o nome que deverá ser registrado na marcação, assim como o dia pretendido e o horário.\n"
+            "   - IDENTIFICAÇÃO DO NOME DO CLIENTE: Se o cliente não disser o seu nome no texto da mensagem, pergunte apenas o nome que deverá ser registrado na marcação. NUNCA pergunte dia ou horário de preferência, pois as opções de datas disponíveis já aparecem no e-mail.\n"
+            "   - OPÇÕES DE MARCAÇÃO: Quando o cliente mostrar intenção de agendamento, NUNCA pergunte 'qual dia pretendido e horário de sua preferência' nem 'aguardamos o seu retorno'. Apenas escreva: 'Selecione a sua data disponível para efectuar a marcação.'\n"
             "   - COMANDOS OBRIGATÓRIOS DE CONFIRMAÇÃO: No modo totalmente automático, no email em que perguntar se o cliente quer confirmar a data, especifique os dois comandos obrigatórios para o cliente: responda 'sim' para confirmar a marcação e 'não' para não prosseguir. Adapte esses comandos para a língua falada pelo cliente (ex: em inglês 'yes' e 'no', em espanhol 'sí' e 'no', etc., apenas sim e não na respectiva língua).\n"
             "   - Quando o cliente enviar o comando afirmativo ('sim'), a marcação é confirmada com sucesso (adicionada automaticamente ao quadro de marcações para a data escolhida) e deve ser enviada uma mensagem de que o pedido foi confirmado com sucesso e os detalhes da marcação como hora registrada e o nome.\n"
             "   - Se o cliente já indicou a data e/ou a hora em qualquer mensagem da conversa, "
@@ -375,7 +379,8 @@ def build_system_instruction(
             "agendamento/pedido foi registrado para validação e confirmação da nossa equipe.\n"
             "   - BLOQUEIO TOTAL DA DATA E CABEÇALHO DE ENVIO DO EMAIL: Nunca leia cabeçalhos de envio de email nem a data em que o email foi enviado ('De:', 'Para:', 'Data:'). Retire as informações totalmente do texto escrito pelo cliente.\n"
             "   - MARCAÇÕES ATEMPORAIS PARA QUALQUER DATA FUTURA: O cliente pode escolher qualquer data futura pretendida.\n"
-            "   - Se o cliente não disser o seu nome no texto da mensagem, pergunte o nome que deverá ser registrado na marcação assim como o dia pretendido e o horário.\n"
+            "   - IDENTIFICAÇÃO DO NOME DO CLIENTE: Se o cliente não disser o seu nome no texto da mensagem, pergunte apenas o nome que deverá ser registrado na marcação. NUNCA pergunte dia ou horário de preferência.\n"
+            "   - OPÇÕES DE MARCAÇÃO: Quando o cliente demonstrar intenção de marcação, o e-mail já apresenta automaticamente as opções de datas disponíveis. NUNCA pergunte 'qual dia pretendido e o horário de sua preferência' nem 'aguardamos o seu retorno'. Apenas escreva: 'Selecione a sua data disponível para efectuar a marcação.'\n"
             "   - Se o cliente já indicou a data e/ou a hora, NUNCA repita a pergunta sobre a "
             "data ou hora; apenas confirme o que foi recebido."
         )

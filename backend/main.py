@@ -2,8 +2,8 @@ import asyncio, json, logging, re
 from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request, Form
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 from backend.database import init_db, connect
@@ -147,6 +147,127 @@ def get_booking_page():
     if not booking_file.exists():
         booking_file = ROOT / "dist" / "booking.html"
     return FileResponse(booking_file)
+
+
+def _booking_confirm_success_html(res: dict) -> str:
+    """Página HTML simples mostrada após o cliente confirmar uma opção de marcação."""
+    mode = res.get("mode", "full")
+    cname = res.get("customer_name", "")
+    date_str = res.get("date_str", res.get("slot_label", ""))
+    if mode == "full":
+        icon, title = "✅", "Marcação Confirmada!"
+        desc = "A sua marcação foi registada no quadro de agendamentos do negócio."
+        status_text, status_color = "Confirmada", "#10b981"
+        note = "Enviámos um e-mail de confirmação com todos os detalhes."
+    else:
+        icon, title = "📋", "Pedido de Marcação Enviado!"
+        desc = "O seu pedido foi recebido e aguarda validação da equipa."
+        status_text, status_color = "Aguardando Validação", "#f59e0b"
+        note = "Assim que a marcação for validada, receberá um e-mail de confirmação."
+    import html as _html
+    return f"""<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>{title}</title>
+  <style>
+    *{{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;}}
+    body{{background:#f3f4f6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;}}
+    .card{{background:#fff;border-radius:16px;padding:40px 32px;max-width:460px;width:100%;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,.1);}}
+    .icon{{font-size:56px;margin-bottom:20px;}}
+    h1{{font-size:22px;color:#111827;margin-bottom:12px;}}
+    .desc{{font-size:15px;color:#6b7280;line-height:1.6;margin-bottom:24px;}}
+    .badge{{display:inline-block;background:{status_color}20;color:{status_color};border-radius:9999px;padding:6px 18px;font-size:13px;font-weight:600;margin-bottom:20px;}}
+    .details{{background:#f9fafb;border-radius:10px;padding:16px;text-align:left;margin-top:4px;}}
+    .row{{font-size:14px;color:#374151;margin-bottom:8px;}}
+    .row:last-child{{margin-bottom:0;}}
+    .lbl{{font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:2px;}}
+    .note{{font-size:13px;color:#93c5fd;margin-top:20px;}}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">{icon}</div>
+  <h1>{title}</h1>
+  <p class="desc">{desc}</p>
+  <span class="badge">{status_text}</span>
+  <div class="details">
+    {'<div class="row"><span class="lbl">Nome</span><strong>' + _html.escape(cname) + '</strong></div>' if cname else ''}
+    {'<div class="row"><span class="lbl">Data e Hora</span><strong>' + _html.escape(date_str) + '</strong></div>' if date_str else ''}
+  </div>
+  <p class="note">{note}</p>
+</div>
+</body>
+</html>"""
+
+
+def _booking_confirm_error_html(message: str = "") -> str:
+    """Página HTML de erro para confirmação de marcação."""
+    import html as _html
+    return f"""<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Erro — Agendamento</title>
+  <style>
+    *{{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}}
+    body{{background:#f3f4f6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;}}
+    .card{{background:#fff;border-radius:16px;padding:40px 32px;max-width:460px;width:100%;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,.1);}}
+    .icon{{font-size:56px;margin-bottom:20px;}}
+    h1{{font-size:22px;color:#111827;margin-bottom:12px;}}
+    .desc{{font-size:15px;color:#6b7280;line-height:1.6;}}
+    .err{{font-size:13px;color:#ef4444;margin-top:12px;}}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">⚠️</div>
+  <h1>Não foi possível confirmar</h1>
+  <p class="desc">O link de agendamento é inválido, já foi utilizado ou expirou.</p>
+  {'<p class="err">' + _html.escape(message) + '</p>' if message else ''}
+</div>
+</body>
+</html>"""
+
+
+@app.get("/api/booking/confirm")
+async def confirm_booking_direct(
+    token: str,
+    slot_id: str = "",
+    slot_label: str = "",
+    scheduled_at: str = "",
+    customer_name: Optional[str] = None,
+):
+    """
+    Confirma uma opção de marcação a partir do link direto enviado no e-mail.
+    O cliente chega aqui ao clicar num dos cards de horário no próprio Gmail/email.
+    Devolve uma página HTML simples de confirmação — sem redirecionamentos adicionais.
+    """
+    data = decode_booking_token(token)
+    if not data:
+        return HTMLResponse(
+            content=_booking_confirm_error_html("Link inválido ou expirado."),
+            status_code=400,
+        )
+    try:
+        res = await handle_booking_selection(
+            user_id=data["user_id"],
+            contact_id=data["contact_id"],
+            customer_email=data["email"],
+            customer_name=customer_name or data.get("name") or "",
+            slot_label=slot_label,
+            scheduled_at=scheduled_at,
+            notes="",
+        )
+        return HTMLResponse(content=_booking_confirm_success_html(res))
+    except Exception as exc:
+        logger.error(f"[Booking Confirm] Erro ao processar marcação: {exc}")
+        return HTMLResponse(
+            content=_booking_confirm_error_html(),
+            status_code=500,
+        )
 
 def current_user(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -557,8 +678,41 @@ def get_booking_options(token: str):
 
 
 @app.post("/api/booking/select")
-async def select_booking_option(payload: BookingSelectIn):
-    data = decode_booking_token(payload.token)
+async def select_booking_option(request: Request):
+    """
+    Aceita seleção de marcação do cliente via:
+      - JSON (application/json) — booking.html externo
+      - Form-encoded (application/x-www-form-urlencoded) — AMP4Email interativo no Gmail
+
+    Devolve sempre JSON e inclui os cabeçalhos CORS necessários para AMP for Email
+    (Access-Control-Allow-Origin: https://mail.google.com).
+    """
+    content_type = request.headers.get("content-type", "")
+
+    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        # Pedido via AMP4Email
+        form = await request.form()
+        token_val = form.get("token", "")
+        slot_label_val = form.get("slot_label", "")
+        scheduled_at_val = form.get("scheduled_at", "")
+        customer_name_val = form.get("customer_name", "") or None
+        notes_val = form.get("notes", "") or None
+    else:
+        # Pedido via JSON (booking.html / API externa)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "Corpo da requisição inválido.")
+        token_val = body.get("token", "")
+        slot_label_val = body.get("slot_label", "")
+        scheduled_at_val = body.get("scheduled_at", "")
+        customer_name_val = body.get("customer_name") or None
+        notes_val = body.get("notes") or None
+
+    if not token_val:
+        raise HTTPException(400, "Token de agendamento em falta.")
+
+    data = decode_booking_token(token_val)
     if not data:
         raise HTTPException(400, "Token de agendamento inválido ou expirado.")
     user_id = data["user_id"]
@@ -569,12 +723,42 @@ async def select_booking_option(payload: BookingSelectIn):
         user_id=user_id,
         contact_id=contact_id,
         customer_email=customer_email,
-        customer_name=payload.customer_name or data.get("name") or "",
-        slot_label=payload.slot_label,
-        scheduled_at=payload.scheduled_at,
-        notes=payload.notes or "",
+        customer_name=customer_name_val or data.get("name") or "",
+        slot_label=slot_label_val,
+        scheduled_at=scheduled_at_val,
+        notes=notes_val or "",
     )
-    return res
+
+    # Cabeçalhos CORS obrigatórios para AMP for Email
+    # Ref: https://amp.dev/documentation/guides-and-tutorials/learn/amp-email-format/#cors-requests-in-amp-email
+    origin = request.headers.get("origin", "")
+    amp_source_origin = request.query_params.get("__amp_source_origin", "")
+    response_headers = {}
+    if "mail.google.com" in origin or "gmail" in origin.lower():
+        response_headers["Access-Control-Allow-Origin"] = origin
+        response_headers["Access-Control-Allow-Credentials"] = "true"
+    if amp_source_origin:
+        response_headers["AMP-Access-Control-Allow-Source-Origin"] = amp_source_origin
+        response_headers["Access-Control-Expose-Headers"] = "AMP-Access-Control-Allow-Source-Origin"
+
+    return JSONResponse(content=res, headers=response_headers)
+
+
+@app.options("/api/booking/select")
+async def booking_select_preflight(request: Request):
+    """Responde a pedidos CORS preflight do AMP for Email."""
+    origin = request.headers.get("origin", "*")
+    amp_source_origin = request.query_params.get("__amp_source_origin", "")
+    headers = {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Credentials": "true",
+    }
+    if amp_source_origin:
+        headers["AMP-Access-Control-Allow-Source-Origin"] = amp_source_origin
+        headers["Access-Control-Expose-Headers"] = "AMP-Access-Control-Allow-Source-Origin"
+    return JSONResponse(content={}, headers=headers, status_code=200)
 
 
 _dashboard_cache = {}  # uid -> (timestamp, data)
