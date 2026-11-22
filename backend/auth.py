@@ -1,11 +1,27 @@
 import os
+import sys
 import bcrypt
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Dict, Any
 from jose import jwt, JWTError
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def is_test_environment() -> bool:
+    return bool(
+        "pytest" in sys.modules
+        or os.getenv("PYTEST_CURRENT_TEST")
+        or os.getenv("DREXIER_TEST_MODE") == "1"
+    )
+
+
 SECRET_KEY = os.getenv("SECRET_KEY", "development-only-change-me")
+if (os.getenv("APP_ENV") == "production" or os.getenv("ENVIRONMENT") == "production") and not is_test_environment():
+    if not SECRET_KEY or SECRET_KEY in ("development-only-change-me", "change-this-to-a-long-random-secret-before-use"):
+        raise RuntimeError("SECRET_KEY de produção não configurada ou insegura!")
+
 ALGORITHM = "HS256"
 
 def hash_password(password: str) -> str:
@@ -19,10 +35,18 @@ def verify_password(password: str, hashed: str) -> bool:
     except Exception:
         return False
 
-def create_token(user_id: int) -> str:
-    # Sessão permanente dentro do software (o utilizador pode mexer por tempo ilimitado)
-    exp = datetime.now(timezone.utc) + timedelta(days=365)
-    return jwt.encode({"sub": str(user_id), "exp": exp}, SECRET_KEY, algorithm=ALGORITHM)
+def create_token(user_id: int, token_version: int = 1) -> str:
+    # Sessão ativa por até 60 dias (com suporte a revogação instantânea via token_version)
+    exp = datetime.now(timezone.utc) + timedelta(days=60)
+    payload = {"sub": str(user_id), "v": int(token_version or 1), "exp": exp}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def get_token_claims(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except (JWTError, KeyError, ValueError):
+        return None
 
 
 def create_password_reset_token(user_id: int) -> str:

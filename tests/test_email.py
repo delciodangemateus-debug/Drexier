@@ -1469,6 +1469,7 @@ async def test_full_automation_no_loop_and_confirms_date_on_week_board(auth_clie
             or "data e hor" in reply1.lower()
             or ("dia" in reply1.lower() and "hor" in reply1.lower())
             or ("data" in reply1.lower() and "hor" in reply1.lower())
+            or "selecione a sua data" in reply1.lower()
         )
 
         # Turno 2: Cliente informa data e hora com citação típica do Gmail

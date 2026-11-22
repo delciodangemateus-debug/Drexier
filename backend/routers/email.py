@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 
-from backend.auth import decode_token, create_token
+import secrets
+from datetime import datetime, timezone, timedelta
+from jose import jwt
+from backend.auth import decode_token, create_token, SECRET_KEY, ALGORITHM
+from backend.services.token_crypto import encrypt_token, decrypt_token
 from backend.database import connect
 from backend.services.billing_service import get_last_successful_payment_at, is_subscription_active
 from backend.services.email_service import (
@@ -121,14 +125,24 @@ def get_email_status(user: dict = Depends(get_current_user)):
     }
 
 
+_used_oauth_states: set = set()
+
 @router.get("/oauth/google/url")
 def get_google_oauth_url(user: dict = Depends(require_email_subscription)):
     """
     Retorna o link oficial de autorização da Google para que o utilizador
     possa aceder e conceder as permissões solicitadas.
+    SEC-16: Gera um token de estado temporário (15min) com nonce único contra CSRF.
     """
-    state_payload = json.dumps({"uid": user["id"], "ts": int(time.time())})
-    state_token = create_token(user["id"])
+    state_token = jwt.encode(
+        {
+            "sub": str(user["id"]),
+            "nonce": secrets.token_hex(16),
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        },
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
     try:
         url = build_google_auth_url(state=state_token)
         return {"url": url}
@@ -152,6 +166,11 @@ async def google_oauth_callback(
     if not code or not state:
         return RedirectResponse("/?email_auth=error&reason=missing_code_or_state")
 
+    # SEC-16: Previne replay de state em ataques de Login CSRF
+    if state in _used_oauth_states:
+        return RedirectResponse("/?email_auth=error&reason=state_already_used")
+    _used_oauth_states.add(state)
+
     uid = decode_token(state)
     if not uid:
         return RedirectResponse("/?email_auth=error&reason=invalid_state")
@@ -170,6 +189,10 @@ async def google_oauth_callback(
         if not email_addr:
             email_addr = f"google_user_{uid}@gmail.com"
 
+        # SEC-08: Armazenamento encriptado de tokens sensíveis (Fernet AES-128-CBC + HMAC)
+        enc_access_token = encrypt_token(access_token)
+        enc_refresh_token = encrypt_token(refresh_token) if refresh_token else ""
+
         with connect() as c:
             c.execute(
                 """INSERT INTO email_integrations (
@@ -186,11 +209,11 @@ async def google_oauth_callback(
                        token_expires_at = excluded.token_expires_at,
                        status = 'connected',
                        updated_at = CURRENT_TIMESTAMP""",
-                (uid, email_addr, display_name, access_token, refresh_token, expires_at),
+                (uid, email_addr, display_name, enc_access_token, enc_refresh_token, expires_at),
             )
 
-        session_token = create_token(uid)
-        return RedirectResponse(f"/?email_auth=success&provider=google&token={session_token}")
+        # SEC-03: O token JWT da sessão não é vazado na URL
+        return RedirectResponse("/?email_auth=success&provider=google")
     except Exception as e:
         logger.error(f"Erro no callback do Google OAuth: {e}")
         return RedirectResponse(f"/?email_auth=error&reason={str(e)}")
@@ -272,9 +295,12 @@ async def test_send_email(
     if not integration:
         raise HTTPException(400, "Nenhuma integração de e-mail conectada nesta conta.")
 
+    integ_data = dict(integration)
+    integ_data["access_token"] = decrypt_token(integ_data.get("access_token"))
+    integ_data["refresh_token"] = decrypt_token(integ_data.get("refresh_token"))
     try:
         res = await send_email(
-            integration=dict(integration),
+            integration=integ_data,
             to_email=payload.to,
             subject=payload.subject,
             body_text=payload.message,

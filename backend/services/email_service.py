@@ -145,10 +145,23 @@ async def exchange_google_code(code: str) -> Dict[str, Any]:
         return data
 
 
+def _decrypt_integration(row: Optional[Any]) -> Optional[Dict[str, Any]]:
+    if not row:
+        return None
+    d = dict(row)
+    from backend.services.token_crypto import decrypt_token
+    if "access_token" in d and d["access_token"]:
+        d["access_token"] = decrypt_token(d["access_token"])
+    if "refresh_token" in d and d["refresh_token"]:
+        d["refresh_token"] = decrypt_token(d["refresh_token"])
+    return d
+
+
 async def refresh_google_token_if_needed(integration: dict) -> str:
     """Renova o token da Google se expirado ou prestes a expirar."""
-    access_token = integration.get("access_token", "")
-    refresh_token = integration.get("refresh_token", "")
+    from backend.services.token_crypto import encrypt_token, decrypt_token
+    access_token = decrypt_token(integration.get("access_token", ""))
+    refresh_token = decrypt_token(integration.get("refresh_token", ""))
     expires_at = integration.get("token_expires_at")
 
     now = time.time()
@@ -184,7 +197,7 @@ async def refresh_google_token_if_needed(integration: dict) -> str:
             with connect() as c:
                 c.execute(
                     "UPDATE email_integrations SET access_token=?, token_expires_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (new_access_token, new_expires_at, integration["id"])
+                    (encrypt_token(new_access_token), new_expires_at, integration["id"])
                 )
             return new_access_token
         else:
@@ -218,7 +231,11 @@ async def fetch_google_user_profile(access_token: str) -> Tuple[str, str]:
 
 def get_public_base_url() -> str:
     """Retorna a URL pública base da aplicação para links de ação nos e-mails."""
-    base = os.getenv("PUBLIC_URL") or os.getenv("APP_URL") or "http://localhost:8000"
+    base = os.getenv("PUBLIC_URL") or os.getenv("APP_URL")
+    if not base:
+        if os.getenv("APP_ENV") == "production" or os.getenv("ENVIRONMENT") == "production":
+            logger.critical("[Security SEC-04] PUBLIC_URL ou APP_URL não definida em produção! Links de agendamento podem quebrar.")
+        base = "http://localhost:8000"
     return base.rstrip("/")
 
 
@@ -351,7 +368,9 @@ def create_mime_message(
     msg = MIMEMultipart("alternative")
     msg["From"] = sender
     msg["To"] = to
-    msg["Subject"] = subject
+    # SEC-15: Sanitização de novas linhas para impedir Email Header Injection
+    clean_subject = re.sub(r"[\r\n]+", " ", subject).strip() if subject else ""
+    msg["Subject"] = clean_subject
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
     if references:
@@ -950,12 +969,13 @@ def detect_booking_or_purchase_intent(incoming_content: str, subject: str) -> Op
 
 BOOKING_INQUIRY_PATTERNS = [
     r"\b(marcar|marca[çc][aã]o|marca[çc][oõ]es|agendar|agendamento|agendamentos|reservar?|reserva|reservas)\b",
-    r"\b(disponibilidade|dispon[ií]vel|dispon[ií]veis|vaga|vagas)\b",
-    r"\b(hor[aá]rio|hor[aá]rios)\b",
-    r"\b(quando\s+(posso|podemos|t[eê]m|h[aá])|tem\s+vaga|h[aá]\s+vaga|tem\s+hor[aá]rio)\b",
+    r"\b(?:hor[aá]rios?|datas?|vagas?)\s+dispon[ií]ve(?:l|is)\b",
+    r"\bdisponibilidade\s+(?:de\s+)?(?:hor[aá]rios?|datas?|marca[çc][aã]o|agendamento|vagas?)\b",
+    r"\b(quando\s+(?:posso|podemos|t[eê]m|h[aá])\s+(?:marcar|agendar|ir|passar))\b",
+    r"\b(tem\s+vaga|h[aá]\s+vaga|tem\s+hor[aá]rio|h[aá]\s+hor[aá]rio)\b",
     r"\b(marcar\s+hora|agendar\s+hora|marcar\s+um\s+dia|agendar\s+um\s+dia|marcar\s+atendimento)\b",
-    r"\b(consulta|sess[aã]o|visita|atendimento)\b.*(marcar|agendar|quando|hor[aá]rio|dispon[ií]vel|vaga)",
-    r"(marcar|agendar|quando|hor[aá]rio|dispon[ií]vel|vaga).*(consulta|sess[aã]o|visita|atendimento)",
+    r"\b(consulta|sess[aã]o|visita|atendimento)\b.*(marcar|agendar|quando|hor[aá]rio|vaga)",
+    r"(marcar|agendar|quando|hor[aá]rio|vaga).*(consulta|sess[aã]o|visita|atendimento)",
     r"\b(book|booking|appointment|schedule)\b",
 ]
 
@@ -965,12 +985,16 @@ def is_booking_inquiry(
     reply_text: Optional[str] = None,
     intent: Optional[Dict[str, str]] = None,
     waiting_for_schedule: bool = False,
+    has_specific_schedule: bool = False,
 ) -> bool:
     """
     Determina segundo a interpretação da IA se a mensagem do cliente é uma pergunta
     ou pedido sobre marcações, agendamentos ou disponibilidade de horários.
     As opções de escolha de data só são entregues nestas mensagens, não em todas.
     """
+    if has_specific_schedule:
+        return False
+
     if waiting_for_schedule:
         return True
 
@@ -2270,6 +2294,7 @@ async def process_and_reply_email(
         known_schedule_fragment = _client_schedule_fragment(known_schedule_text)
         need_date = not bool(_SCHEDULE_DATE_CUE_PATTERN.search(known_schedule_fragment))
         need_time = _extract_schedule_time(known_schedule_text) is None
+        has_specific_schedule = bool(not need_date or not need_time)
 
         # Verifica previamente se é intenção ou pergunta sobre marcações
         inquiry_intent = is_booking_inquiry(
@@ -2277,17 +2302,18 @@ async def process_and_reply_email(
             subject=subject,
             intent=intent,
             waiting_for_schedule=waiting_for_schedule,
+            has_specific_schedule=has_specific_schedule,
         )
 
         reply_instructions = effective_agent_instructions(user_dict)
-        if inquiry_intent:
+        if inquiry_intent and not has_specific_schedule:
             reply_instructions += (
                 "\n\nCONTEXTO OPERACIONAL: O cliente demonstrou intenção de marcação. "
                 "O e-mail já apresenta automaticamente as opções de datas disponíveis para o cliente escolher. "
                 "NUNCA pergunte 'qual dia pretendido e o horário de sua preferência', 'aguardamos o seu retorno' "
                 "nem peça para o cliente informar data ou horário. "
-                "Apenas escreva: 'Selecione a sua data disponível para efectuar a marcação.' "
-                "(ou esclareça dúvidas pontuais do cliente e conclua com 'Selecione a sua data disponível para efectuar a marcação.')."
+                "Apenas escreva: 'Selecione a sua data disponível para efectuar a marcação (data e horário).' "
+                "(ou esclareça dúvidas pontuais do cliente e conclua com 'Selecione a sua data disponível para efectuar a marcação (data e horário).')."
             )
         elif waiting_for_schedule:
             missing_parts = []
@@ -2511,9 +2537,10 @@ async def process_and_reply_email(
         reply_text=reply_text,
         intent=intent,
         waiting_for_schedule=waiting_for_schedule,
+        has_specific_schedule=has_specific_schedule,
     )
 
-    if should_include_options:
+    if should_include_options and not has_specific_schedule:
         # Quando o cliente mostra intenção de marcação, o e-mail já apresenta as opções disponíveis.
         # NUNCA pergunte data/horário de preferência nem 'aguardamos o seu retorno'.
         reply_text = re.sub(
@@ -2527,7 +2554,7 @@ async def process_and_reply_email(
             reply_text,
         )
         reply_text = re.sub(
-            r"(?i)\b(?:para\s+registar[^\.\n]*?)?qual\s+[ée]\s+a\s+data\s+e\s+a\s+hora[^\.\n]*?[\.\?!]?",
+            r"(?i)\b(?:para\s+registar[^\.\n]*?)?qual\s+[ée]\s+(?:a\s+)?data\s+e\s+(?:a\s+)?hora[^\.\n]*?[\.\?!]?",
             "",
             reply_text,
         )
@@ -2547,9 +2574,9 @@ async def process_and_reply_email(
         cleaned_check = re.sub(r"(?i)^(?:ol[áa]|bom\s+dia|boa\s+tarde|boa\s+noite)[^\.\n]*?[\.\?!,\s]*", "", reply_text).strip()
         if not cleaned_check or not reply_text:
             greeting = f"Olá, {booking_customer_name}." if booking_customer_name else "Olá."
-            reply_text = f"{greeting}\n\nSelecione a sua data disponível para efectuar a marcação."
+            reply_text = f"{greeting}\n\nSelecione a sua data disponível para efectuar a marcação (data e horário)."
         elif "selecione a sua data disponível" not in reply_text.lower():
-            reply_text = f"{reply_text}\n\nSelecione a sua data disponível para efectuar a marcação."
+            reply_text = f"{reply_text}\n\nSelecione a sua data disponível para efectuar a marcação (data e horário)."
     elif waiting_for_schedule and (not scheduled_request or scheduled_request.get("request_type") != "purchase"):
         reply_text = ensure_date_time_question(
             reply_text,
@@ -2568,7 +2595,7 @@ async def process_and_reply_email(
         "in_reply_to": message_id_header,
         "references": message_id_header,
     }
-    if should_include_options:
+    if should_include_options and not has_specific_schedule:
         send_kwargs["include_booking_options"] = True
     try:
         await send_email(**send_kwargs)

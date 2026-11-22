@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS users (
   agent_instructions TEXT DEFAULT '',
   agent_adopted_style TEXT DEFAULT '',
   mandatory_responses TEXT DEFAULT '{}',
+  token_version INTEGER DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -183,6 +184,11 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
         }
         if "agent_adopted_style" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN agent_adopted_style TEXT DEFAULT ''")
+        if "token_version" not in user_columns:
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 1")
+            except Exception:
+                pass
         conversion_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info(conversion_requests)").fetchall()
         }

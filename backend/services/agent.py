@@ -596,11 +596,12 @@ async def call_gemini_api(
 
     async with httpx.AsyncClient(timeout=client_timeout) as client:
         for m in candidate_models:
-            url = f"{base_url}/models/{m}:generateContent?key={api_key}"
+            # SEC-13: Chave de API do Gemini no cabeçalho seguro x-goog-api-key em vez de Query Parameter
+            url = f"{base_url}/models/{m}:generateContent"
             try:
                 response = await client.post(
                     url,
-                    headers={"Content-Type": "application/json"},
+                    headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
                     json=payload
                 )
                 if response.status_code == 429:

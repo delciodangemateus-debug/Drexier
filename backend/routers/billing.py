@@ -3,6 +3,7 @@ Roteador da API de Faturação e Pagamentos Stripe (Plano Business 59€/mês).
 Endpoints para checkout, gestão de faturas, verificação de status e webhooks criptografados.
 """
 
+import os
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
@@ -78,13 +79,45 @@ class CheckoutRequestPayload(BaseModel):
     base_url: Optional[str] = None
 
 
+from urllib.parse import urlparse
+
+def _validate_safe_base_url(client_base_url: Optional[str], request: Request) -> str:
+    """
+    SEC-09: Previne ataques de Open Redirect e Phishing no Checkout da Stripe.
+    Garante que as URLs de retorno redirecionam estritamente para o domínio seguro da aplicação.
+    """
+    app_base = (os.getenv("PUBLIC_URL") or os.getenv("APP_URL") or str(request.base_url)).rstrip("/")
+    if not client_base_url:
+        return app_base
+
+    client_parsed = urlparse(client_base_url)
+    app_parsed = urlparse(app_base)
+    req_parsed = urlparse(str(request.base_url))
+
+    allowed_hosts = {
+        app_parsed.netloc,
+        req_parsed.netloc,
+        "localhost:3000",
+        "localhost:5173",
+        "localhost:8000",
+        "127.0.0.1:3000",
+        "127.0.0.1:5173",
+        "127.0.0.1:8000",
+        "testserver",
+    }
+    if client_parsed.netloc in allowed_hosts or not client_parsed.netloc:
+        return client_base_url.rstrip("/")
+    logger.warning(f"[Security SEC-09] Tentativa de Open Redirect bloqueada: {client_base_url}. Forçado: {app_base}")
+    return app_base
+
+
 @router.post("/checkout")
 async def start_checkout(payload: CheckoutRequestPayload, request: Request, user=Depends(get_current_user)):
     """
     Cria uma sessão oficial no Stripe Checkout para subscrição do Plano Business (59€/mês).
     Retorna a URL protegida com 3D Secure / SCA e validação antifraude.
     """
-    base_url = payload.base_url or str(request.base_url)
+    base_url = _validate_safe_base_url(payload.base_url, request)
     try:
         session_info = await create_checkout_session(
             user_id=user["id"],
@@ -106,7 +139,7 @@ async def open_customer_portal(payload: CheckoutRequestPayload, request: Request
     Cria uma sessão do Stripe Customer Portal para o cliente consultar recibos,
     faturas em PDF ou atualizar os dados do cartão de crédito.
     """
-    base_url = payload.base_url or str(request.base_url)
+    base_url = _validate_safe_base_url(payload.base_url, request)
     try:
         portal_info = await create_portal_session(user_id=user["id"], base_url=base_url)
         return portal_info

@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     agent_instructions TEXT DEFAULT '',
     agent_adopted_style TEXT DEFAULT '',
     mandatory_responses JSONB NOT NULL DEFAULT '{}'::jsonb,
+    token_version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('utc'::text, NOW())
 );

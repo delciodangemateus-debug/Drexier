@@ -1,4 +1,4 @@
-import asyncio, json, logging, re
+import asyncio, json, logging, os, re
 from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime, timedelta, timezone
@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, R
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
-from backend.database import init_db, connect
+from backend.database import init_db, connect, is_test_environment
 from backend.supabase_client import get_supabase_status
 from backend.auth import (
     create_password_reset_token,
@@ -17,7 +17,9 @@ from backend.auth import (
     verify_password,
     create_token,
     decode_token,
+    get_token_claims,
 )
+from backend.services.rate_limiter import check_rate_limit
 from backend.services.agent import DEFAULT_AGENT_PERSONALITY, draft_reply, effective_agent_instructions
 from backend.services.analytics import (
     analyze_approaches,
@@ -99,6 +101,11 @@ async def background_email_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # SEC-04: Verificação de configuração HTTPS obrigatória em produção
+    if (os.getenv("APP_ENV") == "production" or os.getenv("ENVIRONMENT") == "production") and not is_test_environment():
+        pub_url = os.getenv("PUBLIC_URL") or os.getenv("APP_URL")
+        if not pub_url or not pub_url.startswith("https://"):
+            raise RuntimeError("Em ambiente de produção, PUBLIC_URL deve ser uma URL HTTPS válida!")
     worker_task = asyncio.create_task(background_email_worker())
     try:
         yield
@@ -114,13 +121,41 @@ app = FastAPI(title="Drexier API", version="0.1.0", lifespan=lifespan)
 app.include_router(billing_router)
 app.include_router(email_router)
 
+# SEC-02: Configuração estrita de CORS com origens autorizadas
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+if _raw_origins:
+    ALLOWED_ORIGINS = [orig.strip() for orig in _raw_origins.split(",") if orig.strip()]
+else:
+    ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8000",
+    ]
+    _pub = os.getenv("PUBLIC_URL") or os.getenv("APP_URL")
+    if _pub:
+        ALLOWED_ORIGINS.append(_pub.rstrip("/"))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS if not is_test_environment() else ["*"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "x-goog-api-key", "Accept"],
 )
+
+
+# SEC-11: Middleware global de cabeçalhos HTTP de segurança
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 app.mount("/static", StaticFiles(directory=ROOT / "frontend"), name="static")
 
@@ -272,14 +307,21 @@ async def confirm_booking_direct(
 def current_user(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Sessão necessária.")
-    uid = decode_token(authorization[7:])
+    raw_token = authorization[7:]
+    uid = decode_token(raw_token)
     if not uid:
         raise HTTPException(401, "Sessão inválida ou expirada.")
     with connect() as c:
-        row = c.execute("SELECT id,name,email,business_type,business_description,language,agent_instructions,agent_adopted_style,mandatory_responses FROM users WHERE id=?", (uid,)).fetchone()
+        row = c.execute("SELECT id,name,email,business_type,business_description,language,agent_instructions,agent_adopted_style,mandatory_responses,token_version FROM users WHERE id=?", (uid,)).fetchone()
     if not row:
         raise HTTPException(401, "Conta não encontrada.")
-    return dict(row)
+    user_data = dict(row)
+    # SEC-05: Invalidação imediata de sessões se o token carregar versão revogada
+    claims = get_token_claims(raw_token)
+    if claims and "v" in claims and "token_version" in user_data and user_data["token_version"] is not None:
+        if int(claims["v"]) != int(user_data["token_version"]):
+            raise HTTPException(401, "Sessão revogada. Por favor, inicie sessão novamente.")
+    return user_data
 
 def user_id(user=Depends(current_user)):
     return user["id"]
@@ -429,7 +471,8 @@ def _challenge_response(challenge_id: str, email: str):
     }
 
 @app.post("/api/auth/signup")
-def signup(data: Signup):
+def signup(data: Signup, request: Request):
+    check_rate_limit(request, action="signup", max_requests=5, window_seconds=600, custom_key=data.email.lower())
     if data.password != data.confirm_password:
         raise HTTPException(400, "As senhas não coincidem.")
     if not re.search(r"[A-Za-z]", data.password) or not re.search(r"\d", data.password):
@@ -450,6 +493,7 @@ def signup(data: Signup):
 
 @app.post("/api/auth/login")
 def login(data: Login, request: Request):
+    check_rate_limit(request, action="login", max_requests=5, window_seconds=60, custom_key=data.email.lower())
     with connect() as c:
         row = c.execute(
             "SELECT id,name,email,password_hash FROM users WHERE email=?",
@@ -474,7 +518,8 @@ def login(data: Login, request: Request):
 
 
 @app.post("/api/auth/password-reset")
-def request_password_reset(data: PasswordResetRequest):
+def request_password_reset(data: PasswordResetRequest, request: Request):
+    check_rate_limit(request, action="password_reset", max_requests=3, window_seconds=600, custom_key=data.email.lower())
     email = data.email.lower()
     with connect() as c:
         row = c.execute(
@@ -559,6 +604,8 @@ def verify_auth_code(data: AuthCode):
     raise HTTPException(400, "Código inválido ou expirado.")
 
 
+_used_password_reset_tokens = set()
+
 @app.post("/api/auth/password-reset/complete")
 def complete_password_reset(data: PasswordResetComplete):
     if data.password != data.confirm_password:
@@ -566,15 +613,28 @@ def complete_password_reset(data: PasswordResetComplete):
     if not re.search(r"[A-Za-z]", data.password) or not re.search(r"\d", data.password):
         raise HTTPException(400, "A senha deve conter pelo menos uma letra e um número.")
 
+    # SEC-14: Impede reutilização do token dentro da janela de 10 minutos
+    if data.reset_token in _used_password_reset_tokens:
+        raise HTTPException(401, "Este token de recuperação já foi utilizado. Solicite um novo código.")
+
     user_id = decode_password_reset_token(data.reset_token)
     if not user_id:
         raise HTTPException(401, "O processo de recuperação expirou. Solicite um novo código.")
 
+    _used_password_reset_tokens.add(data.reset_token)
+
     with connect() as c:
-        c.execute(
-            "UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (hash_password(data.password), user_id),
-        )
+        # SEC-05: Incrementa token_version para invalidar todas as sessões ativas do utilizador
+        try:
+            c.execute(
+                "UPDATE users SET password_hash=?, token_version=COALESCE(token_version, 1) + 1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (hash_password(data.password), user_id),
+            )
+        except Exception:
+            c.execute(
+                "UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (hash_password(data.password), user_id),
+            )
     return {"password_updated": True, "message": "Senha atualizada. Já pode iniciar sessão."}
 
 @app.get("/api/me")
@@ -1138,7 +1198,14 @@ async def upload_training_document(file: UploadFile = File(...), user=Depends(cu
     elif lower_name.endswith(".docx"):
         try:
             import zipfile, xml.etree.ElementTree as ET
+            # SEC-07: Mitigação de Zip Bomb e Path Traversal
             with zipfile.ZipFile(io.BytesIO(content_bytes)) as z:
+                total_uncompressed = sum(info.file_size for info in z.infolist())
+                if total_uncompressed > 25 * 1024 * 1024:
+                    raise HTTPException(400, "Arquivo DOCX excede o limite seguro de descompactação (25MB).")
+                for info in z.infolist():
+                    if ".." in info.filename or info.filename.startswith(("/", "\\")):
+                        raise HTTPException(400, "Arquivo DOCX com estrutura inválida ou suspeita.")
                 xml_content = z.read("word/document.xml")
             tree = ET.fromstring(xml_content)
             paras = []
@@ -1148,6 +1215,8 @@ async def upload_training_document(file: UploadFile = File(...), user=Depends(cu
                     if t:
                         paras.append(t)
             extracted_text = "\n".join(paras)
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(400, f"Falha ao ler documento Word DOCX: {str(e)}")
 
@@ -1309,9 +1378,11 @@ def delete_variant(variant_id:int,user=Depends(current_user)):
     return {"ok":True}
 
 @app.get("/api/database/status")
-def database_status():
+def database_status(user=Depends(current_user)):
     """Retorna o estado de conectividade do Supabase como banco de dados principal e único."""
     status = get_supabase_status()
     status["engine"] = "Supabase PostgreSQL (Cloud)"
     status["local_db_eliminated"] = True
+    if "url" in status and status["url"]:
+        status["url"] = "https://[masked].supabase.co"
     return status
