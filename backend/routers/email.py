@@ -125,8 +125,6 @@ def get_email_status(user: dict = Depends(get_current_user)):
     }
 
 
-_used_oauth_states: set = set()
-
 @router.get("/oauth/google/url")
 def get_google_oauth_url(user: dict = Depends(require_email_subscription)):
     """
@@ -161,15 +159,26 @@ async def google_oauth_callback(
     Troca o código por tokens, obtém o e-mail do cliente e grava a integração.
     """
     if error:
-        return RedirectResponse(f"/?email_auth=error&reason={error}")
+        import urllib.parse as _urlparse
+        safe_err = _urlparse.quote(str(error), safe="")
+        return RedirectResponse(f"/?email_auth=error&reason={safe_err}")
 
     if not code or not state:
         return RedirectResponse("/?email_auth=error&reason=missing_code_or_state")
 
-    # SEC-16: Previne replay de state em ataques de Login CSRF
-    if state in _used_oauth_states:
-        return RedirectResponse("/?email_auth=error&reason=state_already_used")
-    _used_oauth_states.add(state)
+    # SEC-16: Previne replay de state em ataques de Login CSRF (C3: DB-persisted)
+    import hashlib as _hashlib
+    state_hash = _hashlib.sha256(state.encode()).hexdigest()
+    with connect() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS used_oauth_states (state_hash TEXT PRIMARY KEY, used_at TEXT NOT NULL, expires_at TEXT NOT NULL)")
+        # Clean up expired states older than 15 minutes
+        c.execute("DELETE FROM used_oauth_states WHERE expires_at < ?", (datetime.now(timezone.utc).isoformat(),))
+        already_used = c.execute("SELECT 1 FROM used_oauth_states WHERE state_hash=?", (state_hash,)).fetchone()
+        if already_used:
+            return RedirectResponse("/?email_auth=error&reason=state_already_used")
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=16)).isoformat()
+        c.execute("INSERT OR IGNORE INTO used_oauth_states(state_hash, used_at, expires_at) VALUES(?,?,?)",
+                  (state_hash, datetime.now(timezone.utc).isoformat(), expires_at))
 
     uid = decode_token(state)
     if not uid:
@@ -215,8 +224,10 @@ async def google_oauth_callback(
         # SEC-03: O token JWT da sessão não é vazado na URL
         return RedirectResponse("/?email_auth=success&provider=google")
     except Exception as e:
-        logger.error(f"Erro no callback do Google OAuth: {e}")
-        return RedirectResponse(f"/?email_auth=error&reason={str(e)}")
+        import urllib.parse as _urlparse
+        logger.error("Erro no callback do Google OAuth: %s", str(e).replace('\n', '\\n'))
+        safe_reason = _urlparse.quote("Falha na autenticação com a Google. Tente novamente.", safe="")
+        return RedirectResponse(f"/?email_auth=error&reason={safe_reason}")
 
 
 @router.post("/auto-reply")

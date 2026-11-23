@@ -63,10 +63,14 @@ def get_email_config() -> Dict[str, Any]:
 
     google_client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
-    google_redirect_uri = os.getenv(
-        "GOOGLE_REDIRECT_URI",
-        "http://localhost:8000/api/email/oauth/google/callback"
-    ).strip()
+    google_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "").strip()
+    is_prod = (os.getenv("APP_ENV") == "production" or os.getenv("ENVIRONMENT") == "production") and not (
+        os.getenv("PYTEST_CURRENT_TEST") or os.getenv("DREXIER_TEST_MODE") == "1"
+    )
+    if is_prod and (not google_redirect_uri or not google_redirect_uri.startswith("https://")):
+        raise RuntimeError("Em produção, GOOGLE_REDIRECT_URI deve ser configurada obrigatoriamente com HTTPS.")
+    if not google_redirect_uri:
+        google_redirect_uri = "http://localhost:8000/api/email/oauth/google/callback"
 
     return {
         "google": {
@@ -2308,12 +2312,11 @@ async def process_and_reply_email(
         reply_instructions = effective_agent_instructions(user_dict)
         if inquiry_intent and not has_specific_schedule:
             reply_instructions += (
-                "\n\nCONTEXTO OPERACIONAL: O cliente demonstrou intenção de marcação. "
-                "O e-mail já apresenta automaticamente as opções de datas disponíveis para o cliente escolher. "
-                "NUNCA pergunte 'qual dia pretendido e o horário de sua preferência', 'aguardamos o seu retorno' "
-                "nem peça para o cliente informar data ou horário. "
-                "Apenas escreva: 'Selecione a sua data disponível para efectuar a marcação (data e horário).' "
-                "(ou esclareça dúvidas pontuais do cliente e conclua com 'Selecione a sua data disponível para efectuar a marcação (data e horário).')."
+                "\n\nCONTEXTO OPERACIONAL: O cliente demonstrou interesse em agendamento ou tirou dúvidas sobre o negócio. "
+                "DIRETRIZ MANDATÓRIA: Leia toda a conversa, identifique com precisão a dúvida ou pergunta do cliente, "
+                "e responda PRIMEIRO e com PRIORIDADE ABSOLUTA exatamente ao que ele perguntou. "
+                "Se o cliente tiver expressado intenção de agendamento, indique cordialmente que ele pode selecionar uma das opções de data disponíveis apresentadas no e-mail. "
+                "NUNCA envie apenas frases prontas de marcação ignorando as perguntas reais do cliente."
             )
         elif waiting_for_schedule:
             missing_parts = []

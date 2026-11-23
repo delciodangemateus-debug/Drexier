@@ -503,11 +503,12 @@ def verify_checkout_session(session_id: str, user_id: int) -> Dict[str, Any]:
 
 def is_subscription_active(user_id: int) -> bool:
     """Verifica se o utilizador possui acesso SaaS liberado por pagamento em dia."""
-    # Se a Stripe não estiver configurada no .env (modo de desenvolvimento inicial livre), permite acesso
+    # SEC C8: Fail CLOSED — se a Stripe não estiver configurada, bloqueia acesso por segurança
     if not is_stripe_configured():
-        return True
+        logger.warning(f"[SaaS Paywall] Stripe não configurada no ambiente. Bloqueando acesso para user {user_id} por segurança.")
+        return False
     status = get_user_subscription_status(user_id)
-    return status["has_active_subscription"]
+    return bool(status.get("has_active_subscription"))
 
 
 def schedule_subscription_cancellation(user_id: int) -> Dict[str, Any]:

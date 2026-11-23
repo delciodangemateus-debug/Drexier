@@ -590,6 +590,12 @@ class SupabaseCursor:
                 self.rowcount = len(self._rows)
                 return self
 
+        query_upper = clean_sql.strip().upper()
+        is_write_op = any(query_upper.startswith(op) for op in ("INSERT", "UPDATE", "DELETE", "REPLACE"))
+        if is_write_op:
+            logger.error(f"[SupabaseCursor] Operação de escrita NÃO MAPEADA — risco de perda de dados: {clean_sql}")
+            raise RuntimeError(f"[SupabaseAdapter] Operação de escrita não mapeada: {clean_sql[:120]}")
+
         logger.warning(f"[SupabaseCursor] Consulta não mapeada diretamente: {clean_sql}")
         return self
 

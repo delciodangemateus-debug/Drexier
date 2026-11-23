@@ -1,9 +1,45 @@
+# Environment files & Secrets
 .env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
+*.cert
+*.p12
+
+# Python
 .venv/
+venv/
+ENV/
+env/
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+
+# Databases & local state
 data/*.db
+*.sqlite
+*.sqlite3
+*.db
+
+# Caches & Test artifacts
 .pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Frontend & Dependencies
 node_modules/
 dist/
+build/
+.cache/
+
+# OS & Editor
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

@@ -656,7 +656,8 @@ function openModal(htmlContent) {
   const modal = $("#card-expand-modal");
   const shell = $("#expanded-card-content");
   modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  shell.innerHTML = htmlContent;
+  // SEC C5: Sanitização de conteúdo HTML de modal com DOMPurify contra XSS
+  shell.innerHTML = typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(htmlContent) : htmlContent;
   const heading = shell.querySelector(".expanded-header-title");
   if (heading) {
     heading.id = "expanded-modal-title";
@@ -2533,7 +2534,8 @@ function renderAnalysisContent(container, content) {
       }
     });
 
-    div.innerHTML = html;
+    // SEC C6: Sanitização rigorosa com DOMPurify antes de inserir no DOM
+    div.innerHTML = typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(html) : html;
     container.append(div);
   });
 }
@@ -3020,12 +3022,14 @@ function setupStrategicAiReportButton() {
         sections.forEach(sec => {
           const div = document.createElement("div");
           div.className = "strategic-report-section";
-          div.innerHTML = sec
+          const formattedHtml = sec
             .replace(/^###\s+(.+)$/gm, "<h4>$1</h4>")
             .replace(/^##\s+(.+)$/gm, "<h3>$1</h3>")
             .replace(/^#\s+(.+)$/gm, "<h2>$1</h2>")
             .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
             .replace(/\n/g, "<br>");
+          // SEC C6: Sanitização de relatório AI contra XSS e Prompt Injection exfiltration
+          div.innerHTML = typeof DOMPurify !== "undefined" ? DOMPurify.sanitize(formattedHtml) : formattedHtml;
           body.append(div);
         });
         container.classList.remove("hidden");

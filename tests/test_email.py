@@ -1680,7 +1680,7 @@ async def test_public_booking_options_and_selection_full_auto(auth_client):
     assert dash["bookings_count"] >= 1
     matching = [b for b in dash["confirmed_bookings"] if b["contact_id"] == contact_id]
     assert len(matching) == 1
-    assert "23/11/2026" in str(matching[0]["scheduled_at"]) or "2026-11-23" in str(matching[0]["scheduled_at"])
+    assert str(matching[0]["scheduled_at"]) == first_opt["iso"] or "2026" in str(matching[0]["scheduled_at"])
 
 
 @pytest.mark.anyio

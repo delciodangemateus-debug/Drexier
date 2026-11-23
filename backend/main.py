@@ -138,9 +138,12 @@ else:
     if _pub:
         ALLOWED_ORIGINS.append(_pub.rstrip("/"))
 
+is_prod_env = (os.getenv("APP_ENV") == "production" or os.getenv("ENVIRONMENT") == "production")
+cors_origins = ALLOWED_ORIGINS if (is_prod_env or not is_test_environment()) else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS if not is_test_environment() else ["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "x-goog-api-key", "Accept"],
@@ -154,7 +157,21 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://js.stripe.com https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https://api.stripe.com https://*.supabase.co; "
+        "frame-src https://js.stripe.com; "
+        "frame-ancestors 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self';"
+    )
     return response
 
 app.mount("/static", StaticFiles(directory=ROOT / "frontend"), name="static")
@@ -378,9 +395,9 @@ class BusinessInfoIn(BaseModel):
 
 class ProfileUpdate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
-    business_type: str
-    business_description: str = ""
-    language: str = "Português"
+    business_type: str = Field(default="", max_length=120)
+    business_description: str = Field(default="", max_length=5000)
+    language: str = Field(default="Português", max_length=50)
 
 class DeleteAccountIn(BaseModel):
     password: str = Field(min_length=8, max_length=128)
@@ -462,6 +479,16 @@ def _start_auth_challenge(email: str, name: str, purpose: str, payload: dict):
     return challenge_id
 
 
+def _validate_password_strength(password: str) -> None:
+    """Valida requisitos de segurança e entropia da palavra-passe."""
+    if len(password) < 8:
+        raise HTTPException(400, "A senha deve conter pelo menos 8 caracteres.")
+    if len(password.encode("utf-8")) > 72:
+        raise HTTPException(400, "A senha não pode exceder 72 caracteres.")
+    if not re.search(r"[A-Za-z]", password) or not re.search(r"\d", password):
+        raise HTTPException(400, "A senha deve conter pelo menos uma letra e um número.")
+
+
 def _challenge_response(challenge_id: str, email: str):
     return {
         "challenge_required": True,
@@ -475,8 +502,7 @@ def signup(data: Signup, request: Request):
     check_rate_limit(request, action="signup", max_requests=5, window_seconds=600, custom_key=data.email.lower())
     if data.password != data.confirm_password:
         raise HTTPException(400, "As senhas não coincidem.")
-    if not re.search(r"[A-Za-z]", data.password) or not re.search(r"\d", data.password):
-        raise HTTPException(400, "A senha deve conter pelo menos uma letra e um número.")
+    _validate_password_strength(data.password)
     email = data.email.lower()
     challenge_id = _start_auth_challenge(
         email,
@@ -542,7 +568,9 @@ def request_password_reset(data: PasswordResetRequest, request: Request):
     return _challenge_response(challenge_id, row["email"])
 
 @app.post("/api/auth/verify")
-def verify_auth_code(data: AuthCode):
+def verify_auth_code(data: AuthCode, request: Request):
+    # SEC H10: Rate limiting em tentativas de validação de código OTP
+    check_rate_limit(request, action="verify", max_requests=20, window_seconds=60, custom_key=data.challenge_id)
     try:
         signup_payload = consume_auth_challenge(data.challenge_id, data.code, "signup")
         login_payload = None
@@ -604,26 +632,29 @@ def verify_auth_code(data: AuthCode):
     raise HTTPException(400, "Código inválido ou expirado.")
 
 
-_used_password_reset_tokens = set()
-
 @app.post("/api/auth/password-reset/complete")
 def complete_password_reset(data: PasswordResetComplete):
     if data.password != data.confirm_password:
         raise HTTPException(400, "As senhas não coincidem.")
-    if not re.search(r"[A-Za-z]", data.password) or not re.search(r"\d", data.password):
-        raise HTTPException(400, "A senha deve conter pelo menos uma letra e um número.")
-
-    # SEC-14: Impede reutilização do token dentro da janela de 10 minutos
-    if data.reset_token in _used_password_reset_tokens:
-        raise HTTPException(401, "Este token de recuperação já foi utilizado. Solicite um novo código.")
+    _validate_password_strength(data.password)
 
     user_id = decode_password_reset_token(data.reset_token)
     if not user_id:
         raise HTTPException(401, "O processo de recuperação expirou. Solicite um novo código.")
 
-    _used_password_reset_tokens.add(data.reset_token)
+    import hashlib as _hashlib
+    token_hash = _hashlib.sha256(data.reset_token.encode()).hexdigest()
 
     with connect() as c:
+        # SEC C2: Persistência de tokens de recuperação usados na base de dados (sobrevive a restarts)
+        c.execute("CREATE TABLE IF NOT EXISTS used_reset_tokens (token_hash TEXT PRIMARY KEY, used_at TEXT NOT NULL)")
+        already_used = c.execute("SELECT 1 FROM used_reset_tokens WHERE token_hash=?", (token_hash,)).fetchone()
+        if already_used:
+            raise HTTPException(401, "Este token de recuperação já foi utilizado. Solicite um novo código.")
+
+        c.execute("INSERT OR IGNORE INTO used_reset_tokens(token_hash, used_at) VALUES (?, ?)",
+                  (token_hash, datetime.now(timezone.utc).isoformat()))
+
         # SEC-05: Incrementa token_version para invalidar todas as sessões ativas do utilizador
         try:
             c.execute(
@@ -807,10 +838,19 @@ async def select_booking_option(request: Request):
 @app.options("/api/booking/select")
 async def booking_select_preflight(request: Request):
     """Responde a pedidos CORS preflight do AMP for Email."""
-    origin = request.headers.get("origin", "*")
+    origin = request.headers.get("origin", "")
     amp_source_origin = request.query_params.get("__amp_source_origin", "")
+    
+    # SEC H6: Validar origem permitida antes de refletir
+    is_amp = bool(amp_source_origin or "mail.google.com" in origin or "gmail" in origin.lower())
+    is_allowed = (origin in ALLOWED_ORIGINS) or is_amp or is_test_environment()
+    
+    if origin and not is_allowed:
+        return JSONResponse(content={"error": "Origin not allowed"}, status_code=403)
+
+    allow_origin = origin if origin else "*"
     headers = {
-        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Origin": allow_origin,
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
         "Access-Control-Allow-Credentials": "true",
@@ -1186,6 +1226,9 @@ async def upload_training_document(file: UploadFile = File(...), user=Depends(cu
         try:
             import pypdfium2 as pdfium
             pdf = pdfium.PdfDocument(content_bytes)
+            # SEC M7: Limite de páginas para evitar DoS de CPU
+            if len(pdf) > 500:
+                raise HTTPException(400, "O documento PDF excede o limite máximo de 500 páginas.")
             pages = []
             for page in pdf:
                 txt = page.get_textpage().get_text_range()

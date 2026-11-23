@@ -300,3 +300,16 @@ def test_format_gemini_contents_deduplicates_current_message():
     assert contents[-1]["role"] == "user"
     assert "Quero confirmar o pedido." in contents[-1]["parts"][0]["text"]
 
+def test_system_instruction_enforces_mandatory_conversation_flow():
+    from backend.services.agent import build_system_instruction
+    prompt = build_system_instruction(
+        business_context="Café Expresso: 1.20€",
+        instructions="Seja educado.",
+        business_name="Café Central"
+    )
+    assert "FLUXO MANDATÓRIO E OBRIGATÓRIO DE ATENDIMENTO" in prompt
+    assert "ETAPA 1 — LEITURA E CONTEXTUALIZAÇÃO TOTAL DA CONVERSA" in prompt
+    assert "ETAPA 2 — IDENTIFICAÇÃO DO QUE O USUÁRIO QUER PERGUNTAR OU SOLICITAR" in prompt
+    assert "ETAPA 3 — RESPOSTA ESTRITA, DIRETA E EXCLUSIVA" in prompt
+    assert "responder SOMENTE ao que foi perguntado ou solicitado" in prompt
+

@@ -9,6 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Space+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script type="module" src="./i18n.js"></script>
+<!-- SEC C5/C6: Sanitização de HTML com DOMPurify para prevenção rigorosa de XSS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 <script>
   try {
     if (localStorage.getItem("drexier_token")) {

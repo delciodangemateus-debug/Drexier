@@ -37,6 +37,27 @@ class InMemoryRateLimiter:
         now = time.time()
         cutoff = now - window_seconds
 
+        # SEC C7: Suporte a persistência em base de dados para múltiplos workers / deploys
+        try:
+            from backend.database import connect
+            with connect() as c:
+                c.execute("CREATE TABLE IF NOT EXISTS rate_limits (rate_key TEXT NOT NULL, ts REAL NOT NULL)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rate_limits_key_ts ON rate_limits(rate_key, ts)")
+                c.execute("DELETE FROM rate_limits WHERE ts < ?", (cutoff,))
+                row = c.execute(
+                    "SELECT COUNT(*) as cnt, MIN(ts) as oldest FROM rate_limits WHERE rate_key = ?",
+                    (key,)
+                ).fetchone()
+                cnt = row["cnt"] if row else 0
+                if cnt >= max_requests:
+                    oldest = row["oldest"] if (row and row["oldest"]) else cutoff
+                    retry_after = max(1, int(oldest + window_seconds - now))
+                    return False, retry_after
+                c.execute("INSERT INTO rate_limits (rate_key, ts) VALUES (?, ?)", (key, now))
+                return True, 0
+        except Exception:
+            pass
+
         with self._lock:
             timestamps = self._records[key]
             # Limpa timestamps antigos fora da janela deslizante

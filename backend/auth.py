@@ -3,7 +3,8 @@ import sys
 import bcrypt
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from jose import jwt, JWTError
+import jwt
+from jwt.exceptions import InvalidTokenError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,19 +26,24 @@ if (os.getenv("APP_ENV") == "production" or os.getenv("ENVIRONMENT") == "product
 ALGORITHM = "HS256"
 
 def hash_password(password: str) -> str:
-    pwd_bytes = password.encode("utf-8")[:72]
+    pwd_bytes = password.encode("utf-8")
+    if len(pwd_bytes) > 72:
+        raise ValueError("A palavra-passe não pode exceder 72 caracteres.")
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
 def verify_password(password: str, hashed: str) -> bool:
     try:
-        return bcrypt.checkpw(password.encode("utf-8")[:72], hashed.encode("utf-8"))
+        pwd_bytes = password.encode("utf-8")
+        if len(pwd_bytes) > 72:
+            return False
+        return bcrypt.checkpw(pwd_bytes, hashed.encode("utf-8"))
     except Exception:
         return False
 
 def create_token(user_id: int, token_version: int = 1) -> str:
-    # Sessão ativa por até 60 dias (com suporte a revogação instantânea via token_version)
-    exp = datetime.now(timezone.utc) + timedelta(days=60)
+    # Sessão ativa por até 7 dias (com suporte a revogação instantânea via token_version)
+    exp = datetime.now(timezone.utc) + timedelta(days=7)
     payload = {"sub": str(user_id), "v": int(token_version or 1), "exp": exp}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -45,7 +51,7 @@ def create_token(user_id: int, token_version: int = 1) -> str:
 def get_token_claims(token: str) -> Optional[Dict[str, Any]]:
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except (JWTError, KeyError, ValueError):
+    except (InvalidTokenError, KeyError, ValueError, Exception):
         return None
 
 
@@ -64,7 +70,7 @@ def decode_password_reset_token(token: str):
         if payload.get("purpose") != "password_reset":
             return None
         return int(payload["sub"])
-    except (JWTError, KeyError, ValueError):
+    except (InvalidTokenError, KeyError, ValueError, Exception):
         return None
 
 
@@ -74,12 +80,13 @@ def decode_token(token: str):
         if payload.get("purpose") in ("password_reset", "booking"):
             return None
         return int(payload["sub"])
-    except (JWTError, KeyError, ValueError):
+    except (InvalidTokenError, KeyError, ValueError, Exception):
         return None
 
 
 def create_booking_token(user_id: int, contact_id: int, email: str, name: str = "") -> str:
-    exp = datetime.now(timezone.utc) + timedelta(days=60)
+    # Token de booking expira em 48 horas (H2: reduzido de 60 dias para 48 horas)
+    exp = datetime.now(timezone.utc) + timedelta(hours=48)
     payload = {
         "sub": str(user_id),
         "contact_id": int(contact_id),
@@ -102,5 +109,5 @@ def decode_booking_token(token: str) -> dict:
             "email": str(payload.get("email", "")),
             "name": str(payload.get("name", "")),
         }
-    except (JWTError, KeyError, ValueError):
+    except (InvalidTokenError, KeyError, ValueError, Exception):
         return None
