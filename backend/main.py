@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request, Form
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -30,6 +31,7 @@ from backend.services.analytics import (
 )
 from backend.services.email_service import (
     BUSINESS_TIMEZONE,
+    EmailTokenExpiredError,
     sync_emails_for_user,
     process_confirmation_action,
     send_ai_booking_reminder,
@@ -91,6 +93,8 @@ async def background_email_worker():
                     processed = await sync_emails_for_user(uid)
                     if processed:
                         logger.info(f"[IA Drexier] {len(processed)} e-mail(s) real(is) processado(s) e respondido(s) para user_id {uid}.")
+                except EmailTokenExpiredError as te:
+                    logger.warning(f"[IA Drexier] Token expirado para user {uid}. Agente pausado aguardando reconexão: {te}")
                 except Exception as ex:
                     logger.warning(f"[IA Drexier] Erro na verificação periódica de e-mails para utilizador {uid}: {ex}")
         except Exception as e:
@@ -173,6 +177,16 @@ async def add_security_headers(request: Request, call_next):
         "base-uri 'self';"
     )
     return response
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+    logger.error(f"Erro interno não tratado: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Ocorreu um erro. Tente novamente."}
+    )
 
 app.mount("/static", StaticFiles(directory=ROOT / "frontend"), name="static")
 

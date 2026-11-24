@@ -308,9 +308,9 @@
 
     <div id="error-screen" style="display: none; text-align: center; padding: 30px 10px;">
       <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
-      <h2 style="font-size: 20px; margin-bottom: 8px;" id="error-title">Link Indisponível</h2>
+      <h2 style="font-size: 20px; margin-bottom: 8px;" id="error-title">Ocorreu um erro / An error occurred</h2>
       <p style="color: var(--text-muted); font-size: 14px; line-height: 1.6;" id="error-desc">
-        O link de agendamento é inválido ou já expirou. Por favor, aceda através do botão oficial enviado para o seu e-mail.
+        Algo correu errado. Tente novamente. / Something went wrong. Please try again.
       </p>
     </div>
 
@@ -407,29 +407,35 @@
     const customDateInput = document.getElementById('custom-date');
     const customTimeInput = document.getElementById('custom-time');
 
+    function getGenericErrorMessage() {
+      const isEn = (navigator.language && navigator.language.toLowerCase().startsWith('en'));
+      return isEn ? "An error occurred. Please try again." : "Ocorreu um erro. Tente novamente.";
+    }
+
     function showError(msg) {
       loadingState.style.display = 'none';
       bookingForm.style.display = 'none';
       resultScreen.style.display = 'none';
       errorScreen.style.display = 'block';
-      if (msg) document.getElementById('error-desc').textContent = msg;
+      const isEn = (navigator.language && navigator.language.toLowerCase().startsWith('en'));
+      document.getElementById('error-title').textContent = isEn ? "An error occurred" : "Ocorreu um erro";
+      document.getElementById('error-desc').textContent = isEn ? "Something went wrong. Please try again." : "Algo correu errado. Tente novamente.";
     }
 
     async function loadOptions() {
       if (!token) {
-        showError("Nenhum token de agendamento fornecido. Por favor, aceda através do botão enviado no seu e-mail.");
+        showError();
         return;
       }
       try {
         const res = await fetch(`/api/booking/options?token=${encodeURIComponent(token)}`);
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || "Link inválido ou expirado.");
+          throw new Error();
         }
         bookingData = await res.json();
         renderForm();
       } catch (e) {
-        showError(e.message);
+        showError();
       }
     }
 
@@ -506,7 +512,7 @@
       formError.style.display = 'none';
       const name = customerNameInput.value.trim();
       if (!name) {
-        formError.textContent = "Por favor, indique o seu nome completo para a marcação.";
+        formError.textContent = getGenericErrorMessage();
         formError.style.display = 'block';
         customerNameInput.focus();
         return;
@@ -519,7 +525,7 @@
         const d = customDateInput.value;
         const t = customTimeInput.value;
         if (!d || !t) {
-          formError.textContent = "Por favor, selecione a data e o horário pretendidos.";
+          formError.textContent = getGenericErrorMessage();
           formError.style.display = 'block';
           return;
         }
@@ -529,7 +535,7 @@
         slotIso = `${d}T${t}:00Z`;
       } else {
         if (!selectedOption) {
-          formError.textContent = "Por favor, selecione uma das opções disponíveis.";
+          formError.textContent = getGenericErrorMessage();
           formError.style.display = 'block';
           return;
         }
@@ -553,14 +559,13 @@
         });
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || "Erro ao registar a marcação.");
+          throw new Error();
         }
 
         const data = await res.json();
         showSuccess(data);
       } catch (err) {
-        formError.textContent = err.message;
+        formError.textContent = getGenericErrorMessage();
         formError.style.display = 'block';
         btnSubmit.disabled = false;
         btnSubmit.innerHTML = `<span>Confirmar Opção Selecionada</span>`;

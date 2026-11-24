@@ -37,9 +37,11 @@
       <nav class="lp-nav">
         <a href="#lp-hero" class="lp-nav-link">Visão Geral</a>
         <a href="#lp-how-it-works" class="lp-nav-link">Como Funciona</a>
-        <a href="#lp-features" class="lp-nav-link">Funcionalidades</a>
-        <a href="#lp-benefits" class="lp-nav-link">Benefícios</a>
-        <a href="#lp-faq" class="lp-nav-link">Perguntas Frequentes</a>
+        <a href="#lp-simulation" class="lp-nav-link">Simulação</a>
+        <a href="#lp-features" class="lp-nav-link">Capacidades</a>
+        <a href="#lp-comparison" class="lp-nav-link">Comparativo</a>
+        <a href="#lp-pricing" class="lp-nav-link">Preço</a>
+        <a href="#lp-faq" class="lp-nav-link">FAQ</a>
       </nav>
       <div class="lp-header-actions">
         <div class="language-selector" role="group" aria-label="Idioma / Language">
@@ -58,41 +60,42 @@
       <div class="lp-hero-grid">
         <div class="lp-hero-content">
           <div class="lp-pill-badge">
-            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-            <span>Tecnologia Autônoma de Atendimento &amp; Vendas</span>
+            <span class="lp-radar-dot"></span>
+            <span>IA Autônoma para Vendas &amp; Atendimento Comercial via E-mail</span>
           </div>
           <h1 class="lp-hero-title">
-            A inteligência que transforma conversas em <span class="lp-title-highlight">clientes</span>.
+            A inteligência que transforma e-mails frios em <span class="lp-title-highlight">vendas e agendamentos</span>.
           </h1>
           <p class="lp-hero-subtitle">
-            O Drexier utiliza inteligência artificial para conduzir conversas comerciais, responder aos seus clientes e acompanhar o processo de compra, enquanto o seu negócio continua a avançar.
+            O Drexier conecta-se à sua conta Google Gmail para responder a dúvidas de clientes, verificar disponibilidade de produtos e agendar serviços 24 horas por dia — com controle absoluto e intervenção humana a qualquer instante.
           </p>
           <div class="lp-hero-actions">
             <button type="button" class="btn primary lp-btn-hero lp-cta-btn" id="lp-btn-hero-start">
-              <span>Começar agora</span>
+              <span>Começar agora gratuitamente</span>
               <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
             </button>
-            <a href="#lp-how-it-works" class="btn outline lp-btn-hero-secondary" id="lp-btn-hero-secondary">
-              <span>Conhecer a plataforma</span>
+            <a href="#lp-simulation" class="btn outline lp-btn-hero-secondary" id="lp-btn-hero-secondary">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+              <span>Ver simulação ao vivo</span>
             </a>
           </div>
           <div class="lp-hero-guarantees">
             <div class="lp-hero-guarantee-item">
               <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <span>Configuração guiada</span>
+              <span>OAuth 2.0 Verificado Google</span>
             </div>
             <div class="lp-hero-guarantee-item">
               <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <span>Integração com Gmail</span>
+              <span>Sigilo Absoluto de Estoque</span>
             </div>
             <div class="lp-hero-guarantee-item">
               <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <span>Controlo do agente na plataforma</span>
+              <span>Controlo Total do Agente</span>
             </div>
           </div>
         </div>
 
-        <!-- HERO VISUAL SHOWCASE -->
+        <!-- HERO VISUAL SHOWCASE COM ABAS INTERATIVAS -->
         <div class="lp-hero-visual-wrapper">
           <div class="lp-visual-frame">
             <div class="lp-visual-header">
@@ -101,77 +104,142 @@
                 <span class="lp-vdot"></span>
                 <span class="lp-vdot"></span>
               </div>
-              <div class="lp-visual-title">Drexier Email Assistant &bull; Product Preview</div>
+              <div class="lp-hero-tabs" role="tablist">
+                <button type="button" class="lp-hero-tab active" data-tab="gmail">Atendimento Gmail</button>
+                <button type="button" class="lp-hero-tab" data-tab="board">Quadro de Marcações</button>
+                <button type="button" class="lp-hero-tab" data-tab="studio">Agent Studio</button>
+              </div>
               <div class="lp-visual-status">
                 <span class="lp-live-beacon"></span>
-                <span>Atendimento Ativo</span>
+                <span>Online</span>
               </div>
             </div>
 
-            <!-- Telemetria do Agente -->
-            <div class="lp-telemetry-grid">
-              <div class="lp-telemetry-item">
-                <span class="lp-telemetry-label">Agente de IA</span>
-                <strong class="lp-telemetry-val">Ativo &bull; Drexier</strong>
-                <small class="lp-telemetry-sub">Operação contínua</small>
+            <!-- ABA 1: ATENDIMENTO GMAIL AO VIVO -->
+            <div class="lp-hero-pane active" data-pane="gmail">
+              <!-- Telemetria do Agente -->
+              <div class="lp-telemetry-grid">
+                <div class="lp-telemetry-item">
+                  <span class="lp-telemetry-label">Agente de IA</span>
+                  <strong class="lp-telemetry-val">Ativo &bull; Drexier</strong>
+                </div>
+                <div class="lp-telemetry-item">
+                  <span class="lp-telemetry-label">Canal Oficial</span>
+                  <strong class="lp-telemetry-val" style="color: var(--purple-arcade);">Google Gmail</strong>
+                </div>
+                <div class="lp-telemetry-item">
+                  <span class="lp-telemetry-label">Base do Negócio</span>
+                  <strong class="lp-telemetry-val">Sincronizada</strong>
+                </div>
+                <div class="lp-telemetry-item">
+                  <span class="lp-telemetry-label">Intervenção</span>
+                  <strong class="lp-telemetry-val" style="color: var(--color-success);">Humano / IA</strong>
+                </div>
               </div>
-              <div class="lp-telemetry-item">
-                <span class="lp-telemetry-label">Canal Oficial</span>
-                <strong class="lp-telemetry-val lp-gold-val">Google Gmail</strong>
-                <small class="lp-telemetry-sub">OAuth 2.0 verificado</small>
-              </div>
-              <div class="lp-telemetry-item">
-                <span class="lp-telemetry-label">Base do Negócio</span>
-                <strong class="lp-telemetry-val">100% Conectada</strong>
-                <small class="lp-telemetry-sub">Produtos, regras &amp; stock</small>
-              </div>
-              <div class="lp-telemetry-item">
-                <span class="lp-telemetry-label">Intervenção</span>
-                <strong class="lp-telemetry-val lp-gold-val">Controlo Total</strong>
-                <small class="lp-telemetry-sub">Assumir a qualquer hora</small>
+
+              <!-- Demonstração de Conversação de Email -->
+              <div class="lp-dialogue-mockup">
+                <!-- Cliente -->
+                <div class="lp-mock-bubble lp-client-bubble">
+                  <div class="lp-bubble-meta">
+                    <span class="lp-client-tag">
+                      <svg class="svg-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path></svg>
+                      <span>Entrada de Email</span>
+                    </span>
+                    <span style="color: var(--text-tertiary);">Mariana Costa &bull; Há 1 minuto</span>
+                  </div>
+                  <div class="lp-bubble-subject">Assunto: Disponibilidade de Camisola Premium e prazos</div>
+                  <p class="lp-bubble-text">
+                    "Boa tarde! Gostaria de saber se têm disponível a Camisola Premium em tamanho M na cor preta e se posso marcar uma visita ao showroom para ver o tecido."
+                  </p>
+                </div>
+
+                <!-- Conexão do Fluxo -->
+                <div class="lp-flow-line">
+                  <div class="lp-flow-pulse"></div>
+                  <span>IA consultou Stock em tempo real, Políticas de Entrega e Horários Livres</span>
+                </div>
+
+                <!-- Agente IA -->
+                <div class="lp-mock-bubble lp-agent-bubble">
+                  <div class="lp-bubble-meta">
+                    <span class="lp-agent-badge">
+                      <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                      <span>Resposta IA Drexier</span>
+                    </span>
+                    <span style="color: var(--text-tertiary);">Entregue via Gmail oficial &bull; 42s de resposta</span>
+                  </div>
+                  <div class="lp-bubble-subject">Re: Disponibilidade de Camisola Premium e prazos</div>
+                  <p class="lp-bubble-text">
+                    "Olá Mariana! Temos a Camisola Premium em tamanho M na cor preta disponível para entrega imediata. Será um prazer recebê-la no nosso showroom. Selecione a sua data e horário preferido para confirmar a sua visita:"
+                  </p>
+                  <!-- Botões de Opções de Agendamento Interativos -->
+                  <div class="lp-mock-slots-grid">
+                    <div class="lp-mock-slot-btn selected">
+                      <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+                      <span>Terça, 10:30 (Escolhido)</span>
+                    </div>
+                    <div class="lp-mock-slot-btn">
+                      <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+                      <span>Quarta, 15:00</span>
+                    </div>
+                    <div class="lp-mock-slot-btn">
+                      <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+                      <span>Quinta, 17:00</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <!-- Demonstração de Conversação de Email -->
-            <div class="lp-dialogue-mockup">
-              <!-- Cliente -->
-              <div class="lp-mock-bubble lp-client-bubble">
-                <div class="lp-bubble-meta">
-                  <span class="lp-client-tag">Entrada de Email</span>
-                  <span class="lp-client-id">Mariana Costa &bull; Cliente</span>
-                  <span class="lp-bubble-time">Hoje às 14:22</span>
+            <!-- ABA 2: QUADRO DE MARCAÇÕES -->
+            <div class="lp-hero-pane" data-pane="board">
+              <div class="lp-board-preview-grid">
+                <div class="lp-board-col">
+                  <div class="lp-board-col-header">
+                    <span>PEDIDOS PENDENTES (1)</span>
+                    <span class="lp-board-badge" style="background: var(--orange-subtle); color: var(--orange-arcade);">Aguardando</span>
+                  </div>
+                  <div class="lp-board-card">
+                    <div class="lp-board-card-title">Mariana Costa</div>
+                    <div class="lp-board-card-sub">Visita Showroom &bull; Camisola Premium M (Preto)</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                      <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-tertiary);">Terça 10:30</span>
+                      <button type="button" class="btn primary small" style="padding:2px 8px; font-size:11px;">Confirmar</button>
+                    </div>
+                  </div>
                 </div>
-                <div class="lp-bubble-subject">Assunto: Disponibilidade de Camisola Premium e prazos</div>
-                <p class="lp-bubble-text">
-                  "Boa tarde! Gostaria de saber se têm disponível a Camisola Premium em tamanho M na cor preta e qual o prazo estimado de entrega para Lisboa."
-                </p>
-              </div>
 
-              <!-- Conexão do Fluxo -->
-              <div class="lp-flow-line">
-                <div class="lp-flow-pulse"></div>
-                <span>IA consultou Stock em tempo real e Políticas de Entrega</span>
+                <div class="lp-board-col">
+                  <div class="lp-board-col-header">
+                    <span>MARCAÇÕES CONFIRMADAS (3)</span>
+                    <span class="lp-board-badge" style="background: var(--lime-subtle); color: var(--color-success);">Agendado</span>
+                  </div>
+                  <div class="lp-board-card" style="border-left: 4px solid var(--color-success);">
+                    <div class="lp-board-card-title">João Ferreira</div>
+                    <div class="lp-board-card-sub">Demonstração de Software &bull; Confirmado</div>
+                    <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-tertiary);">Amanhã às 14:00</span>
+                  </div>
+                  <div class="lp-board-card" style="border-left: 4px solid var(--color-success);">
+                    <div class="lp-board-card-title">Délcio Mateus</div>
+                    <div class="lp-board-card-sub">Consultoria Comercial &bull; Confirmado</div>
+                    <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-tertiary);">Quarta às 16:30</span>
+                  </div>
+                </div>
               </div>
+            </div>
 
-              <!-- Agente IA -->
-              <div class="lp-mock-bubble lp-agent-bubble">
-                <div class="lp-bubble-meta">
-                  <span class="lp-agent-badge">
-                    <svg class="svg-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                    <span>IA Drexier</span>
-                  </span>
-                  <span class="lp-agent-id">Resposta Oficial &bull; Entregue via Gmail</span>
-                </div>
-                <div class="lp-bubble-subject">Re: Disponibilidade de Camisola Premium e prazos</div>
-                <p class="lp-bubble-text">
-                  "Olá Mariana, obrigado pelo contacto! Temos a Camisola Premium em tamanho M na cor preta disponível para envio imediato. As entregas para Lisboa demoram entre 24 a 48 horas úteis. Deseja que reserve o artigo e lhe envie o link seguro de confirmação de encomenda?"
-                </p>
-                <div class="lp-agent-footer">
-                  <span class="lp-audit-tag">
-                    <svg class="svg-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                    <span>Intenção de compra detectada e registada no Dashboard</span>
-                  </span>
-                </div>
+            <!-- ABA 3: AGENT STUDIO MOCKUP -->
+            <div class="lp-hero-pane" data-pane="studio">
+              <div class="lp-studio-mock-code no-translate">
+                <div><span class="lp-code-comment">// Diretrizes do Agente Comercial Drexier</span></div>
+                <div><span class="lp-code-keyword">const</span> <span class="lp-code-prop">agentConfig</span> = {</div>
+                <div style="padding-left:16px;"><span class="lp-code-prop">tomDeVoz</span>: <span class="lp-code-str">"Profissional, consultivo e focado em fecho"</span>,</div>
+                <div style="padding-left:16px;"><span class="lp-code-prop">canalIntegrado</span>: <span class="lp-code-str">"Google Gmail OAuth 2.0"</span>,</div>
+                <div style="padding-left:16px;"><span class="lp-code-prop">politicaSigiloEstoque</span>: <span class="lp-code-keyword">true</span>, <span class="lp-code-comment">// Nunca revela contagem numérica</span></div>
+                <div style="padding-left:16px;"><span class="lp-code-prop">agendamentoAutomatico</span>: <span class="lp-code-str">"ativo_com_link_dinamico"</span>,</div>
+                <div style="padding-left:16px;"><span class="lp-code-prop">intervencaoHumana</span>: <span class="lp-code-keyword">true</span> <span class="lp-code-comment">// Operador pode pausar em 1 clique</span></div>
+                <div>};</div>
               </div>
             </div>
           </div>
@@ -180,328 +248,747 @@
     </div>
   </section>
 
-  <!-- SEÇÃO 2: TICKER INFINITO DE CONFIANÇA -->
-  <section class="lp-ticker-section">
-    <div class="lp-ticker-track-wrap">
-      <div class="lp-ticker-track">
-        <div class="lp-ticker-item">
-          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
-          <span><strong>Agilidade no atendimento:</strong> Respostas imediatas e contextuais aos clientes</span>
+  <!-- SEÇÃO 2: FAIXA DE MÉTRICAS & TELEMETRIA REAL -->
+  <section class="lp-stats-strip">
+    <div class="lp-container">
+      <div class="lp-stats-grid">
+        <div class="lp-stat-card">
+          <div class="lp-stat-num">&lt; 60s</div>
+          <div class="lp-stat-label">Tempo de Resposta</div>
+          <p class="lp-stat-desc">Primeiro contacto contextual imediato com o comprador, sem atrasos na caixa de entrada.</p>
         </div>
-        <div class="lp-ticker-item">
-          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
-          <span><strong>Contexto do negócio:</strong> Informações de produtos, stock e políticas sincronizadas</span>
+        <div class="lp-stat-card">
+          <div class="lp-stat-num">24/7</div>
+          <div class="lp-stat-label">Cobertura Contínua</div>
+          <p class="lp-stat-desc">Vendas e atendimento ativo durante noites, feriados e fins de semana sem interrupção.</p>
         </div>
-        <div class="lp-ticker-item">
-          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-          <span><strong>Segurança e controlo:</strong> Integração oficial Google Gmail com ativação sob o seu comando</span>
+        <div class="lp-stat-card">
+          <div class="lp-stat-num">100%</div>
+          <div class="lp-stat-label">Google Workspace</div>
+          <p class="lp-stat-desc">Integração oficial OAuth 2.0 segura sem partilha nem armazenamento de senhas.</p>
         </div>
-        <div class="lp-ticker-item">
-          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
-          <span><strong>Visibilidade operacional:</strong> Dashboard e relatórios com métricas reais do seu negócio</span>
-        </div>
-        <div class="lp-ticker-item">
-          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
-          <span><strong>Agilidade no atendimento:</strong> Respostas imediatas e contextuais aos clientes</span>
-        </div>
-        <div class="lp-ticker-item">
-          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
-          <span><strong>Contexto do negócio:</strong> Informações de produtos, stock e políticas sincronizadas</span>
+        <div class="lp-stat-card">
+          <div class="lp-stat-num">0%</div>
+          <div class="lp-stat-label">Risco de Vazamento</div>
+          <p class="lp-stat-desc">Sigilo estrito: o agente apenas informa disponibilidade sem expor estoques confidenciais.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- SEÇÃO 3: COMO FUNCIONA (3 ETAPAS HORIZONTAIS) -->
+  <!-- SEÇÃO 3: SIMULADOR INTERATIVO POR SETOR -->
+  <section id="lp-simulation" class="lp-section lp-section-alt">
+    <div class="lp-container">
+      <div class="lp-section-header">
+        <span class="lp-section-tag">Simulador em Tempo Real</span>
+        <h2 class="lp-section-title">Veja o Drexier em ação no seu ramo de atividade</h2>
+        <p class="lp-section-desc">Descubra como o nosso agente raciocina, consulta as políticas da sua empresa e conduz conversas de alto valor em diferentes modelos de negócio.</p>
+      </div>
+
+      <div class="lp-scenario-wrapper">
+        <div class="lp-scenario-tabs" role="tablist">
+          <button type="button" class="lp-scenario-tab active" data-scenario="retail">
+            <span>🛍️</span>
+            <span>Varejo &amp; E-commerce</span>
+          </button>
+          <button type="button" class="lp-scenario-tab" data-scenario="services">
+            <span>🛠️</span>
+            <span>Prestação de Serviços</span>
+          </button>
+          <button type="button" class="lp-scenario-tab" data-scenario="health">
+            <span>🩺</span>
+            <span>Clínicas &amp; Estética</span>
+          </button>
+          <button type="button" class="lp-scenario-tab" data-scenario="b2b">
+            <span>🏢</span>
+            <span>B2B &amp; Distribuição</span>
+          </button>
+        </div>
+
+        <!-- CENÁRIO 1: VAREJO -->
+        <div class="lp-scenario-pane active" data-scenario="retail">
+          <div class="lp-scenario-grid">
+            <div class="lp-scenario-inbox-col">
+              <div class="lp-scenario-card">
+                <div class="lp-scenario-card-header">
+                  <span style="font-weight:700; color:var(--text-primary);">Email Recebido do Cliente</span>
+                  <span style="color:var(--text-tertiary);">De: carolina.p@email.com</span>
+                </div>
+                <p style="font-size:13.5px; line-height:1.5; margin:0; color:var(--text-secondary);">
+                  "Olá! Vocês ainda têm o Tênis Urban Run em tamanho 39 na cor branca? Se eu pedir hoje, quando chega no Porto?"
+                </p>
+              </div>
+
+              <div class="lp-scenario-context-box">
+                <div class="lp-scenario-context-title">
+                  <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  <span>Consulta de Contexto Drexier</span>
+                </div>
+                <div>&bull; Produto: Tênis Urban Run &bull; Tam: 39 &bull; Cor: Branca &rarr; <strong>Em Stock</strong></div>
+                <div>&bull; Política de Envio: Porto &rarr; 24 a 48h úteis</div>
+                <div>&bull; Sigilo de Stock: Quantidade exata mantida em confidencialidade</div>
+              </div>
+            </div>
+
+            <div class="lp-scenario-reply-card">
+              <div class="lp-scenario-reply-header">
+                <div>
+                  <span class="lp-agent-badge">IA Drexier</span>
+                  <strong style="margin-left: 8px; font-size: 13.5px;">Resposta Gerada em 38s</strong>
+                </div>
+                <span class="lp-scenario-action-badge">Stock Verificado + Link Seguro</span>
+              </div>
+              <div class="lp-scenario-reply-text">
+Olá Carolina, obrigado pelo contacto!
+
+Temos sim o Tênis Urban Run no tamanho 39 na cor branca disponível para envio imediato. 
+
+Para a região do Porto, o prazo de entrega é de 24 a 48 horas úteis após a confirmação. Gostaria que lhe envie o link de reserva do par para garantir o envio no primeiro lote de amanhã?
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button type="button" class="btn primary small lp-cta-btn">Experimentar com o seu catálogo</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENÁRIO 2: SERVIÇOS -->
+        <div class="lp-scenario-pane" data-scenario="services">
+          <div class="lp-scenario-grid">
+            <div class="lp-scenario-inbox-col">
+              <div class="lp-scenario-card">
+                <div class="lp-scenario-card-header">
+                  <span style="font-weight:700; color:var(--text-primary);">Email Recebido do Cliente</span>
+                  <span style="color:var(--text-tertiary);">De: tiago.m@empresa.pt</span>
+                </div>
+                <p style="font-size:13.5px; line-height:1.5; margin:0; color:var(--text-secondary);">
+                  "Boa tarde, preciso de um diagnóstico para manutenção do sistema de ar condicionado do nosso escritório. É possível agendar uma visita técnica esta semana?"
+                </p>
+              </div>
+
+              <div class="lp-scenario-context-box">
+                <div class="lp-scenario-context-title">
+                  <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  <span>Consulta de Contexto Drexier</span>
+                </div>
+                <div>&bull; Tipo de Serviço: Diagnóstico Técnico Climatização</div>
+                <div>&bull; Horários Disponíveis: Quarta 10h ou Quinta 14h30</div>
+                <div>&bull; Regra de Agendamento: Conduzir à seleção com confirmação pelo gestor</div>
+              </div>
+            </div>
+
+            <div class="lp-scenario-reply-card">
+              <div class="lp-scenario-reply-header">
+                <div>
+                  <span class="lp-agent-badge">IA Drexier</span>
+                  <strong style="margin-left: 8px; font-size: 13.5px;">Resposta Gerada em 45s</strong>
+                </div>
+                <span class="lp-scenario-action-badge">Agendamento Dinâmico</span>
+              </div>
+              <div class="lp-scenario-reply-text">
+Olá Tiago, com certeza! Podemos realizar a visita técnica para diagnóstico do seu sistema esta semana.
+
+Os nossos técnicos têm disponibilidade nas seguintes opções:
+• Quarta-feira às 10:00
+• Quinta-feira às 14:30
+
+Por favor indique a opção de sua preferência ou clique no link seguro de agendamento em anexo para registarmos a sua morada e enviarmos a equipa técnica.
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button type="button" class="btn primary small lp-cta-btn">Automatizar os seus agendamentos</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENÁRIO 3: CLÍNICAS -->
+        <div class="lp-scenario-pane" data-scenario="health">
+          <div class="lp-scenario-grid">
+            <div class="lp-scenario-inbox-col">
+              <div class="lp-scenario-card">
+                <div class="lp-scenario-card-header">
+                  <span style="font-weight:700; color:var(--text-primary);">Email Recebido do Paciente</span>
+                  <span style="color:var(--text-tertiary);">De: sofia.almeida@email.com</span>
+                </div>
+                <p style="font-size:13.5px; line-height:1.5; margin:0; color:var(--text-secondary);">
+                  "Olá, gostaria de saber o valor da consulta de avaliação estética e se o Dr. Ricardo atende às terças à tarde."
+                </p>
+              </div>
+
+              <div class="lp-scenario-context-box">
+                <div class="lp-scenario-context-title">
+                  <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  <span>Consulta de Contexto Drexier</span>
+                </div>
+                <div>&bull; Profissional: Dr. Ricardo &bull; Terças: 14h às 19h</div>
+                <div>&bull; Avaliação Inicial: Informação cadastrada na base com opções de agendamento</div>
+                <div>&bull; Preparo: Informações prévias enviadas no email de confirmação</div>
+              </div>
+            </div>
+
+            <div class="lp-scenario-reply-card">
+              <div class="lp-scenario-reply-header">
+                <div>
+                  <span class="lp-agent-badge">IA Drexier</span>
+                  <strong style="margin-left: 8px; font-size: 13.5px;">Resposta Gerada em 34s</strong>
+                </div>
+                <span class="lp-scenario-action-badge">Triagem &amp; Agendamento</span>
+              </div>
+              <div class="lp-scenario-reply-text">
+Olá Sofia, será um prazer recebê-la na nossa clínica!
+
+A consulta de avaliação estética com o Dr. Ricardo tem a duração de 45 minutos e inclui análise personalizada completa. O Dr. Ricardo atende às terças-feiras no período da tarde.
+
+Temos vagas para a próxima terça-feira às 15:00 ou 16:30. Deseja que reserve um destes horários para a sua avaliação?
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button type="button" class="btn primary small lp-cta-btn">Integrar a sua clínica</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENÁRIO 4: B2B -->
+        <div class="lp-scenario-pane" data-scenario="b2b">
+          <div class="lp-scenario-grid">
+            <div class="lp-scenario-inbox-col">
+              <div class="lp-scenario-card">
+                <div class="lp-scenario-card-header">
+                  <span style="font-weight:700; color:var(--text-primary);">Email Recebido do Comprador</span>
+                  <span style="color:var(--text-tertiary);">De: compras@distribuidor.com</span>
+                </div>
+                <p style="font-size:13.5px; line-height:1.5; margin:0; color:var(--text-secondary);">
+                  "Prezados, temos interesse em cotar 200 unidades da Válvula Industrial Modelo X4. Qual o prazo para fornecimento e aceitam faturação a 30 dias?"
+                </p>
+              </div>
+
+              <div class="lp-scenario-context-box">
+                <div class="lp-scenario-context-title">
+                  <svg class="svg-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                  <span>Consulta de Contexto Drexier</span>
+                </div>
+                <div>&bull; Artigo: Válvula Industrial Modelo X4 &bull; Lote: 200 un</div>
+                <div>&bull; Condição Faturamento: Faturação 30 dias mediante aprovação de crédito</div>
+                <div>&bull; Encaminhamento: Pedido qualificado registado na Central de Conversões</div>
+              </div>
+            </div>
+
+            <div class="lp-scenario-reply-card">
+              <div class="lp-scenario-reply-header">
+                <div>
+                  <span class="lp-agent-badge">IA Drexier</span>
+                  <strong style="margin-left: 8px; font-size: 13.5px;">Resposta Gerada em 51s</strong>
+                </div>
+                <span class="lp-scenario-action-badge">Qualificação B2B Registada</span>
+              </div>
+              <div class="lp-scenario-reply-text">
+Estimados, agradecemos o vosso interesse nos nossos produtos industriais.
+
+Temos capacidade para fornecimento das 200 unidades da Válvula Modelo X4 com expedição estimada em até 5 dias úteis. Relativamente à condição de faturação a 30 dias, é uma modalidade suportada após breve validação cadastral da empresa.
+
+O vosso pedido de cotação já foi registado na nossa central comercial e enviámos os dados da ficha de crédito em anexo para agilizarmos a emissão da proposta formal.
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <button type="button" class="btn primary small lp-cta-btn">Começar operação B2B</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SEÇÃO 4: COMO FUNCIONA (CONEXÃO OPERACIONAL EM 4 ETAPAS) -->
   <section id="lp-how-it-works" class="lp-section">
     <div class="lp-container">
       <div class="lp-section-header">
-        <span class="lp-section-tag">Fluxo Operacional</span>
-        <h2 class="lp-section-title">Como o Drexier conduz o seu atendimento</h2>
-        <p class="lp-section-desc">Uma sequência transparente desenhada para transformar mensagens isoladas em vendas concretas com precisão.</p>
+        <span class="lp-section-tag">Fluxo Operacional Transparente</span>
+        <h2 class="lp-section-title">Como o Drexier conduz o seu atendimento até ao fecho</h2>
+        <p class="lp-section-desc">Uma sequência inteligente concebida para converter caixas de entrada desordenadas em processos de venda organizados e lucrativos.</p>
       </div>
 
-      <div class="lp-steps-grid">
-        <div class="lp-step-card">
-          <div class="lp-step-number">01</div>
-          <h3 class="lp-step-title">O cliente inicia a conversa</h3>
-          <p class="lp-step-text">
-            Um potencial comprador envia uma dúvida sobre produtos, disponibilidade, horários ou preços para a sua caixa de entrada comercial do Gmail.
+      <div class="lp-stepper-grid">
+        <div class="lp-stepper-card">
+          <div class="lp-stepper-num">01</div>
+          <h3 class="lp-stepper-title">Conexão Oficial em 1 Clique</h3>
+          <p class="lp-stepper-desc">
+            Autorização segura via OAuth 2.0 oficial Google Gmail. Sem partilha de senhas, com revogação instantânea sempre que desejar.
           </p>
         </div>
 
-        <div class="lp-step-card">
-          <div class="lp-step-number">02</div>
-          <h3 class="lp-step-title">A IA compreende e responde</h3>
-          <p class="lp-step-text">
-            O agente Drexier analisa a mensagem, consulta a base de conhecimento e o banco de stock, e formula uma resposta clara e personalizada em conformidade com o seu tom de voz.
+        <div class="lp-stepper-card">
+          <div class="lp-stepper-num">02</div>
+          <h3 class="lp-stepper-title">Base de Conhecimento Estruturada</h3>
+          <p class="lp-stepper-desc">
+            Cadastre os seus produtos, variantes de estoque, horários de atendimento, políticas comerciais e o tom de voz do seu negócio.
           </p>
         </div>
 
-        <div class="lp-step-card">
-          <div class="lp-step-number">03</div>
-          <h3 class="lp-step-title">Condução à oportunidade</h3>
-          <p class="lp-step-text">
-            O diálogo evolui naturalmente para o fecho da venda ou marcação de agendamento, registando o pedido no painel para confirmação rápida do proprietário.
+        <div class="lp-stepper-card">
+          <div class="lp-stepper-num">03</div>
+          <h3 class="lp-stepper-title">Atendimento &amp; Triagem Autônoma</h3>
+          <p class="lp-stepper-desc">
+            A IA compreende a intenção do cliente, consulta regras de negócio em tempo real e redige respostas precisas e impecáveis.
+          </p>
+        </div>
+
+        <div class="lp-stepper-card">
+          <div class="lp-stepper-num">04</div>
+          <h3 class="lp-stepper-title">Fecho Comercial &amp; Quadro de Agendamentos</h3>
+          <p class="lp-stepper-desc">
+            Pedidos de compra e marcações são canalizados para o painel de validação, prontos para entrega ou confirmação do proprietário.
           </p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- SEÇÃO 4: FUNCIONALIDADES (BENTO GRID) -->
-  <section id="lp-features" class="lp-section" style="background: var(--bg-secondary);">
+  <!-- SEÇÃO 5: BENTO GRID DE CAPACIDADES DA PLATAFORMA -->
+  <section id="lp-features" class="lp-section lp-section-alt">
     <div class="lp-container">
       <div class="lp-section-header">
         <span class="lp-section-tag">Capacidades da Plataforma</span>
-        <h2 class="lp-section-title">Concebido para operações comerciais reais</h2>
-        <p class="lp-section-desc">Todas as ferramentas que a sua empresa necessita para gerir o atendimento com autoridade.</p>
+        <h2 class="lp-section-title">Engenharia de precisão para operações comerciais reais</h2>
+        <p class="lp-section-desc">Cada componente do Drexier foi arquitetado para conceder total autoridade, controlo e previsibilidade ao seu negócio.</p>
       </div>
 
-      <div class="lp-features-grid">
-        <div class="lp-feature-card">
-          <div class="lp-feature-icon">
-            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+      <div class="lp-bento-grid">
+        <!-- CARD GRANDE: CENTRAL DE 3 COLUNAS + INTERVENÇÃO -->
+        <div class="lp-bento-card lp-bento-span-2">
+          <div class="lp-bento-icon-wrapper purple">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line></svg>
           </div>
-          <h3 class="lp-feature-title">Atendimento Inteligente</h3>
-          <p class="lp-feature-desc">
-            Agente autónomo capaz de esclarecer dúvidas complexas, apresentar preços com exatidão e manter consistência comunicacional contínua.
+          <h3 class="lp-bento-title">Central de Conversas em 3 Colunas com Intervenção Humana (Human-in-the-Loop)</h3>
+          <p class="lp-bento-desc">
+            Acompanhe o fluxo de todos os clientes em tempo real. Com um único clique no botão mestre, o proprietário pode desativar as respostas automáticas e assumir o controlo direto da conversa sem que o cliente perceba qualquer descontinuidade.
           </p>
+          <div class="lp-bento-interactive-snippet" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span class="lp-radar-dot"></span>
+              <span style="font-family:var(--font-mono); font-size:12px; font-weight:700;">Modo Ativo: IA Conduzindo com Validação</span>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <span style="font-family:var(--font-mono); font-size:11px; background:var(--surface-primary); padding:3px 8px; border:1px solid var(--border-arcade); border-radius:4px;">1-Clique Pause</span>
+              <span style="font-family:var(--font-mono); font-size:11px; background:var(--surface-primary); padding:3px 8px; border:1px solid var(--border-arcade); border-radius:4px;">Histórico Completo</span>
+            </div>
+          </div>
         </div>
 
-        <div class="lp-feature-card">
-          <div class="lp-feature-icon">
-            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        <!-- CARD 1: SIGILO DE ESTOQUE -->
+        <div class="lp-bento-card">
+          <div class="lp-bento-icon-wrapper lime">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
           </div>
-          <h3 class="lp-feature-title">Central de Conversas em 3 Colunas</h3>
-          <p class="lp-feature-desc">
-            Espaço de trabalho de nível empresarial para acompanhar mensagens em tempo real, consultar histórico e intervir manualmente quando necessário.
+          <h3 class="lp-bento-title">Sigilo Algorítmico de Estoque</h3>
+          <p class="lp-bento-desc">
+            A IA confirma se há disponibilidade imediata do artigo sem nunca expor a contagem numérica interna do armazém aos clientes.
           </p>
+          <div class="lp-bento-interactive-snippet">
+            <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--color-success); font-weight:700;">✓ Proteção anti-vazamento ativa</span>
+          </div>
         </div>
 
-        <div class="lp-feature-card">
-          <div class="lp-feature-icon">
-            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+        <!-- CARD 2: AGENDAMENTOS INTELIGENTES -->
+        <div class="lp-bento-card">
+          <div class="lp-bento-icon-wrapper blue">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
           </div>
-          <h3 class="lp-feature-title">Conhecimento Empresarial Estruturado</h3>
-          <p class="lp-feature-desc">
-            Cards organizados por categoria que alimentam o cérebro da IA com informações sobre produtos, horários, pagamentos e termos comerciais.
+          <h3 class="lp-bento-title">Links de Agendamento Dinâmico</h3>
+          <p class="lp-bento-desc">
+            Elimina o vai-e-vem de mensagens. O cliente clica diretamente no slot disponível para confirmar horários sem conflitos de agenda.
           </p>
+          <div class="lp-bento-interactive-snippet">
+            <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--blue-arcade); font-weight:700;">Zero sobreposição de horários</span>
+          </div>
         </div>
 
-        <div class="lp-feature-card">
-          <div class="lp-feature-icon">
-            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-          </div>
-          <h3 class="lp-feature-title">Banco de Stock com Variantes</h3>
-          <p class="lp-feature-desc">
-            Monitorização de artigos, variantes (tamanho, cor) e níveis de stock. A IA apenas comunica disponibilidade sem revelar quantidades confidenciais.
-          </p>
-        </div>
-
-        <div class="lp-feature-card">
-          <div class="lp-feature-icon">
+        <!-- CARD 3: BI & TELEMETRIA -->
+        <div class="lp-bento-card">
+          <div class="lp-bento-icon-wrapper orange">
             <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
           </div>
-          <h3 class="lp-feature-title">Business Intelligence &amp; Relatórios</h3>
-          <p class="lp-feature-desc">
-            Métricas reais de novos clientes diários, mensagens respondidas e tendências de aquisição sem estimativas fictícias ou cálculos artificiais.
+          <h3 class="lp-bento-title">Relatórios Reais &amp; Telemetria BI</h3>
+          <p class="lp-bento-desc">
+            Métricas auditáveis de contactos diários, mensagens respondidas e conversões reais sem números inventados nem estimativas artificiais.
           </p>
+          <div class="lp-bento-interactive-snippet">
+            <span style="font-family:var(--font-mono); font-size:11.5px; color:var(--text-primary); font-weight:700;">Dados auditáveis em tempo real</span>
+          </div>
         </div>
 
-        <div class="lp-feature-card">
-          <div class="lp-feature-icon">
-            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        <!-- CARD GRANDE: AGENT STUDIO & TOM DE VOZ -->
+        <div class="lp-bento-card lp-bento-span-2">
+          <div class="lp-bento-icon-wrapper purple">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
           </div>
-          <h3 class="lp-feature-title">Agent Studio Unificado</h3>
-          <p class="lp-feature-desc">
-            Personalize a postura, tom de voz, regras obrigatórias e diretrizes comerciais da IA num único centro de controlo avançado.
+          <h3 class="lp-bento-title">Agent Studio: Personalidade, Tom de Voz &amp; Regras Inegociáveis</h3>
+          <p class="lp-bento-desc">
+            Defina diretrizes obrigatórias que a IA seguirá à risca. Escolha entre postura formal, consultiva ou dinâmica, e estabeleça termos e condições comerciais que nunca serão desrespeitados durante o atendimento.
           </p>
+          <div class="lp-bento-interactive-snippet" style="display:flex; gap:16px; flex-wrap:wrap;">
+            <span style="font-family:var(--font-mono); font-size:11.5px; background:var(--surface-primary); border:1px solid var(--border-arcade); padding:4px 8px; border-radius:4px;">Tom de voz configurável</span>
+            <span style="font-family:var(--font-mono); font-size:11.5px; background:var(--surface-primary); border:1px solid var(--border-arcade); padding:4px 8px; border-radius:4px;">Regras restritas de preço</span>
+            <span style="font-family:var(--font-mono); font-size:11.5px; background:var(--surface-primary); border:1px solid var(--border-arcade); padding:4px 8px; border-radius:4px;">Respostas bilíngues (PT / EN)</span>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- SEÇÃO 5: BENEFÍCIOS -->
-  <section id="lp-benefits" class="lp-section">
+  <!-- SEÇÃO 6: TABELA COMPARATIVA VISUAL (SEM DREXIER vs COM DREXIER) -->
+  <section id="lp-comparison" class="lp-section">
     <div class="lp-container">
       <div class="lp-section-header">
-        <span class="lp-section-tag">Impacto no Negócio</span>
-        <h2 class="lp-section-title">Construído para escalar vendas com consistência</h2>
-        <p class="lp-section-desc">Veja as vantagens práticas de implementar automação assistida por IA na sua comunicação comercial.</p>
+        <span class="lp-section-tag">Impacto Prático</span>
+        <h2 class="lp-section-title">O seu negócio sem Drexier vs com o Drexier Enterprise</h2>
+        <p class="lp-section-desc">Entenda a diferença entre manter uma caixa de entrada tradicional e operar com uma inteligência artificial comercial dedicada.</p>
       </div>
 
-      <div class="lp-steps-grid">
-        <div class="lp-step-card">
-          <h3 class="lp-step-title">Respostas com maior consistência</h3>
-          <p class="lp-step-text">Evite atrasos de horas ou dias na caixa de entrada. Cada cliente recebe atenção rápida baseada exatamente nos termos e políticas que determinou.</p>
-        </div>
-        <div class="lp-step-card">
-          <h3 class="lp-step-title">Acompanhamento de compradores</h3>
-          <p class="lp-step-text">A inteligência não se limita a responder; ela detecta o interesse de compra e conduz a conversa com foco no avanço do negócio.</p>
-        </div>
-        <div class="lp-step-card">
-          <h3 class="lp-step-title">Autonomia com controlo seguro</h3>
-          <p class="lp-step-text">Mantenha a liberdade de ativar ou pausar as respostas automáticas a qualquer momento com um clique no botão mestre.</p>
-        </div>
+      <div class="lp-comparison-table-wrapper">
+        <table class="lp-comp-table">
+          <thead>
+            <tr>
+              <th style="width: 25%;">Critério Operacional</th>
+              <th style="width: 37.5%;">Atendimento Tradicional / Manual</th>
+              <th class="highlight-col" style="width: 37.5%;">Com Drexier Enterprise AI</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Velocidade de Resposta</strong></td>
+              <td>
+                <span class="lp-comp-badge bad">4h a 48h de espera</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Clientes procuram concorrentes enquanto aguardam retorno.</p>
+              </td>
+              <td class="highlight-col">
+                <span class="lp-comp-badge good">&lt; 60 segundos</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Resposta contextual imediata captando o cliente no pico do interesse.</p>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Fins de Semana &amp; Noites</strong></td>
+              <td>
+                <span class="lp-comp-badge bad">Caixa fechada</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Mensagens acumulam-se e esfriam até segunda-feira.</p>
+              </td>
+              <td class="highlight-col">
+                <span class="lp-comp-badge good">Operação 24/7/365</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Atendimento ativo e vendas concluídas a qualquer dia e hora.</p>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Consistência de Preços &amp; Stock</strong></td>
+              <td>
+                <span class="lp-comp-badge bad">Erros frequentes</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Risco de vender itens esgotados ou passar valores desatualizados.</p>
+              </td>
+              <td class="highlight-col">
+                <span class="lp-comp-badge good">Precisão em tempo real</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Consulta estrita das variantes cadastradas e estoque atual.</p>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Agendamento de Serviços</strong></td>
+              <td>
+                <span class="lp-comp-badge bad">5 a 10 e-mails trocados</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Atrito elevado para encontrar uma data conveniente para ambos.</p>
+              </td>
+              <td class="highlight-col">
+                <span class="lp-comp-badge good">Seleção em 1 clique</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">O cliente escolhe o slot dinâmico e o evento entra no quadro.</p>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Segurança &amp; Controlo</strong></td>
+              <td>
+                <span class="lp-comp-badge bad">Automações cegas</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Ferramentas genéricas que enviam mensagens sem supervisão do dono.</p>
+              </td>
+              <td class="highlight-col">
+                <span class="lp-comp-badge good">Human-in-the-Loop</span>
+                <p style="margin:6px 0 0; font-size:12.5px;">Botão de pausa instantâneo e intervenção manual a qualquer momento.</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </section>
 
-  <!-- SEÇÃO 6: INTEGRAÇÃO GMAIL -->
-  <section class="lp-section" style="background: var(--bg-secondary);">
+  <!-- SEÇÃO 7: SEGURANÇA & PRIVACIDADE ENTERPRISE -->
+  <section class="lp-section lp-section-alt">
     <div class="lp-container">
-      <div class="lp-hero-grid" style="align-items: center;">
-        <div>
-          <div class="lp-pill-badge">
-            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-            <span>Canal E-mail Oficial</span>
+      <div class="lp-section-header">
+        <span class="lp-section-tag">Infraestrutura &amp; Privacidade</span>
+        <h2 class="lp-section-title">Construído segundo os padrões mais rigorosos de segurança</h2>
+        <p class="lp-section-desc">A sua empresa mantém a posse e controlo absoluto sobre todos os dados operacionais e comunicações.</p>
+      </div>
+
+      <div class="lp-security-grid">
+        <div class="lp-security-card">
+          <div class="lp-security-icon">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
           </div>
-          <h2 class="lp-section-title" style="text-align: left;">Conexão direta com Google Gmail</h2>
-          <p class="lp-section-desc" style="text-align: left; margin-bottom: 24px;">
-            Conecte a conta comercial da sua empresa com autenticação segura OAuth 2.0 oficial da Google. O Drexier monitoriza a caixa de entrada, organiza mensagens de clientes e envia respostas personalizadas.
-          </p>
-          <div style="display: flex; flex-direction: column; gap: 12px;">
-            <div style="display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--text-secondary);">
-              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <span>Autenticação em 1 clique sem expor a sua palavra-passe</span>
-            </div>
-            <div style="display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--text-secondary);">
-              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <span>Controlo de ativação e desativação em tempo real</span>
-            </div>
-            <div style="display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--text-secondary);">
-              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-              <span>Respostas enviadas através do seu endereço profissional</span>
-            </div>
-          </div>
+          <h3 class="lp-security-title">Google OAuth 2.0 Oficial</h3>
+          <p class="lp-security-desc">Conexão aprovada oficialmente pela Google API com escopos estritamente necessários para ler e responder e-mails.</p>
         </div>
-        <div style="background:var(--surface-primary); border:1px solid var(--border-primary); border-radius:var(--radius-lg); padding:32px;">
-          <div style="display:flex; align-items:center; gap:14px; margin-bottom:20px;">
-            <div style="width:44px; height:44px; border-radius:var(--radius-md); background:var(--violet-subtle); display:flex; align-items:center; justify-content:center; color:var(--lavender);">
-              <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-            </div>
-            <div>
-              <strong style="display:block; font-size:16px; color:var(--text-primary);">Segurança &amp; Privacidade Enterprise</strong>
-              <span class="muted">Conformidade com os padrões oficiais de segurança Google API</span>
-            </div>
+
+        <div class="lp-security-card">
+          <div class="lp-security-icon">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
           </div>
-          <p style="font-size:13.5px; color:var(--text-secondary); line-height:1.6; margin:0 0 20px;">
-            Os dados de atendimento permanecem restritos ao contexto da sua operação. A IA Drexier utiliza apenas as regras configuradas pelo seu negócio para instruir as conversações comerciais.
-          </p>
-          <button type="button" class="btn primary small lp-cta-btn" id="lp-btn-gmail-start">
-            <span>Ligar Google Gmail</span>
-            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-          </button>
+          <h3 class="lp-security-title">Criptografia AES-256</h3>
+          <p class="lp-security-desc">Tokens de autenticação e credenciais são criptografados antes da persistência na base de dados.</p>
+        </div>
+
+        <div class="lp-security-card">
+          <div class="lp-security-icon">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+          </div>
+          <h3 class="lp-security-title">Conformidade RGPD / GDPR</h3>
+          <p class="lp-security-desc">Direito integral à privacidade, exclusão completa de conta e purga instantânea de histórico sob requisição.</p>
+        </div>
+
+        <div class="lp-security-card">
+          <div class="lp-security-icon">
+            <svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+          </div>
+          <h3 class="lp-security-title">Zero Treinamento Externo</h3>
+          <p class="lp-security-desc">As conversas e segredos comerciais da sua empresa nunca são utilizados para treinar modelos públicos de inteligência artificial.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- SEÇÃO 7: AUTORIDADE INSTITUCIONAL -->
-  <section class="lp-authority-section">
+  <!-- SEÇÃO 8: PREÇO & ASSINATURA TRANSPARENTE -->
+  <section id="lp-pricing" class="lp-section">
     <div class="lp-container">
-      <blockquote class="lp-authority-quote">
-        "Mais do que responder. Compreender, acompanhar e transformar."
-      </blockquote>
-      <p class="lp-authority-sub">
-        A tecnologia do Drexier foi desenvolvida para aproximar empresas e compradores com agilidade e clareza, eliminando ruídos operacionais e valorizando cada oportunidade comercial.
-      </p>
+      <div class="lp-section-header">
+        <span class="lp-section-tag">Investimento Transparente</span>
+        <h2 class="lp-section-title">Um plano completo para transformar o seu atendimento</h2>
+        <p class="lp-section-desc">Sem custos ocultos por mensagem nem taxas de adesão. Acesso total a todas as funcionalidades enterprise.</p>
+      </div>
+
+      <div class="lp-pricing-wrapper">
+        <div class="lp-pricing-ribbon">
+          ⚡ ACESSO IMEDIATO A TODAS AS FUNCIONALIDADES &bull; GARANTIA INCONDICIONAL DE 14 DIAS
+        </div>
+        <div class="lp-pricing-body">
+          <div class="lp-pricing-left">
+            <span class="lp-brand-badge" style="background:var(--purple-subtle); color:var(--purple-arcade);">PLANO BUSINESS</span>
+            <div class="lp-price-tag">
+              <span class="lp-price-val">59€</span>
+              <span class="lp-price-period">/ mês</span>
+            </div>
+            <p style="font-size:14px; color:var(--text-secondary); line-height:1.5; margin:0 0 24px;">
+              Ideal para empresas, e-commerces, clínicas e prestadores de serviços que pretendem escalar vendas com agilidade e consistência.
+            </p>
+            <button type="button" class="btn primary btn-large lp-cta-btn" id="lp-btn-cta-compare" style="width:100%;">
+              <span>Começar agora</span>
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </button>
+            <p style="font-family:var(--font-mono); font-size:11.5px; color:var(--text-tertiary); text-align:center; margin:12px 0 0;">
+              Cancele quando quiser &bull; Sem período de fidelização
+            </p>
+          </div>
+
+          <div class="lp-pricing-features">
+            <div class="lp-pricing-feat-item">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>Agente IA Comercial</strong> ilimitado 24 horas por dia</span>
+            </div>
+            <div class="lp-pricing-feat-item">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>Integração oficial Google Gmail</strong> via OAuth 2.0</span>
+            </div>
+            <div class="lp-pricing-feat-item">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>Central de Conversas em 3 Colunas</strong> com intervenção manual</span>
+            </div>
+            <div class="lp-pricing-feat-item">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>Banco de Stock com Variantes</strong> e proteção de sigilo</span>
+            </div>
+            <div class="lp-pricing-feat-item">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>Quadro de Marcações &amp; Links Dinâmicos</strong></span>
+            </div>
+            <div class="lp-pricing-feat-item">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>Agent Studio Unificado</strong> para personalização do tom de voz</span>
+            </div>
+            <div class="lp-pricing-feat-item">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>Dashboard de Telemetria Comercial</strong> em tempo real</span>
+            </div>
+            <div class="lp-pricing-feat-item">
+              <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              <span><strong>Suporte técnico prioritário</strong> e atualizações contínuas</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
-  <!-- SEÇÃO 8: PERGUNTAS FREQUENTES (FAQ) -->
-  <section id="lp-faq" class="lp-section">
+  <!-- SEÇÃO 9: PERGUNTAS FREQUENTES (FAQ) -->
+  <section id="lp-faq" class="lp-section lp-section-alt">
     <div class="lp-container">
       <div class="lp-section-header">
         <span class="lp-section-tag">Dúvidas Comuns</span>
         <h2 class="lp-section-title">Perguntas Frequentes</h2>
-        <p class="lp-section-desc">Esclareça os detalhes técnicos e operacionais sobre a plataforma Drexier.</p>
+        <p class="lp-section-desc">Tudo o que precisa de saber sobre a implantação, operação e segurança do Drexier.</p>
       </div>
 
       <div class="lp-faq-accordion" id="lp-faq-list">
         <div class="lp-faq-item active">
-          <button type="button" class="lp-faq-question">
+          <button type="button" class="lp-faq-question" aria-expanded="true">
             <span>Como o agente Drexier sabe as respostas certas para os meus clientes?</span>
             <span class="lp-faq-icon">+</span>
           </button>
           <div class="lp-faq-answer">
-            O agente consulta as informações estruturadas cadastradas na aba Negócio (produtos, preços, stock, horários e termos de entrega) e as instruções definidas no Agent Studio.
+            O agente consulta as informações estruturadas cadastradas no painel do negócio (produtos, variantes, preços, disponibilidade de stock, horários e termos de entrega) e as diretrizes de tom de voz configuradas no Agent Studio. Ele nunca inventa preços nem políticas que não tenham sido definidas por si.
           </div>
         </div>
 
         <div class="lp-faq-item">
-          <button type="button" class="lp-faq-question">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
             <span>Posso intervir numa conversa que esteja a ser atendida pela IA?</span>
             <span class="lp-faq-icon">+</span>
           </button>
-          <div class="lp-faq-answer" style="display:none;">
-            Sim. Na Central de Mensagens pode alternar a qualquer instante entre atendimento automático da IA e intervenção manual como operador proprietário.
+          <div class="lp-faq-answer">
+            Sim. Na Central de Mensagens em 3 colunas pode pausar as respostas automáticas da IA e responder manualmente como operador a qualquer momento com um simples clique no interruptor mestre.
           </div>
         </div>
 
         <div class="lp-faq-item">
-          <button type="button" class="lp-faq-question">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
             <span>O Drexier revela as quantidades do meu stock aos clientes?</span>
             <span class="lp-faq-icon">+</span>
           </button>
-          <div class="lp-faq-answer" style="display:none;">
-            Não. Por regra estrita de sigilo, a IA informa unicamente se o artigo está disponível ou esgotado, sem nunca divulgar números internos de stock.
+          <div class="lp-faq-answer">
+            Não. Por regra estrita de sigilo algorítmico, a IA informa unicamente se o artigo está disponível para envio ou esgotado, sem nunca divulgar números internos de stock aos compradores.
           </div>
         </div>
 
         <div class="lp-faq-item">
-          <button type="button" class="lp-faq-question">
-            <span>Que canais de comunicação estão suportados atualmente?</span>
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>Como funciona a integração oficial com o Google Gmail?</span>
             <span class="lp-faq-icon">+</span>
           </button>
-          <div class="lp-faq-answer" style="display:none;">
-            O Drexier está integrado oficialmente com o Google Gmail através de autorização segura OAuth 2.0.
+          <div class="lp-faq-answer">
+            A integração é realizada diretamente através do protocolo oficial OAuth 2.0 da Google. Não necessita fornecer a sua palavra-passe e pode desconectar a integração a qualquer momento diretamente nas opções do software ou na consola Google.
           </div>
         </div>
 
         <div class="lp-faq-item">
-          <button type="button" class="lp-faq-question">
-            <span>Como funciona a subscrição e faturação do software?</span>
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>Como funcionam as opções de agendamento e marcações?</span>
             <span class="lp-faq-icon">+</span>
           </button>
-          <div class="lp-faq-answer" style="display:none;">
-            O Drexier opera no modelo SaaS através do Plano Business (59€/mês), processado com segurança bancária pela Stripe sem período de fidelização obrigatório.
+          <div class="lp-faq-answer">
+            Quando um cliente manifesta interesse em agendar um horário ou serviço, o Drexier gera opções de horários com base nos seus horários de atendimento e envia um link dinâmico seguro. O cliente escolhe a opção e a marcação é registada automaticamente no seu quadro comercial.
+          </div>
+        </div>
+
+        <div class="lp-faq-item">
+          <button type="button" class="lp-faq-question" aria-expanded="false">
+            <span>Como funciona a subscrição e o cancelamento do software?</span>
+            <span class="lp-faq-icon">+</span>
+          </button>
+          <div class="lp-faq-answer">
+            O Drexier opera no modelo SaaS através do Plano Business (59€/mês), processado com segurança bancária pela Stripe. Não existe qualquer período de fidelização e pode cancelar a subscrição a qualquer momento diretamente no portal de faturação.
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- SEÇÃO 9: FINAL CTA -->
-  <section class="lp-section" style="background: var(--bg-secondary); border-top: 1px solid var(--border-subtle); text-align: center;">
+  <!-- SEÇÃO 10: FINAL CTA -->
+  <section class="lp-final-cta-section">
     <div class="lp-container">
-      <h2 class="lp-section-title" style="font-size: 38px;">O próximo passo do seu negócio começa com uma conversa.</h2>
-      <p class="lp-section-desc" style="max-width: 580px; margin: 0 auto 32px;">
-        Junte-se a empresas que automatizam o atendimento comercial com inteligência de nível Enterprise.
-      </p>
-      <button type="button" class="btn primary btn-large lp-cta-btn" id="lp-btn-final-start">
-        <span>Começar agora</span>
-        <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-      </button>
+      <div class="lp-final-cta-box">
+        <h2 class="lp-final-title">O próximo salto comercial do seu negócio começa com uma conversa.</h2>
+        <p class="lp-final-desc">
+          Junte-se a empresas visionárias que conduzem conversas comerciais com inteligência artificial de nível corporativo e transformam a caixa de correio num motor contínuo de vendas.
+        </p>
+        <button type="button" class="btn primary btn-large lp-cta-btn" id="lp-btn-final-start" style="box-shadow: 4px 4px 0 var(--border-arcade);">
+          <span>Começar agora gratuitamente</span>
+          <svg class="svg-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </button>
+        <div class="lp-final-badges">
+          <span style="display:flex; align-items:center; gap:6px;">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--lime-arcade)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span>Sem cartão para criar conta</span>
+          </span>
+          <span style="display:flex; align-items:center; gap:6px;">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--lime-arcade)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span>Configuração em 3 minutos</span>
+          </span>
+          <span style="display:flex; align-items:center; gap:6px;">
+            <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--lime-arcade)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span>Garantia de 14 dias</span>
+          </span>
+        </div>
+      </div>
     </div>
   </section>
 
   <!-- FOOTER -->
   <footer class="lp-footer">
     <div class="lp-container">
-      <div class="lp-footer-grid" style="justify-content: center; text-align: center;">
+      <div class="lp-footer-grid">
         <div class="lp-footer-col">
-          <div class="lp-brand" style="margin-bottom: 12px;">
-            <span class="lp-wordmark">Drexier</span>
+          <div class="lp-brand" style="margin-bottom: 14px;">
+            <span class="lp-wordmark" style="color: #FFFDF7;">Drexier</span>
+            <span class="lp-brand-badge">ENTERPRISE AI</span>
           </div>
-          <p class="muted" style="max-width: 420px; line-height: 1.6; margin: 0 auto;">
-            Plataforma SaaS de inteligência artificial comercial, automação e gestão avançada de conversas com clientes.
+          <p style="color: #94A3B8; font-size: 13.5px; line-height: 1.6; max-width: 320px; margin: 0 0 20px;">
+            Plataforma SaaS de inteligência artificial comercial, automação e gestão avançada de conversas com clientes via Google Gmail.
           </p>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="lp-radar-dot"></span>
+            <span style="font-family:var(--font-mono); font-size:12px; color:#94A3B8;">Sistemas 100% Operacionais</span>
+          </div>
+        </div>
+
+        <div class="lp-footer-col">
+          <div class="lp-footer-col-title">Plataforma</div>
+          <div class="lp-footer-links">
+            <a href="#lp-hero" class="lp-footer-link">Visão Geral</a>
+            <a href="#lp-how-it-works" class="lp-footer-link">Como Funciona</a>
+            <a href="#lp-simulation" class="lp-footer-link">Simulador Setorial</a>
+            <a href="#lp-features" class="lp-footer-link">Capacidades</a>
+            <a href="#lp-comparison" class="lp-footer-link">Comparativo</a>
+            <a href="#lp-pricing" class="lp-footer-link">Preço</a>
+          </div>
+        </div>
+
+        <div class="lp-footer-col">
+          <div class="lp-footer-col-title">Segurança &amp; Legal</div>
+          <div class="lp-footer-links">
+            <span class="lp-footer-link">OAuth 2.0 Google Verified</span>
+            <span class="lp-footer-link">Criptografia AES-256</span>
+            <span class="lp-footer-link">Conformidade com o RGPD</span>
+            <span class="lp-footer-link">Sigilo Estrito de Estoque</span>
+            <span class="lp-footer-link">Termos de Serviço</span>
+          </div>
+        </div>
+
+        <div class="lp-footer-col">
+          <div class="lp-footer-col-title">Acesso &amp; Conta</div>
+          <div class="lp-footer-links">
+            <a href="#" class="lp-footer-link" id="lp-link-footer-login">Entrar na Conta</a>
+            <a href="#" class="lp-footer-link" id="lp-link-footer-signup">Criar Conta / Começar Agora</a>
+            <a href="#lp-faq" class="lp-footer-link">Perguntas Frequentes</a>
+            <a href="mailto:contato@drexier.com" class="lp-footer-link">Suporte Técnico</a>
+          </div>
         </div>
       </div>
+
       <div class="lp-footer-bottom">
-        <span>&copy; Drexier &bull; Todos os direitos reservados.</span>
+        <span>&copy; Drexier &bull; Todos os direitos reservados. Plataforma de Inteligência Artificial Comercial.</span>
+        <span>Made for high-performance businesses.</span>
       </div>
     </div>
   </footer>
@@ -1319,6 +1806,22 @@
             <div class="integration-alert-content">
               <strong>Configuração de Credenciais Google no ficheiro .env</strong>
               <p class="muted">Adicione GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET para permitir autorização direta.</p>
+            </div>
+          </div>
+
+          <!-- ALERTA DE TOKEN EXPIRADO / RECONEXÃO NECESSÁRIA -->
+          <div id="email-reconnect-alert" class="integration-alert-box hidden" style="border-left: 4px solid var(--color-error, #ef4444); background: var(--color-error-bg, rgba(239, 68, 68, 0.1)); margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div class="integration-alert-icon" style="color: var(--color-error, #ef4444); display: flex; align-items: center;">
+                <svg class="svg-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              </div>
+              <div class="integration-alert-content">
+                <strong id="email-reconnect-alert-title" style="color: var(--color-error, #ef4444); display: block; font-size: 13.5px;">O agente foi pausado. Desconecte e reconecte o e-mail para voltar o funcionamento do agente.</strong>
+                <p class="muted" id="email-reconnect-alert-desc" style="margin: 2px 0 0; font-size: 12.5px;">O token de integração perdeu a validade. Para reativar o agente, desconecte e realize uma nova autorização oficial Google Gmail.</p>
+              </div>
+            </div>
+            <div>
+              <button id="btn-email-reconnect-disconnect" class="btn outline danger small" type="button" style="white-space: nowrap;">Desconectar E-mail</button>
             </div>
           </div>
 

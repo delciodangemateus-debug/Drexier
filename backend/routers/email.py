@@ -14,6 +14,7 @@ from backend.services.token_crypto import encrypt_token, decrypt_token
 from backend.database import connect
 from backend.services.billing_service import get_last_successful_payment_at, is_subscription_active
 from backend.services.email_service import (
+    EmailTokenExpiredError,
     get_email_response_cutoff,
     build_google_auth_url,
     exchange_google_code,
@@ -92,15 +93,41 @@ def get_email_status(user: dict = Depends(get_current_user)):
     with connect() as c:
         row = c.execute(
             """SELECT id, user_id, provider, email_address, display_name,
-                      status, auto_reply_enabled, last_sync_at, created_at, updated_at
+                      status, auto_reply_enabled, token_expires_at, refresh_token, last_sync_at, created_at, updated_at
                FROM email_integrations
                WHERE user_id = ? AND provider = 'google'""",
             (user["id"],),
         ).fetchone()
 
-    if not row or row["status"] != "connected":
+    if not row:
         return {
             "connected": False,
+            "needs_reconnect": False,
+            "integration": None,
+        }
+
+    is_needs_reconnect = row["status"] == "needs_reconnect"
+
+    # Verificação preventiva: se o token já expirou e não há refresh_token, marca como needs_reconnect e pausa o agente
+    if not is_needs_reconnect and row["status"] == "connected":
+        expires_at = row["token_expires_at"]
+        try:
+            exp_ts = float(expires_at) if expires_at else None
+            ref = decrypt_token(row["refresh_token"]) if row["refresh_token"] else ""
+            if exp_ts and exp_ts <= time.time() and not ref:
+                is_needs_reconnect = True
+                with connect() as c:
+                    c.execute(
+                        "UPDATE email_integrations SET status = 'needs_reconnect', auto_reply_enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (row["id"],),
+                    )
+        except Exception:
+            pass
+
+    if row["status"] != "connected" and not is_needs_reconnect:
+        return {
+            "connected": False,
+            "needs_reconnect": False,
             "integration": None,
         }
 
@@ -108,15 +135,23 @@ def get_email_status(user: dict = Depends(get_current_user)):
     integration_data["last_successful_payment_at"] = get_last_successful_payment_at(user["id"])
     response_cutoff = get_email_response_cutoff(integration_data)
 
+    MSG_PT = "O agente foi pausado. Desconecte e reconecte o e-mail para voltar o funcionamento do agente."
+    MSG_EN = "The agent was paused. Disconnect and reconnect your email to resume the agent."
+
     return {
-        "connected": True,
+        "connected": row["status"] == "connected" and not is_needs_reconnect,
+        "needs_reconnect": is_needs_reconnect,
+        "reconnect_message": MSG_PT,
+        "reconnect_message_pt": MSG_PT,
+        "reconnect_message_en": MSG_EN,
         "integration": {
             "id": row["id"],
             "provider": row["provider"],
             "email_address": row["email_address"],
             "display_name": row["display_name"],
-            "status": row["status"],
-            "auto_reply_enabled": bool(row["auto_reply_enabled"]),
+            "status": "needs_reconnect" if is_needs_reconnect else row["status"],
+            "needs_reconnect": is_needs_reconnect,
+            "auto_reply_enabled": False if is_needs_reconnect else bool(row["auto_reply_enabled"]),
             "last_sync_at": row["last_sync_at"],
             "response_since_at": response_cutoff.isoformat() if response_cutoff else None,
             "created_at": row["created_at"],
@@ -238,10 +273,20 @@ def toggle_auto_reply(
     """Ativa ou desativa as respostas automáticas da IA para a integração de e-mail."""
     with connect() as c:
         row = c.execute(
-            "SELECT id FROM email_integrations WHERE user_id = ? AND status = 'connected' AND provider = 'google'",
+            "SELECT id, status FROM email_integrations WHERE user_id = ? AND provider = 'google'",
             (user["id"],)
         ).fetchone()
-        if not row:
+        if not row or row["status"] != "connected":
+            if row and row["status"] == "needs_reconnect":
+                raise HTTPException(
+                    400,
+                    detail={
+                        "code": "token_expired",
+                        "message": "O agente foi pausado. Desconecte e reconecte o e-mail para voltar o funcionamento do agente.",
+                        "message_en": "The agent was paused. Disconnect and reconnect your email to resume the agent.",
+                        "needs_reconnect": True,
+                    }
+                )
             raise HTTPException(400, "Nenhuma integração de e-mail conectada nesta conta.")
 
         c.execute(
@@ -282,6 +327,16 @@ async def trigger_email_sync(user: dict = Depends(require_email_subscription)):
             "processed": processed,
             "message": f"Sincronização concluída: {len(processed)} e-mail(s) verificado(s) e respondido(s)."
         }
+    except EmailTokenExpiredError:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "token_expired",
+                "message": "O agente foi pausado. Desconecte e reconecte o e-mail para voltar o funcionamento do agente.",
+                "message_en": "The agent was paused. Disconnect and reconnect your email to resume the agent.",
+                "needs_reconnect": True,
+            }
+        )
     except Exception as e:
         logger.error(f"Erro ao sincronizar e-mails: {e}")
         raise HTTPException(

@@ -161,6 +161,29 @@ def _decrypt_integration(row: Optional[Any]) -> Optional[Dict[str, Any]]:
     return d
 
 
+class EmailTokenExpiredError(RuntimeError):
+    """Exceção levantada quando o token Google perde a validade e requer reconexão."""
+    pass
+
+
+def mark_integration_token_expired(integration_id: Optional[int] = None, user_id: Optional[int] = None):
+    """Marca a integração de e-mail como precisa de reconexão e pausa imediatamente o agente."""
+    try:
+        with connect() as c:
+            if integration_id:
+                c.execute(
+                    "UPDATE email_integrations SET status = 'needs_reconnect', auto_reply_enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (integration_id,)
+                )
+            elif user_id:
+                c.execute(
+                    "UPDATE email_integrations SET status = 'needs_reconnect', auto_reply_enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND provider = 'google'",
+                    (user_id,)
+                )
+    except Exception as exc:
+        logger.error(f"[Email Integration] Erro ao marcar integração como needs_reconnect: {exc}")
+
+
 async def refresh_google_token_if_needed(integration: dict) -> str:
     """Renova o token da Google se expirado ou prestes a expirar."""
     from backend.services.token_crypto import encrypt_token, decrypt_token
@@ -172,14 +195,16 @@ async def refresh_google_token_if_needed(integration: dict) -> str:
     try:
         expires_timestamp = float(expires_at) if expires_at else None
     except (TypeError, ValueError) as exc:
-        raise RuntimeError("Data de expiração do token Google inválida; reconecte a conta Gmail.") from exc
+        mark_integration_token_expired(integration.get("id"), integration.get("user_id"))
+        raise EmailTokenExpiredError("Data de expiração do token Google inválida; reconecte a conta Gmail.") from exc
     # Se ainda tem validade (com margem de 60s), usa o atual
     if expires_timestamp and expires_timestamp > (now + 60) and access_token:
         return access_token
 
     if not refresh_token:
         if expires_timestamp and expires_timestamp <= now:
-            raise RuntimeError("Token Google expirado e sem refresh token; reconecte a conta Gmail.")
+            mark_integration_token_expired(integration.get("id"), integration.get("user_id"))
+            raise EmailTokenExpiredError("Token Google expirado e sem refresh token; reconecte a conta Gmail.")
         return access_token
 
     config = get_email_config()["google"]
@@ -195,7 +220,8 @@ async def refresh_google_token_if_needed(integration: dict) -> str:
             data = res.json()
             new_access_token = data.get("access_token")
             if not new_access_token:
-                raise RuntimeError("Google não retornou um access token válido.")
+                mark_integration_token_expired(integration.get("id"), integration.get("user_id"))
+                raise EmailTokenExpiredError("Google não retornou um access token válido.")
             expires_in = data.get("expires_in", 3600)
             new_expires_at = str(now + expires_in)
             with connect() as c:
@@ -206,7 +232,8 @@ async def refresh_google_token_if_needed(integration: dict) -> str:
             return new_access_token
         else:
             logger.warning("Falha ao renovar token Google (HTTP %s).", res.status_code)
-            raise RuntimeError(
+            mark_integration_token_expired(integration.get("id"), integration.get("user_id"))
+            raise EmailTokenExpiredError(
                 "Não foi possível renovar a autorização Gmail. Reconecte a conta Google."
             )
 
@@ -507,6 +534,10 @@ async def send_email(
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
         res = await client.post(f"{GMAIL_API_BASE}/messages/send", headers=headers, json=payload)
+        if res.status_code == 401:
+            logger.warning("Falha ao enviar mensagem Gmail: HTTP 401 Unauthorized (token revogado/expirado).")
+            mark_integration_token_expired(integration.get("id"), integration.get("user_id"))
+            raise EmailTokenExpiredError("Token de acesso inválido ou revogado pela Google ao enviar.")
         if res.status_code not in (200, 201):
             logger.error(f"Erro Gmail send: {res.text}")
             raise ValueError(f"Falha ao enviar e-mail via Gmail: {res.text}")
@@ -1601,6 +1632,10 @@ async def _sync_google_emails(user_dict: dict, integration: dict) -> List[Dict[s
         query = "label:INBOX is:unread -category:promotions -category:social -label:spam -label:trash"
         list_url = f"{GMAIL_API_BASE}/messages?q={urllib.parse.quote(query)}&maxResults=15"
         res = await client.get(list_url, headers=headers)
+        if res.status_code == 401:
+            logger.warning("Falha ao listar mensagens do Gmail: HTTP 401 Unauthorized (token revogado/expirado).")
+            mark_integration_token_expired(integration.get("id"), integration.get("user_id"))
+            raise EmailTokenExpiredError("Token de acesso inválido ou revogado pela Google.")
         if res.status_code != 200:
             logger.warning("Falha ao listar mensagens do Gmail (HTTP %s).", res.status_code)
             raise RuntimeError(

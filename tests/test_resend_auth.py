@@ -381,7 +381,8 @@ def test_access_token_is_persistent_and_password_reset_expires_after_ten_minutes
     )
     now = int(time.time())
 
-    assert access_claims["exp"] - now >= 86400 * 30
+    # Token de sessão válido por até 7 dias (com suporte a revogação instantânea)
+    assert 86400 * 6 <= access_claims["exp"] - now <= 86400 * 7 + 60
     assert 0 < reset_claims["exp"] - now <= 600
     assert reset_claims["purpose"] == "password_reset"
     assert decode_password_reset_token(reset_token) == 123

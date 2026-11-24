@@ -316,7 +316,7 @@ async def test_booking_inquiry_does_not_ask_preferred_time_and_does_not_use_sent
     assert sent["include_booking_options"] is True
 
     # 2. Deve orientar a selecionar a data disponível
-    assert "Selecione a sua data disponível para efectuar a marcação" in body
+    assert "selecione a sua data disponível para efectuar a marcação" in body.lower()
 
     # 3. NÃO deve enviar a frase com 'marcação de marcação' nem com o horário do envio
     assert "marcação de marcação" not in body.lower()

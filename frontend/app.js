@@ -1,6 +1,24 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
+function getGenericErrorMessage() {
+  const isEn = (window.DrexierI18n && typeof window.DrexierI18n.getLanguage === "function" && window.DrexierI18n.getLanguage() === "en") ||
+               localStorage.getItem("drexier_language") === "en";
+  return isEn ? "An error occurred. Please try again." : "Ocorreu um erro. Tente novamente.";
+}
+window.getGenericErrorMessage = getGenericErrorMessage;
+
+function getEmailReconnectMessage() {
+  const isEn = (window.DrexierI18n && typeof window.DrexierI18n.getLanguage === "function" && window.DrexierI18n.getLanguage() === "en") ||
+               localStorage.getItem("drexier_language") === "en";
+  return isEn
+    ? "The agent was paused. Disconnect and reconnect your email to resume the agent."
+    : "O agente foi pausado. Desconecte e reconecte o e-mail para voltar o funcionamento do agente.";
+}
+window.getEmailReconnectMessage = getEmailReconnectMessage;
+
+let isTokenNeedsReconnect = false;
+
 const controlProcessingStates = new WeakMap();
 let activeActionControl = null;
 let recentActionControl = null;
@@ -131,7 +149,7 @@ function expireAuthSession() {
   document.documentElement.classList.remove("is-authenticated");
   showAuth("login");
   const errEl = $("#auth-error");
-  if (errEl) errEl.textContent = "Sessão inválida. Por favor, entre novamente.";
+  if (errEl) errEl.textContent = getGenericErrorMessage();
 }
 
 /* ==============================================================================
@@ -587,12 +605,19 @@ async function api(url, options = {}) {
           hasActiveSub = false;
           applyPaywallState(false);
           openPaywallModal();
-          const msg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Subscrição do Plano Business (59€/mês) necessária.");
-          throw new Error(msg);
+          const error = new Error(getGenericErrorMessage());
+          error.status = 402;
+          throw error;
         }
-        const errMsg = typeof data.detail === "object" ? data.detail.message : (data.detail || "Ocorreu um erro.");
+        const isTokenExpired = Boolean(
+          data.detail?.code === "token_expired" ||
+          data.detail?.needs_reconnect ||
+          data.needs_reconnect
+        );
+        const errMsg = isTokenExpired ? getEmailReconnectMessage() : getGenericErrorMessage();
         const error = new Error(errMsg);
         error.status = res.status;
+        error.isTokenExpired = isTokenExpired;
         error.retryAfter = Number(data.detail?.retry_after || res.headers.get("Retry-After") || 0);
         throw error;
       }
@@ -617,11 +642,8 @@ async function api(url, options = {}) {
         const cached = apiCache.get(url);
         if (cached) return cached.data;
       }
-      if (e.name === "AbortError") {
-        throw new Error("O pedido demorou demasiado tempo a responder. Tente novamente.");
-      }
-      if (e instanceof TypeError) {
-        throw new Error("Não foi possível contactar o servidor. Verifique se a API está em execução e tente novamente.");
+      if (e.name === "AbortError" || e instanceof TypeError) {
+        throw new Error(getGenericErrorMessage());
       }
       throw e;
     } finally {
@@ -641,13 +663,56 @@ async function api(url, options = {}) {
 
 function showNotice(msg, error = false) {
   const n = $("#notice");
-  const translated = window.t ? window.t(msg) : msg;
-  n.textContent = translated;
-  n.classList.remove("hidden", "error-notice");
-  if (error) n.classList.add("error-notice");
+  if (!n) return;
+  const isTokenExp = (msg && typeof msg === "object" && msg.isTokenExpired) ||
+                     (typeof msg === "string" && (
+                       msg.includes("O agente foi pausado") ||
+                       msg.includes("The agent was paused") ||
+                       msg.includes("reconecte o e-mail") ||
+                       msg.includes("reconnect your email")
+                     ));
+  if (isTokenExp) {
+    n.textContent = getEmailReconnectMessage();
+    n.classList.remove("hidden");
+    n.classList.add("error-notice");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(() => n.classList.add("hidden"), 8000);
+    return;
+  }
+  const isErr = error || (msg instanceof Error) || (typeof msg === "string" && /^(erro|error|falha|failed|exception)\b/i.test(msg.trim()));
+  if (isErr) {
+    n.textContent = getGenericErrorMessage();
+    n.classList.remove("hidden");
+    n.classList.add("error-notice");
+  } else {
+    const translated = window.t ? window.t(msg) : msg;
+    n.textContent = translated;
+    n.classList.remove("hidden", "error-notice");
+  }
   window.scrollTo({ top: 0, behavior: "smooth" });
   setTimeout(() => n.classList.add("hidden"), 5000);
 }
+
+window.addEventListener("drexier:languagechange", () => {
+  const n = $("#notice");
+  if (n && n.classList.contains("error-notice") && !n.classList.contains("hidden")) {
+    if (isTokenNeedsReconnect) {
+      n.textContent = getEmailReconnectMessage();
+    } else {
+      n.textContent = getGenericErrorMessage();
+    }
+  }
+  const authErr = $("#auth-error");
+  if (authErr && authErr.textContent) {
+    authErr.textContent = getGenericErrorMessage();
+  }
+  if (isTokenNeedsReconnect) {
+    const reconnectTitle = $("#email-reconnect-alert-title");
+    if (reconnectTitle) reconnectTitle.textContent = getEmailReconnectMessage();
+    const liveStatusText = $("#live-status-text");
+    if (liveStatusText) liveStatusText.textContent = getEmailReconnectMessage();
+  }
+});
 
 /* Modal Expansível Global com Fundo Desfocado */
 let modalReturnFocus = null;
@@ -748,7 +813,7 @@ function showAuthCodeChallenge(response, returnTab) {
     } else {
       setAuthTab(returnTab);
     }
-    $("#auth-error").textContent = "O código expirou. Solicite um novo código para continuar.";
+    $("#auth-error").textContent = getGenericErrorMessage();
   }, Math.max(1, Number(response.expires_in || 600)) * 1000);
 }
 
@@ -796,12 +861,10 @@ function startAuthLockoutCountdown(retryAfter) {
       } else {
         setAuthTab(authChallengeReturnTab);
       }
-      $("#auth-error").textContent = "O bloqueio terminou. Solicite um novo código para tentar novamente.";
+      $("#auth-error").textContent = "";
       return;
     }
-    const minutes = Math.floor(remaining / 60);
-    const seconds = String(remaining % 60).padStart(2, "0");
-    $("#auth-error").textContent = `Muitas tentativas. Tente novamente em ${minutes}:${seconds}.`;
+    $("#auth-error").textContent = getGenericErrorMessage();
   }, 1000);
 }
 $$("[data-auth]").forEach(b => b.addEventListener("click", () => setAuthTab(b.dataset.auth)));
@@ -829,10 +892,7 @@ $("#forgot-password")?.addEventListener("click", async e => {
       showAuthNotice(response.message);
     }
   } catch (error) {
-    $("#auth-error").textContent = error.message;
-    if (error.retryAfter > 0) {
-      $("#auth-error").textContent = "Este email está temporariamente bloqueado. Tente novamente após 15 minutos.";
-    }
+    $("#auth-error").textContent = getGenericErrorMessage();
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = originalLabel;
@@ -844,7 +904,7 @@ $("#password-reset-form")?.addEventListener("submit", async e => {
   $("#auth-error").textContent = "";
   const data = Object.fromEntries(new FormData(e.currentTarget));
   if (data.password !== data.confirm_password) {
-    $("#auth-error").textContent = "As senhas não coincidem.";
+    $("#auth-error").textContent = getGenericErrorMessage();
     return;
   }
   const submitButton = e.currentTarget.querySelector("button[type='submit']");
@@ -861,11 +921,10 @@ $("#password-reset-form")?.addEventListener("submit", async e => {
     setAuthTab("login");
     showAuthNotice(response.message);
   } catch (error) {
-    $("#auth-error").textContent = error.message;
+    $("#auth-error").textContent = getGenericErrorMessage();
     if (error.status === 401) {
       resetToken = null;
       setAuthTab("login");
-      $("#auth-error").textContent = "A recuperação expirou. Solicite um novo código.";
     }
   } finally {
     submitButton.disabled = false;
@@ -890,10 +949,7 @@ $("#login-form").addEventListener("submit", async e => {
     saveAuthToken(r.token);
     await boot();
   } catch (err) {
-    $("#auth-error").textContent = err.message;
-    if (err.retryAfter > 0) {
-      $("#auth-error").textContent = `Muitas tentativas. Tente novamente após 15 minutos.`;
-    }
+    $("#auth-error").textContent = getGenericErrorMessage();
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = originalLabel;
@@ -905,7 +961,7 @@ $("#signup-form").addEventListener("submit", async e => {
   $("#auth-error").textContent = "";
   const d = Object.fromEntries(new FormData(e.target));
   if (d.password !== d.confirm_password) {
-    $("#auth-error").textContent = "As senhas não coincidem.";
+    $("#auth-error").textContent = getGenericErrorMessage();
     return;
   }
   const submitButton = e.currentTarget.querySelector('button[type="submit"]');
@@ -921,7 +977,7 @@ $("#signup-form").addEventListener("submit", async e => {
     saveAuthToken(r.token);
     await boot();
   } catch (err) {
-    $("#auth-error").textContent = err.message;
+    $("#auth-error").textContent = getGenericErrorMessage();
     if (err.retryAfter > 0) {
       startAuthLockoutCountdown(err.retryAfter);
     }
@@ -953,7 +1009,7 @@ $("#auth-code-form")?.addEventListener("submit", async e => {
       authChallengeTimer = setTimeout(() => {
         resetToken = null;
         setAuthTab("login");
-        $("#auth-error").textContent = "A recuperação expirou. Solicite um novo código.";
+        $("#auth-error").textContent = getGenericErrorMessage();
       }, 10 * 60 * 1000);
       return;
     }
@@ -961,7 +1017,7 @@ $("#auth-code-form")?.addEventListener("submit", async e => {
     authChallengeId = null;
     await boot();
   } catch (err) {
-    $("#auth-error").textContent = err.message;
+    $("#auth-error").textContent = getGenericErrorMessage();
     if (err.retryAfter > 0) {
       startAuthLockoutCountdown(err.retryAfter);
     }
@@ -1085,7 +1141,7 @@ async function boot() {
       return;
     } else if (urlParams.get("email_auth") === "error") {
       const reason = urlParams.get("reason") || "Erro na autorização do fornecedor de e-mail.";
-      showNotice(`Falha na ligação do e-mail: ${reason}`, true);
+      showNotice(getGenericErrorMessage(), true);
       window.history.replaceState({}, document.title, window.location.pathname);
       await navigate("settings");
       return;
@@ -1102,7 +1158,7 @@ async function boot() {
       document.documentElement.classList.remove("is-authenticated");
       showAuth("login");
       const errEl = $("#auth-error");
-      if (errEl) errEl.textContent = "Sessão inválida. Entre novamente.";
+      if (errEl) errEl.textContent = getGenericErrorMessage();
     } else {
       // Falha temporária de rede / recarregamento: mantém o utilizador autenticado dentro do software
       console.warn("Aviso na inicialização do perfil:", err);
@@ -1269,6 +1325,11 @@ function syncGlobalAgentState() {
       "aria-label",
       isEnabled ? "Desativar respostas automáticas do agente" : "Ativar respostas automáticas do agente"
     );
+  }
+
+  if (isTokenNeedsReconnect) {
+    setAgentStatus("paused");
+    return;
   }
 
   if (!hasChannel) {
@@ -1827,7 +1888,7 @@ async function openPendingConfirmationsModal() {
     const requests = d.pending_requests || [];
     renderPendingModalList(requests);
   } catch (err) {
-    modalBody.innerHTML = `<div class="empty error-notice">Erro ao carregar pedidos: ${escapeHtml(err.message)}</div>`;
+    modalBody.innerHTML = `<div class="empty error-notice">${escapeHtml(getGenericErrorMessage())}</div>`;
   } finally {
     modalBody.setAttribute("aria-busy", "false");
     if (wasHidden && !modal.classList.contains("hidden")) $("#close-pending-modal")?.focus();
@@ -1952,7 +2013,7 @@ function renderPendingModalList(requests) {
     btnSendManual.onclick = async () => {
       const text = manualInput.value.trim();
       if (!text) {
-        alert("Por favor, escreva a sua mensagem antes de enviar.");
+        alert(getGenericErrorMessage());
         manualInput.focus();
         return;
       }
@@ -2264,7 +2325,7 @@ async function renderConversationMessages(id, autoScroll = true) {
   } catch (err) {
     if (!conversationMessagesCache[id]) {
       el.className = "conversation empty";
-      el.textContent = `Erro ao carregar mensagens: ${err.message}`;
+      el.textContent = getGenericErrorMessage();
     }
   }
 }
@@ -3783,7 +3844,7 @@ function openExpandBusinessCard(cardId, editingIdx = null) {
     const details = detailsEl?.value.trim() || "";
 
     if (!name) {
-      alert("Por favor, preencha o nome do item.");
+      alert(getGenericErrorMessage());
       nameEl?.focus();
       return;
     }
@@ -4260,7 +4321,7 @@ async function handleTrainingFileUpload(file) {
   } catch (err) {
     if (notice) {
       notice.className = "upload-feedback error";
-      notice.textContent = `Erro no carregamento: ${err.message}`;
+      notice.textContent = getGenericErrorMessage();
     }
     showNotice(err.message, true);
   } finally {
@@ -4958,16 +5019,56 @@ async function loadEmailStatus() {
     const data = await api("/api/email/status");
     loading.classList.add("hidden");
 
-    if (data.connected && data.integration) {
+    isTokenNeedsReconnect = Boolean(data.needs_reconnect);
+    const reconnectAlert = $("#email-reconnect-alert");
+    if (reconnectAlert) reconnectAlert.classList.toggle("hidden", !isTokenNeedsReconnect);
+
+    if (isTokenNeedsReconnect) {
+      isEmailConnected = false;
+      const reconnectTitle = $("#email-reconnect-alert-title");
+      if (reconnectTitle) reconnectTitle.textContent = getEmailReconnectMessage();
+
+      if (badge) {
+        badge.textContent = window.t ? window.t("Reconexão Necessária") : "Reconexão Necessária";
+        badge.className = "badge badge-disconnected";
+        badge.style.background = "var(--color-error-bg, rgba(239, 68, 68, 0.15))";
+        badge.style.color = "var(--color-error, #ef4444)";
+      }
+      const emailPillDisc = $("#pill-email-status");
+      if (emailPillDisc) {
+        emailPillDisc.textContent = window.t ? window.t("Reconexão Necessária") : "Reconexão Necessária";
+        emailPillDisc.className = "channel-pill";
+        emailPillDisc.style.color = "var(--color-error, #ef4444)";
+      }
+
+      showNotice(getEmailReconnectMessage());
+      updateAutoReplyUI(false, true);
+
+      if (data.integration) {
+        const it = data.integration;
+        const dispProvider = $("#email-display-provider");
+        const dispAddr = $("#email-display-address");
+        if (dispProvider) dispProvider.textContent = "Google Gmail (Reconexão Necessária)";
+        if (dispAddr) dispAddr.textContent = it.email_address || "";
+        connectedView.classList.remove("hidden");
+        disconnectedView.classList.add("hidden");
+      } else {
+        disconnectedView.classList.remove("hidden");
+        connectedView.classList.add("hidden");
+      }
+    } else if (data.connected && data.integration) {
       const it = data.integration;
       if (badge) {
         badge.textContent = "Conectado";
         badge.className = "badge badge-connected";
+        badge.style.background = "";
+        badge.style.color = "";
       }
       const emailPill = $("#pill-email-status");
       if (emailPill) {
         emailPill.textContent = "Conectado";
         emailPill.className = "channel-pill connected";
+        emailPill.style.color = "";
       }
 
       const providerName = "Google Gmail";
@@ -5001,11 +5102,14 @@ async function loadEmailStatus() {
       if (badge) {
         badge.textContent = "Desconectado";
         badge.className = "badge badge-disconnected";
+        badge.style.background = "";
+        badge.style.color = "";
       }
       const emailPillDisc = $("#pill-email-status");
       if (emailPillDisc) {
         emailPillDisc.textContent = "Desconectado";
         emailPillDisc.className = "channel-pill";
+        emailPillDisc.style.color = "";
       }
       disconnectedView.classList.remove("hidden");
     }
@@ -5049,6 +5153,9 @@ $("#btn-email-disconnect")?.addEventListener("click", async () => {
     showNotice(err.message, true);
   }
 });
+$("#btn-email-reconnect-disconnect")?.addEventListener("click", () => {
+  $("#btn-email-disconnect")?.click();
+});
 
 // Sincronização manual de e-mails
 async function handleEmailSync(triggerBtn) {
@@ -5086,6 +5193,29 @@ function updateAutoReplyUI(enabled, connected = true) {
   const liveStatusDot = $("#live-status-dot");
   const liveStatusBar = $("#conversation-live-status");
   const liveStatusText = $("#live-status-text");
+
+  if (isTokenNeedsReconnect) {
+    if (autoReplyText) {
+      autoReplyText.textContent = window.t ? window.t("Pausada") : "Pausada";
+      autoReplyText.className = "integration-text-muted";
+    }
+    if (autoReplyBtn) {
+      autoReplyBtn.textContent = window.t ? window.t("Reconexão Necessária") : "Reconexão Necessária";
+      autoReplyBtn.disabled = true;
+    }
+    if (msgToggleBtn) {
+      msgToggleBtn.textContent = window.t ? window.t("Respostas IA: Pausadas") : "Respostas IA: Pausadas";
+      msgToggleBtn.className = "btn outline small";
+      msgToggleBtn.style.borderColor = "#ef4444";
+      msgToggleBtn.style.color = "#dc2626";
+    }
+    if (liveStatusDot) liveStatusDot.className = "live-pulse-dot paused";
+    if (liveStatusBar) liveStatusBar.className = "conversation-live-bar paused";
+    if (liveStatusText) {
+      liveStatusText.textContent = getEmailReconnectMessage();
+    }
+    return;
+  }
 
   if (!connected) {
     if (autoReplyText) {
@@ -5148,8 +5278,16 @@ function updateAutoReplyUI(enabled, connected = true) {
 
 async function toggleAutoReply() {
     if (!paywallCheck()) return;
+    if (isTokenNeedsReconnect) {
+      showNotice(getEmailReconnectMessage());
+      return;
+    }
     try {
       const statusData = await api("/api/email/status");
+      if (statusData.needs_reconnect) {
+        showNotice(getEmailReconnectMessage());
+        return;
+      }
       if (!statusData.connected) {
         showNotice("Conecte primeiro o seu e-mail nas configurações para gerir as respostas automáticas.", true);
         return;
@@ -5369,6 +5507,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Botão Voltar à Landing Page a partir do Auth
   $("#btn-back-to-landing")?.addEventListener("click", () => showLanding());
+
+  // Abas interativas da Vitrine Hero (Gmail / Quadro / Studio)
+  $$(".lp-hero-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const targetPane = tab.dataset.tab;
+      $$(".lp-hero-tab").forEach(t => t.classList.toggle("active", t === tab));
+      $$(".lp-hero-pane").forEach(p => p.classList.toggle("active", p.dataset.pane === targetPane));
+    });
+  });
+
+  // Abas interativas do Simulador de Cenários Setoriais
+  $$(".lp-scenario-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const targetScenario = tab.dataset.scenario;
+      $$(".lp-scenario-tab").forEach(t => t.classList.toggle("active", t === tab));
+      $$(".lp-scenario-pane").forEach(p => p.classList.toggle("active", p.dataset.scenario === targetScenario));
+    });
+  });
 
   // Acordeão FAQ interativo com clique para abrir/fechar suave
   $$(".lp-faq-question").forEach(q => {

@@ -1,5 +1,6 @@
 import json
 import pytest
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
 
@@ -1706,9 +1707,11 @@ async def test_public_booking_selection_semi_auto_and_approval_moves_to_board(au
 
     booking_tok = create_booking_token(user_id, contact_id, "ana@exemplo.com", "Ana Costa")
 
-    # Cliente escolhe uma opção
-    slot_label = "Opção 2: Dia 23/11/2026 às 13:00"
-    slot_iso = "2026-11-23T13:00:00+00:00"
+    # Cliente escolhe uma opção (data futura dinâmica para compatibilidade com o quadro de marcações)
+    future_dt = datetime.now(timezone.utc) + timedelta(days=2)
+    slot_date_str = future_dt.strftime("%d/%m/%Y")
+    slot_label = f"Opção 2: Dia {slot_date_str} às 13:00"
+    slot_iso = future_dt.replace(hour=13, minute=0, second=0, microsecond=0).isoformat()
     resp_sel = client.post("/api/booking/select", json={
         "token": booking_tok,
         "slot_label": slot_label,
@@ -1741,7 +1744,7 @@ async def test_public_booking_selection_semi_auto_and_approval_moves_to_board(au
         body_sent = mock_send.call_args.kwargs["body_text"]
         assert "confirmado com sucesso" in body_sent
         assert "Ana Costa" in body_sent
-        assert "23/11/2026" in body_sent
+        assert slot_date_str in body_sent
 
     # 3. Agora a marcação foi adicionada ao card de marcações
     dash_after = client.get("/api/dashboard", headers={"Authorization": f"Bearer {token}"}).json()
