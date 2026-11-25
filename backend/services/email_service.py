@@ -991,10 +991,6 @@ def detect_booking_or_purchase_intent(incoming_content: str, subject: str) -> Op
         r"\b(confirmar\s+(o\s+)?pedido|confirmo\s+(o\s+)?pedido|confirmo|confirmar\s+(a\s+)?compra|confirmo\s+(a\s+)?compra|pode\s+fechar)\b",
     ]
 
-    for pat in booking_patterns:
-        if re.search(pat, text, re.IGNORECASE):
-            return {"type": "booking", "details": incoming_content[:300].strip()}
-
     for pat in purchase_patterns:
         if re.search(pat, text, re.IGNORECASE):
             return {"type": "purchase", "details": incoming_content[:300].strip()}
@@ -1023,34 +1019,9 @@ def is_booking_inquiry(
     has_specific_schedule: bool = False,
 ) -> bool:
     """
-    Determina segundo a interpretação da IA se a mensagem do cliente é uma pergunta
-    ou pedido sobre marcações, agendamentos ou disponibilidade de horários.
-    As opções de escolha de data só são entregues nestas mensagens, não em todas.
+    Marcações desativadas por completo no software.
+    O sistema agora apenas responde a dúvidas e mensagens dos clientes e informa horários disponíveis.
     """
-    if has_specific_schedule:
-        return False
-
-    if waiting_for_schedule:
-        return True
-
-    if intent and intent.get("type") == "booking":
-        return True
-
-    combined = f"{subject or ''}\n{incoming_content or ''}".lower()
-    for pat in BOOKING_INQUIRY_PATTERNS:
-        if re.search(pat, combined, re.IGNORECASE):
-            return True
-
-    # Só considera reply_text se houver contexto prévio de marcação ou atendimento na mensagem
-    if reply_text and any(w in combined for w in ("marcar", "agendar", "marcação", "agendamento", "consulta", "reserva", "vaga", "sessão", "atendimento")):
-        rt = reply_text.lower()
-        if any(w in rt for w in (
-            "para efetuar a marcação", "para efectuar a marcação",
-            "agendar um horário", "agendar um horario",
-            "marcar uma consulta", "marcar um atendimento"
-        )):
-            return True
-
     return False
 
 
@@ -1437,7 +1408,7 @@ def capture_scheduled_request(
         (user_id, contact_id),
     ).fetchone()
     request_type = intent["type"] if intent else (waiting["request_type"] if waiting else None)
-    if not request_type:
+    if not request_type or request_type == "booking":
         return None
 
     clean_incoming = clean_email_body(incoming_content)
@@ -2568,59 +2539,9 @@ async def process_and_reply_email(
             else UNKNOWN_REPLY
         )
 
-    # Determina segundo a interpretação da IA se esta mensagem é uma consulta sobre marcações
-    should_include_options = is_booking_inquiry(
-        incoming_content=incoming_content,
-        subject=subject,
-        reply_text=reply_text,
-        intent=intent,
-        waiting_for_schedule=waiting_for_schedule,
-        has_specific_schedule=has_specific_schedule,
-    )
-
-    if should_include_options and not has_specific_schedule:
-        # Quando o cliente mostra intenção de marcação, o e-mail já apresenta as opções disponíveis.
-        # NUNCA pergunte data/horário de preferência nem 'aguardamos o seu retorno'.
-        reply_text = re.sub(
-            r"(?i)\b(?:por\s+favor,?\s*)?(?:informe|indique|diga)[^\.\n]*?(?:dia|data|hor[áa]rio)[^\.\n]*?(?:prefer[êe]ncia|pretendid[oa])[^\.\n]*?[\.\?!]?",
-            "",
-            reply_text,
-        )
-        reply_text = re.sub(
-            r"(?i)\b(?:por\s+favor,?\s*)?aguardamos\s+o\s+seu\s+retorno[^\.\n]*?[\.\?!]?",
-            "",
-            reply_text,
-        )
-        reply_text = re.sub(
-            r"(?i)\b(?:para\s+registar[^\.\n]*?)?qual\s+[ée]\s+(?:a\s+)?data\s+e\s+(?:a\s+)?hora[^\.\n]*?[\.\?!]?",
-            "",
-            reply_text,
-        )
-        reply_text = re.sub(
-            r"(?i)\b(?:por\s+favor,?\s*)?indique\s+o\s+dia\s+e\s+o\s+hor[áa]rio[^\.\n]*?[\.\?!]?",
-            "",
-            reply_text,
-        )
-        reply_text = re.sub(
-            r"(?i)\b(?:por\s+favor,?\s*)?indique\s+o\s+hor[áa]rio\s+desejado[^\.\n]*?[\.\?!]?",
-            "",
-            reply_text,
-        )
-        reply_text = re.sub(r"\n{3,}", "\n\n", reply_text).strip()
-
-        # Se o texto ficou vazio ou continha apenas saudação/marcação, define diretamente
-        cleaned_check = re.sub(r"(?i)^(?:ol[áa]|bom\s+dia|boa\s+tarde|boa\s+noite)[^\.\n]*?[\.\?!,\s]*", "", reply_text).strip()
-        if not cleaned_check or not reply_text:
-            greeting = f"Olá, {booking_customer_name}." if booking_customer_name else "Olá."
-            reply_text = f"{greeting}\n\nSelecione a sua data disponível para efectuar a marcação (data e horário)."
-        elif "selecione a sua data disponível" not in reply_text.lower():
-            reply_text = f"{reply_text}\n\nSelecione a sua data disponível para efectuar a marcação (data e horário)."
-    elif waiting_for_schedule and (not scheduled_request or scheduled_request.get("request_type") != "purchase"):
-        reply_text = ensure_date_time_question(
-            reply_text,
-            need_date=need_date,
-            need_time=need_time,
-        )
+    # Marcações eliminadas por completo do software:
+    # O agente responde estritamente à mensagem/dúvida do cliente sem adicionar opções de agendamento.
+    should_include_options = False
 
     # Envia o e-mail de resposta de volta ao cliente pelo provedor configurado
     reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"

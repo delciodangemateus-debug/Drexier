@@ -430,19 +430,6 @@ const PRESET_BUSINESS_CARDS = [
     }
   },
   {
-    kind: "marcacoes",
-    title: "Tempo e Regras de Marcações",
-    icon: "marcacoes",
-    category: "Agendamento",
-    description: "Antecedência mínima, políticas de tolerância, remarcação e cancelamento.",
-    hint: "Defina como os agendamentos devem ser solicitados para evitar furos de agenda.",
-    placeholders: {
-      name: "Ex: Marcações com Antecedência Mínima",
-      price: "Ex: 24 horas de antecedência",
-      details: "Ex: Tolerância de 15 minutos de atraso; cancelamentos sem custo até 6h antes"
-    }
-  },
-  {
     kind: "pagamentos",
     title: "Formas de Pagamento e Faturação",
     icon: "pagamentos",
@@ -1454,17 +1441,11 @@ function renderDashboardData(d) {
   const mPending = $("#metric-pending");
   if (mPending) mPending.textContent = pending;
 
-  // 5: Marcações previstas para os próximos sete dias
-  const mBookings = $("#metric-bookings");
-  const confirmedList = d.confirmed_bookings || [];
-  const bookingsCount = d.bookings_count ?? confirmedList.filter(b => b.status !== "treated").length;
-  if (mBookings) mBookings.textContent = bookingsCount;
-
   // 7: Taxa de conversão real
   const mConv = $("#metric-conversion-rate");
   if (mConv) {
     if (contacts > 0) {
-      const convRate = Math.min(100, Math.round(((pending + bookingsCount) / contacts) * 100));
+      const convRate = Math.min(100, Math.round((pending / contacts) * 100));
       mConv.textContent = `${convRate}%`;
     } else {
       mConv.textContent = "0%";
@@ -1484,8 +1465,7 @@ function renderDashboardData(d) {
     { title: "Novos Clientes (24h)", val: `${today} (24h anteriores: ${yest})`, desc: "Novos contactos nas últimas 24 horas, comparados com as 24 horas imediatamente anteriores." },
     { title: "Clientes na Base", val: contacts, desc: "Número acumulado de contactos únicos que iniciaram conversa com o seu negócio." },
     { title: "Vendas & Pedidos", val: pending, desc: "Intenções de compra recolhidas pelo agente aguardando a sua validação ou confirmação." },
-    { title: "Marcações da Semana", val: bookingsCount, desc: "Pedidos e marcações com data e hora registadas para qualquer data futura." },
-    { title: "Taxa de Conversão", val: mConv ? mConv.textContent : "0%", desc: "Proporção de contactos que evoluíram para intenção de compra ou marcação de serviço." }
+    { title: "Taxa de Conversão", val: mConv ? mConv.textContent : "0%", desc: "Proporção de contactos que evoluíram para intenção de compra." }
   ];
 
   metrics.forEach((m, i) => {
@@ -1499,9 +1479,7 @@ function renderDashboardData(d) {
         m.click();
       }
     };
-    if (m.id === "card-metric-bookings") {
-      m.onclick = () => openBookingsModal(d.confirmed_bookings || []);
-    } else if (m.id === "card-metric-pending") {
+    if (m.id === "card-metric-pending") {
       m.onclick = () => openPendingConfirmationsModal();
     } else if (metricData[i]) {
       m.onclick = () => expandMetricCard(metricData[i].title, metricData[i].val, metricData[i].desc);
@@ -1708,133 +1686,8 @@ function formatBookingDateTime(value) {
   }
 }
 
-function openBookingsModal(confirmedList) {
-  const modal = $("#bookings-expand-modal");
-  const modalBody = $("#bookings-modal-body");
-  if (!modal || !modalBody) return;
-
-  modal.classList.remove("hidden");
-  document.body.style.overflow = "hidden";
-  modalBody.innerHTML = "";
-
-  const list = Array.isArray(confirmedList) ? confirmedList : [];
-  if (!list.length) {
-    modalBody.innerHTML = '<div class="empty">Ainda não existem marcações futuras com data e hora registadas. A IA pedirá esses dados ao cliente quando necessário.</div>';
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  list.forEach(r => {
-    const card = document.createElement("article");
-    card.className = "booking-week-item";
-
-    const info = document.createElement("div");
-    info.className = "booking-week-info";
-
-    const summary = document.createElement("button");
-    summary.type = "button";
-    summary.className = "booking-week-toggle";
-    summary.setAttribute("aria-controls", `booking-request-${Number(r.id)}`);
-    summary.setAttribute("aria-expanded", "false");
-
-    const clientLine = document.createElement("span");
-    clientLine.className = "booking-client-line";
-
-    const clientName = document.createElement("span");
-    clientName.className = "booking-client-name";
-    clientName.textContent = r.name || r.contact_key || "Cliente";
-
-    const scheduledAt = document.createElement("span");
-    scheduledAt.className = "booking-scheduled-at";
-    scheduledAt.textContent = formatBookingDateTime(r.scheduled_at);
-
-    clientLine.append(clientName, scheduledAt);
-
-    const requestDetails = document.createElement("div");
-    requestDetails.className = "booking-request-details";
-    requestDetails.id = `booking-request-${Number(r.id)}`;
-    requestDetails.hidden = true;
-    const appointmentMessage = document.createElement("p");
-    appointmentMessage.className = "booking-appointment-message";
-    appointmentMessage.textContent = r.appointment_message || "Não há mensagem do pedido registada.";
-    requestDetails.append(appointmentMessage);
-
-    const conversationBtn = document.createElement("button");
-    conversationBtn.type = "button";
-    conversationBtn.className = "booking-conversation-link";
-    conversationBtn.textContent = "Abrir conversa completa";
-    conversationBtn.addEventListener("click", () => {
-      openBookingConversation(r.contact_id);
-    });
-    requestDetails.append(conversationBtn);
-
-    summary.addEventListener("click", () => {
-      const isExpanded = summary.getAttribute("aria-expanded") === "true";
-      summary.setAttribute("aria-expanded", String(!isExpanded));
-      requestDetails.hidden = isExpanded;
-    });
-
-    const validatedBadge = document.createElement("span");
-    validatedBadge.className = "booking-status-badge";
-    validatedBadge.textContent = "Validada";
-
-    summary.append(clientLine, validatedBadge);
-    info.append(summary, requestDetails);
-
-    const reminderBtn = document.createElement("button");
-    reminderBtn.type = "button";
-    reminderBtn.className = "btn outline small booking-reminder-btn";
-    reminderBtn.dataset.requestId = String(Number(r.id));
-    reminderBtn.textContent = "Enviar lembrete";
-    reminderBtn.addEventListener("click", async () => {
-      reminderBtn.disabled = true;
-      reminderBtn.textContent = "A enviar…";
-      try {
-        await api(`/api/conversions/${Number(r.id)}/remind`, { method: "POST" });
-        showNotice("Lembrete enviado ao cliente com sucesso.");
-        reminderBtn.textContent = "Lembrete enviado";
-      } catch (err) {
-        showNotice(err.message, true);
-        reminderBtn.disabled = false;
-        reminderBtn.textContent = "Enviar lembrete";
-      }
-    });
-
-    // Botão de lixeira para remover da lista da semana
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "btn-icon-danger booking-delete-btn";
-    deleteBtn.title = "Remover desta lista";
-    deleteBtn.setAttribute("aria-label", "Remover cliente desta lista");
-    deleteBtn.innerHTML = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
-    deleteBtn.addEventListener("click", async () => {
-      if (!confirm(`Remover ${r.name || r.contact_key || "este cliente"} da lista de marcações desta semana?`)) return;
-      deleteBtn.disabled = true;
-      try {
-        await api(`/api/conversions/${Number(r.id)}/remove-from-week`, { method: "DELETE" });
-        card.style.opacity = "0";
-        card.style.transition = "opacity 0.25s";
-        setTimeout(() => {
-          card.remove();
-          if (!modalBody.querySelector(".booking-week-item")) {
-            modalBody.innerHTML = '<div class="empty">Sem marcações na lista.</div>';
-          }
-          loadDashboard().catch(() => {});
-        }, 260);
-      } catch (err) {
-        showNotice(err.message, true);
-        deleteBtn.disabled = false;
-      }
-    });
-
-    const actionsDiv = document.createElement("div");
-    actionsDiv.className = "booking-week-actions";
-    actionsDiv.append(reminderBtn, deleteBtn);
-    card.append(info, actionsDiv);
-    fragment.append(card);
-  });
-
-  modalBody.append(fragment);
+function openBookingsModal() {
+  // Marcações eliminadas por completo do software
 }
 
 async function openBookingConversation(contactId) {

@@ -105,7 +105,7 @@ async def test_options_only_delivered_on_booking_inquiry(monkeypatch):
     assert len(sent_emails) == 1
     assert sent_emails[0]["include_booking_options"] is False
 
-    # 2. Cliente pergunta sobre marcação de consulta (É pergunta sobre marcações)
+    # 2. Cliente pergunta sobre horários disponíveis (Marcações desativadas - nunca inclui booking_options)
     sent_emails.clear()
     await process_and_reply_email(
         user_dict=user_dict,
@@ -116,7 +116,7 @@ async def test_options_only_delivered_on_booking_inquiry(monkeypatch):
         incoming_content="Queria agendar uma consulta, quais são os horários disponíveis para marcar?",
     )
     assert len(sent_emails) == 1
-    assert sent_emails[0]["include_booking_options"] is True
+    assert sent_emails[0]["include_booking_options"] is False
 
 
 def test_extract_booking_option_choice_various_formats():
@@ -254,6 +254,7 @@ async def test_gmail_selection_semi_auto_adds_to_pending_validation(monkeypatch)
         assert "Opção 2" in req["details"]
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_booking_inquiry_does_not_ask_preferred_time_and_does_not_use_sent_timestamp(monkeypatch):
     """

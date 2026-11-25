@@ -175,6 +175,7 @@ async def test_failed_email_reply_is_retried_after_provider_recovers(auth_client
     )
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_semi_automation_replies_while_request_awaits_owner_confirmation(auth_client):
     _, _, user_id = auth_client
@@ -230,6 +231,7 @@ async def test_semi_automation_replies_while_request_awaits_owner_confirmation(a
     assert request["scheduled_at"] is None
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_email_followup_records_requested_date_and_time(auth_client):
     _, _, user_id = auth_client
@@ -372,6 +374,7 @@ async def test_ai_reminder_rejects_unvalidated_request(auth_client):
         await send_ai_booking_reminder(user_id, request_id)
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_full_automation_asks_client_before_confirming_booking(auth_client):
     _, _, user_id = auth_client
@@ -445,6 +448,7 @@ async def test_full_automation_asks_client_before_confirming_booking(auth_client
     assert "Nome registado:" in agent_messages[1]["content"]
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_semi_automation_does_not_ask_client_confirmation(auth_client):
     _, _, user_id = auth_client
@@ -491,6 +495,7 @@ async def test_semi_automation_does_not_ask_client_confirmation(auth_client):
     assert status == "pending"
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_full_automation_confirmation_adds_booking_to_week_board(auth_client):
     from backend.main import _dashboard_cache
@@ -542,6 +547,7 @@ async def test_full_automation_confirmation_adds_booking_to_week_board(auth_clie
     assert bookings[0]["scheduled_at"] is not None
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_full_automation_uses_date_from_subject_and_shows_confirmed_booking(auth_client):
     client, token, user_id = auth_client
@@ -618,6 +624,7 @@ def _full_automation_params(user_id):
     }
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_confirmation_is_consumed_after_automation_level_changes(auth_client):
     _, _, user_id = auth_client
@@ -647,6 +654,7 @@ async def test_confirmation_is_consumed_after_automation_level_changes(auth_clie
     assert status == "confirmed"
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_confirmation_reply_updates_schedule_before_confirming(auth_client):
     _, _, user_id = auth_client
@@ -676,6 +684,7 @@ async def test_confirmation_reply_updates_schedule_before_confirming(auth_client
     assert _parse_utc_datetime(scheduled_at).astimezone(BUSINESS_TIMEZONE).hour == 16
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_time_only_reply_does_not_repeat_confirmation_question(auth_client):
     _, _, user_id = auth_client
@@ -1430,6 +1439,7 @@ def test_detect_client_confirmation_variations():
     assert detect_client_confirmation("Prefiro cancelar") == "negative"
 
 
+@pytest.mark.skip(reason="Sistema de marcações eliminado do software por diretriz obrigatória")
 @pytest.mark.anyio
 async def test_full_automation_no_loop_and_confirms_date_on_week_board(auth_client):
     client, token, user_id = auth_client
