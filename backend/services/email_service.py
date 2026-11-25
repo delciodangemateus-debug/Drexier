@@ -1041,10 +1041,10 @@ def is_booking_inquiry(
         if re.search(pat, combined, re.IGNORECASE):
             return True
 
-    if reply_text:
+    # Só considera reply_text se houver contexto prévio de marcação ou atendimento na mensagem
+    if reply_text and any(w in combined for w in ("marcar", "agendar", "marcação", "agendamento", "consulta", "reserva", "vaga", "sessão", "atendimento")):
         rt = reply_text.lower()
         if any(w in rt for w in (
-            "horários disponíveis", "horarios disponiveis",
             "para efetuar a marcação", "para efectuar a marcação",
             "agendar um horário", "agendar um horario",
             "marcar uma consulta", "marcar um atendimento"

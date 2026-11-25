@@ -778,3 +778,66 @@ def test_full_ai_analysis_report_lifecycle_and_booking_removal(monkeypatch):
     assert rm_res.status_code == 200
     assert rm_res.json()["ok"] is True
 
+
+def test_password_reset_invalidates_old_sessions_and_allows_new_login():
+    import time
+    email = f"pwd_reset_{int(time.time() * 1000)}@example.com"
+    pwd1 = "InitialPass123"
+    pwd2 = "UpdatedPass456"
+
+    signup_res = signup_and_verify(client, {
+        "name": "Reset Test User",
+        "email": email,
+        "password": pwd1,
+        "confirm_password": pwd1,
+        "business_type": "Serviços",
+    })
+    old_token = signup_res.json()["token"]
+
+    # Verifica que o token inicial funciona nos endpoints protegidos
+    assert client.get("/api/me", headers={"Authorization": f"Bearer {old_token}"}).status_code == 200
+    assert client.get("/api/billing/status", headers={"Authorization": f"Bearer {old_token}"}).status_code == 200
+    assert client.get("/api/email/status", headers={"Authorization": f"Bearer {old_token}"}).status_code == 200
+
+    # Solicita redefinição de senha
+    reset_req = client.post("/api/auth/password-reset", json={"email": email})
+    assert reset_req.status_code == 200
+    ch_id = reset_req.json()["challenge_id"]
+    code = app.state.test_auth_codes[(email.lower(), "password_reset")]
+
+    # Valida código OTP de recuperação
+    verify_res = client.post("/api/auth/verify", json={"challenge_id": ch_id, "code": code})
+    assert verify_res.status_code == 200
+    reset_token = verify_res.json()["reset_token"]
+
+    # Conclui redefinição de senha
+    complete_res = client.post("/api/auth/password-reset/complete", json={
+        "reset_token": reset_token,
+        "password": pwd2,
+        "confirm_password": pwd2,
+    })
+    assert complete_res.status_code == 200
+    assert complete_res.json()["password_updated"] is True
+
+    # Token antigo DEVE ser rejeitado em todos os roteadores (revogação imediata via token_version)
+    assert client.get("/api/me", headers={"Authorization": f"Bearer {old_token}"}).status_code == 401
+    assert client.get("/api/billing/status", headers={"Authorization": f"Bearer {old_token}"}).status_code == 401
+    assert client.get("/api/email/status", headers={"Authorization": f"Bearer {old_token}"}).status_code == 401
+
+    # Login com a nova senha deve funcionar e gerar um token com a token_version atualizada
+    login_res = login_and_verify(client, email, pwd2)
+    assert login_res.status_code == 200
+    new_token = login_res.json()["token"]
+
+    # O utilizador NÃO deve ficar bloqueado: o novo token deve ter acesso total
+    me_res = client.get("/api/me", headers={"Authorization": f"Bearer {new_token}"})
+    assert me_res.status_code == 200
+    assert me_res.json()["email"] == email
+
+    billing_res = client.get("/api/billing/status", headers={"Authorization": f"Bearer {new_token}"})
+    assert billing_res.status_code == 200
+
+    email_res = client.get("/api/email/status", headers={"Authorization": f"Bearer {new_token}"})
+    assert email_res.status_code == 200
+
+

@@ -163,7 +163,8 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    if request.url.scheme == "https":
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").lower()
+    if request.url.scheme == "https" or forwarded_proto == "https" or is_prod_env:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
@@ -300,6 +301,7 @@ def _booking_confirm_error_html(message: str = "") -> str:
 
 @app.get("/api/booking/confirm")
 async def confirm_booking_direct(
+    request: Request,
     token: str,
     slot_id: str = "",
     slot_label: str = "",
@@ -311,6 +313,7 @@ async def confirm_booking_direct(
     O cliente chega aqui ao clicar num dos cards de horário no próprio Gmail/email.
     Devolve uma página HTML simples de confirmação — sem redirecionamentos adicionais.
     """
+    check_rate_limit(request, action="booking_confirm", max_requests=20, window_seconds=60)
     data = decode_booking_token(token)
     if not data:
         return HTMLResponse(
@@ -536,7 +539,7 @@ def login(data: Login, request: Request):
     check_rate_limit(request, action="login", max_requests=5, window_seconds=60, custom_key=data.email.lower())
     with connect() as c:
         row = c.execute(
-            "SELECT id,name,email,password_hash FROM users WHERE email=?",
+            "SELECT id,name,email,password_hash,token_version FROM users WHERE email=?",
             (data.email.lower(),),
         ).fetchone()
     if not row or not verify_password(data.password, row["password_hash"]):
@@ -550,6 +553,7 @@ def login(data: Login, request: Request):
             "user_id": row["id"],
             "email": row["email"],
             "name": row["name"],
+            "token_version": row["token_version"] if "token_version" in row.keys() and row["token_version"] is not None else 1,
             "ip_address": request.client.host if request.client else None,
             "user_agent": request.headers.get("user-agent"),
         },
@@ -635,7 +639,10 @@ def verify_auth_code(data: AuthCode, request: Request):
             ip_address=login_payload.get("ip_address"),
             user_agent=login_payload.get("user_agent"),
         )
-        return {"token": create_token(login_payload["user_id"]), "user_id": login_payload["user_id"]}
+        with connect() as c:
+            u_row = c.execute("SELECT token_version FROM users WHERE id=?", (login_payload["user_id"],)).fetchone()
+            curr_v = (u_row["token_version"] if u_row and u_row["token_version"] is not None else login_payload.get("token_version", 1))
+        return {"token": create_token(login_payload["user_id"], token_version=curr_v), "user_id": login_payload["user_id"]}
 
     if password_reset_payload:
         return {
@@ -745,7 +752,8 @@ def delete_account(data: DeleteAccountIn, user=Depends(current_user)):
 
 # ── Endpoints Públicos de Marcação por Opções (Acesso do Cliente) ─────────────
 @app.get("/api/booking/options")
-def get_booking_options(token: str):
+def get_booking_options(token: str, request: Request):
+    check_rate_limit(request, action="booking_options", max_requests=30, window_seconds=60)
     data = decode_booking_token(token)
     if not data:
         raise HTTPException(400, "Link de agendamento inválido ou expirado.")
@@ -792,6 +800,7 @@ async def select_booking_option(request: Request):
     Devolve sempre JSON e inclui os cabeçalhos CORS necessários para AMP for Email
     (Access-Control-Allow-Origin: https://mail.google.com).
     """
+    check_rate_limit(request, action="booking_select", max_requests=20, window_seconds=60)
     content_type = request.headers.get("content-type", "")
 
     if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:

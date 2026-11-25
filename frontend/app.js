@@ -115,6 +115,9 @@ function throttle(fn, limit = 200) {
 const initialParams = new URLSearchParams(window.location.search);
 if (initialParams.get("token")) {
   localStorage.setItem("drexier_token", initialParams.get("token"));
+  try {
+    window.history.replaceState({}, document.title, window.location.pathname);
+  } catch (_) {}
 }
 let token = localStorage.getItem("drexier_token") || "";
 if (token) {

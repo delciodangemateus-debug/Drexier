@@ -6,9 +6,12 @@ Garante compatibilidade total e transparente com tokens não criptografados (leg
 
 import base64
 import hashlib
+import logging
 import os
 from typing import Optional
 from cryptography.fernet import Fernet
+
+logger = logging.getLogger(__name__)
 
 
 def _get_fernet() -> Fernet:
@@ -27,8 +30,9 @@ def encrypt_token(plain_text: Optional[str]) -> str:
     try:
         f = _get_fernet()
         return f.encrypt(str(plain_text).encode("utf-8")).decode("utf-8")
-    except Exception:
-        return str(plain_text)
+    except Exception as exc:
+        logger.critical("Falha ao criptografar token sensível: %s", exc)
+        raise RuntimeError("Falha crítica no sistema de criptografia de tokens") from exc
 
 
 def decrypt_token(cipher_text: Optional[str]) -> str:
@@ -42,5 +46,6 @@ def decrypt_token(cipher_text: Optional[str]) -> str:
     try:
         f = _get_fernet()
         return f.decrypt(text.encode("utf-8")).decode("utf-8")
-    except Exception:
+    except Exception as exc:
+        logger.error("Falha ao descriptografar token: %s", exc)
         return text

@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from backend.auth import decode_token
+from backend.auth import decode_token, get_token_claims
 from backend.database import connect
 from backend.services.billing_service import (
     get_stripe_public_config,
@@ -29,17 +29,24 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
     """Dependência para autenticar utilizador através do JWT Bearer token."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Sessão necessária.")
-    uid = decode_token(authorization[7:])
+    raw_token = authorization[7:]
+    uid = decode_token(raw_token)
     if not uid:
         raise HTTPException(401, "Sessão inválida ou expirada.")
     with connect() as c:
         row = c.execute(
-            "SELECT id, name, email, business_type, business_description, language FROM users WHERE id=?",
+            "SELECT id, name, email, business_type, business_description, language, token_version FROM users WHERE id=?",
             (uid,),
         ).fetchone()
     if not row:
         raise HTTPException(401, "Conta não encontrada.")
-    return dict(row)
+    user_data = dict(row)
+    # Validação de revogação imediata de sessão via token_version
+    claims = get_token_claims(raw_token)
+    if claims and "v" in claims and "token_version" in user_data and user_data["token_version"] is not None:
+        if int(claims["v"]) != int(user_data["token_version"]):
+            raise HTTPException(401, "Sessão revogada. Por favor, inicie sessão novamente.")
+    return user_data
 
 
 @router.get("/config")
