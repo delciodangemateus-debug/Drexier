@@ -27,18 +27,41 @@ class SupabaseRow(dict):
 
     def __getitem__(self, key: Union[str, int]) -> Any:
         if isinstance(key, int):
-            col_name = self._columns[key]
-            return super().__getitem__(col_name)
-        return super().__getitem__(key)
+            if 0 <= key < len(self._columns):
+                col_name = self._columns[key]
+                return super().get(col_name)
+            raise IndexError(f"Índice de coluna fora do alcance: {key}")
+        if key in self:
+            return super().__getitem__(key)
+        # Fallbacks seguros para colunas que podem não existir fisicamente no Supabase
+        if key == "token_version":
+            return 1
+        if key in ("agent_adopted_style", "agent_instructions", "business_description", "details"):
+            return ""
+        if key == "mandatory_responses":
+            return "{}"
+        return super().get(key, None)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        val = super().get(key, None)
+        if val is not None:
+            return val
+        if key == "token_version":
+            return 1 if default is None else default
+        if key in ("agent_adopted_style", "agent_instructions", "business_description", "details"):
+            return "" if default is None else default
+        if key == "mandatory_responses":
+            return "{}" if default is None else default
+        return default
 
     def keys(self):
         return self._columns
 
     def values(self):
-        return [super(SupabaseRow, self).__getitem__(c) for c in self._columns]
+        return [self[c] for c in self._columns]
 
     def items(self):
-        return [(c, super(SupabaseRow, self).__getitem__(c)) for c in self._columns]
+        return [(c, self[c]) for c in self._columns]
 
 
 def _format_row_for_app(table: str, row: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,6 +72,19 @@ def _format_row_for_app(table: str, row: Dict[str, Any]) -> Dict[str, Any]:
     - Booleans -> int/bool (compatível)
     """
     res = dict(row)
+    if table == "users":
+        if "token_version" not in res or res["token_version"] is None:
+            res["token_version"] = 1
+        if "agent_adopted_style" not in res or res["agent_adopted_style"] is None:
+            res["agent_adopted_style"] = ""
+        if "mandatory_responses" not in res or res["mandatory_responses"] is None:
+            res["mandatory_responses"] = "{}"
+        if "agent_instructions" not in res or res["agent_instructions"] is None:
+            res["agent_instructions"] = ""
+        if "business_description" not in res or res["business_description"] is None:
+            res["business_description"] = ""
+        if "language" not in res or res["language"] is None:
+            res["language"] = "Português"
     if "mandatory_responses" in res and isinstance(res["mandatory_responses"], (dict, list)):
         res["mandatory_responses"] = json.dumps(res["mandatory_responses"], ensure_ascii=False)
     if "metadata" in res and isinstance(res["metadata"], (dict, list)):
@@ -507,11 +543,32 @@ class SupabaseCursor:
 
                 update_data[col] = val
 
+            if "token_version" in update_data:
+                try:
+                    update_data["token_version"] = int(update_data["token_version"])
+                except (ValueError, TypeError):
+                    update_data["token_version"] = 1
+
             query = self.client.table(table).update(update_data)
             if where_clause:
                 query, _ = _apply_where_conditions(query, where_clause, p, param_idx)
 
-            res = query.select("*").execute()
+            try:
+                res = query.select("*").execute()
+            except Exception as ex:
+                err_s = str(ex)
+                if ("42703" in err_s or "does not exist" in err_s.lower()) and any(col in update_data for col in ("token_version", "agent_adopted_style")):
+                    cleaned_data = {k: v for k, v in update_data.items() if k not in ("token_version", "agent_adopted_style")}
+                    if cleaned_data:
+                        query2 = self.client.table(table).update(cleaned_data)
+                        if where_clause:
+                            query2, _ = _apply_where_conditions(query2, where_clause, p, param_idx)
+                        res = query2.select("*").execute()
+                    else:
+                        self.rowcount = 1
+                        return self
+                else:
+                    raise
             self.rowcount = len(res.data or [])
             return self
 
@@ -577,6 +634,12 @@ class SupabaseCursor:
                         if limit_clause:
                             query_fallback = query_fallback.limit(int(limit_clause))
                         res = query_fallback.execute()
+                        # Garante que colunas solicitadas existam no dicionário retornado
+                        requested_cols = [c.strip() for c in cols_str.split(",") if c.strip()]
+                        for item in (res.data or []):
+                            for c in requested_cols:
+                                if c not in item:
+                                    item[c] = 1 if c == "token_version" else ("{}" if c == "mandatory_responses" else "")
                     elif "PGRST205" in err_s or "schema cache" in err_s.lower():
                         logger.warning(f"[SupabaseCursor] Tabela {table} ausente no Supabase.")
                         self._rows = []

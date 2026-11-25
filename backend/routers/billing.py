@@ -43,7 +43,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
     user_data = dict(row)
     # Validação de revogação imediata de sessão via token_version
     claims = get_token_claims(raw_token)
-    if claims and "v" in claims and "token_version" in user_data and user_data["token_version"] is not None:
+    if claims and "v" in claims and user_data.get("token_version") is not None:
         if int(claims["v"]) != int(user_data["token_version"]):
             raise HTTPException(401, "Sessão revogada. Por favor, inicie sessão novamente.")
     return user_data

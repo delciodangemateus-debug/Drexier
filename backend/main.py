@@ -352,7 +352,7 @@ def current_user(authorization: Optional[str] = Header(default=None)):
     user_data = dict(row)
     # SEC-05: Invalidação imediata de sessões se o token carregar versão revogada
     claims = get_token_claims(raw_token)
-    if claims and "v" in claims and "token_version" in user_data and user_data["token_version"] is not None:
+    if claims and "v" in claims and user_data.get("token_version") is not None:
         if int(claims["v"]) != int(user_data["token_version"]):
             raise HTTPException(401, "Sessão revogada. Por favor, inicie sessão novamente.")
     return user_data
@@ -641,7 +641,11 @@ def verify_auth_code(data: AuthCode, request: Request):
         )
         with connect() as c:
             u_row = c.execute("SELECT token_version FROM users WHERE id=?", (login_payload["user_id"],)).fetchone()
-            curr_v = (u_row["token_version"] if u_row and u_row["token_version"] is not None else login_payload.get("token_version", 1))
+            curr_v = (
+                u_row["token_version"]
+                if (u_row and "token_version" in u_row.keys() and u_row["token_version"] is not None)
+                else login_payload.get("token_version", 1)
+            )
         return {"token": create_token(login_payload["user_id"], token_version=curr_v), "user_id": login_payload["user_id"]}
 
     if password_reset_payload:

@@ -62,7 +62,8 @@ ALTER TABLE public.email_integrations
     DROP COLUMN IF EXISTS imap_port;
 
 ALTER TABLE public.users
-    ADD COLUMN IF NOT EXISTS agent_adopted_style TEXT DEFAULT '';
+    ADD COLUMN IF NOT EXISTS agent_adopted_style TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 1;
 
 DROP TRIGGER IF EXISTS set_timestamp_users ON public.users;
 CREATE TRIGGER set_timestamp_users
