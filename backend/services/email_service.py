@@ -1871,7 +1871,10 @@ async def process_and_reply_email(
         # sem enviar mensagens padrão de confirmação, prompts sim/não ou opções de horários estilizadas.
         intent = detect_booking_or_purchase_intent(incoming_content, subject)
         if intent:
-            target_status = "confirmed" if intent["type"] == "booking" else "pending"
+            if automation_level == "semi":
+                target_status = "pending"
+            else:
+                target_status = "confirmed" if intent["type"] == "booking" else "pending"
             has_open_req = c.execute(
                 """SELECT id FROM conversion_requests
                    WHERE user_id = ? AND contact_id = ? AND request_type = ?
@@ -1902,7 +1905,7 @@ async def process_and_reply_email(
             _safe_invalidate_dashboard_cache(user_id)
 
         reply_instructions = effective_agent_instructions(user_dict)
-        if intent and intent["type"] == "booking":
+        if intent and intent["type"] == "booking" and automation_level != "semi":
             reply_instructions += (
                 "\n\nCONTEXTO OPERACIONAL: O pedido de marcação/agendamento deste cliente foi registado com sucesso. "
                 "Avise claramente o cliente na sua resposta que a marcação foi efetuada com sucesso, "
@@ -2499,6 +2502,125 @@ async def process_confirmation_action(
         "reply_text": reply_text,
         "customer_email": customer_email
     }
+
+
+async def send_conversion_decision_email(
+    user_id: int, request_id: int, confirmed: bool
+) -> Dict[str, Any]:
+    """Envia mensagem ao cliente ao confirmar (modo semi-automático) ou desmarcar no card Importante."""
+    with connect() as c:
+        req = c.execute(
+            """SELECT r.id, r.request_type, r.details, r.status,
+                      ct.id AS contact_id, ct.name, ct.contact_key
+               FROM conversion_requests r
+               JOIN contacts ct ON ct.id = r.contact_id
+               WHERE r.id = ? AND r.user_id = ?""",
+            (request_id, user_id),
+        ).fetchone()
+        if not req:
+            raise ValueError("Registo não encontrado.")
+
+        user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        email_integration = c.execute(
+            "SELECT * FROM email_integrations WHERE user_id = ? AND status = 'connected' AND provider = 'google'",
+            (user_id,),
+        ).fetchone()
+        email_thread = c.execute(
+            """SELECT subject, thread_id, last_message_id FROM email_threads
+               WHERE contact_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1""",
+            (req["contact_id"], user_id),
+        ).fetchone()
+        history_rows = c.execute(
+            """SELECT sender, content FROM messages
+               WHERE contact_id = ? AND user_id = ? ORDER BY id DESC LIMIT 5""",
+            (req["contact_id"], user_id),
+        ).fetchall()
+
+    customer_key = req["contact_key"] or ""
+    user_dict = dict(user) if user else {}
+    business_name = user_dict.get("name") or "nosso negócio"
+    contact_name = req["name"] or customer_key
+    display_name = contact_name.strip() if contact_name and "@" not in contact_name else ""
+    latest_customer_message = next(
+        (row["content"] for row in reversed(history_rows) if row["sender"] == "customer"),
+        "",
+    )
+    language = (
+        detect_message_language(latest_customer_message)
+        if latest_customer_message
+        else ("en" if (user_dict.get("language") or "").lower().startswith("en") else "pt")
+    )
+
+    if confirmed:
+        if language == "en":
+            greeting = f"Hello, {display_name}." if display_name else "Hello."
+            reply_text = (
+                f"{greeting}\n\n"
+                f"Your request has been registered successfully.\n\n"
+                f"Kind regards,\n{business_name}"
+            )
+            default_subj = f"Request Update - {business_name}"
+        else:
+            greeting = f"Olá, {display_name}." if display_name else "Olá."
+            reply_text = (
+                f"{greeting}\n\n"
+                f"O seu pedido foi registado com sucesso.\n\n"
+                f"Com os melhores cumprimentos,\n{business_name}"
+            )
+            default_subj = f"Atualização do Pedido - {business_name}"
+        new_status = "confirmed"
+    else:
+        if language == "en":
+            greeting = f"Hello, {display_name}." if display_name else "Hello."
+            reply_text = (
+                f"{greeting}\n\n"
+                f"Unfortunately, the booking could not be completed.\n\n"
+                f"Kind regards,\n{business_name}"
+            )
+            default_subj = f"Booking Update - {business_name}"
+        else:
+            greeting = f"Olá, {display_name}." if display_name else "Olá."
+            reply_text = (
+                f"{greeting}\n\n"
+                f"Infelizmente não poderá ser efetuada a marcação.\n\n"
+                f"Com os melhores cumprimentos,\n{business_name}"
+            )
+            default_subj = f"Atualização de Marcação - {business_name}"
+        new_status = "cancelled"
+
+    email_sent = False
+    if "@" in customer_key and email_integration:
+        integration_dict = dict(email_integration)
+        subject = email_thread["subject"] if email_thread and email_thread["subject"] else default_subj
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+        last_message_id = email_thread["last_message_id"] if email_thread else None
+        await send_email(
+            integration=integration_dict,
+            to_email=customer_key,
+            subject=subject,
+            body_text=reply_text,
+            thread_id=email_thread["thread_id"] if email_thread else None,
+            in_reply_to=last_message_id,
+            references=last_message_id,
+        )
+        email_sent = True
+
+    with connect() as c:
+        c.execute(
+            "UPDATE conversion_requests SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+            (new_status, request_id, user_id),
+        )
+        c.execute(
+            "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
+            (user_id, req["contact_id"], reply_text),
+        )
+        c.execute(
+            "UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (req["contact_id"],),
+        )
+    _safe_invalidate_dashboard_cache(user_id)
+    return {"ok": True, "status": new_status, "email_sent": email_sent, "reply_text": reply_text}
 
 
 async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, Any]:

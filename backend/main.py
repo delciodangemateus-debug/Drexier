@@ -35,6 +35,7 @@ from backend.services.email_service import (
     sync_emails_for_user,
     process_confirmation_action,
     send_ai_booking_reminder,
+    send_conversion_decision_email,
     send_owner_reply,
     extract_scheduled_at,
     generate_booking_options,
@@ -980,10 +981,17 @@ def dashboard(user=Depends(current_user)):
             "created_at": item.get("created_at"),
             "status": item.get("status"),
         })
+    automation_level = "semi"
+    try:
+        mandatory = json.loads(user.get("mandatory_responses") or "{}")
+        automation_level = mandatory.get("automation_level", "semi")
+    except Exception:
+        automation_level = "semi"
+
     res = {"messages_answered":total_messages,"messages_received":received_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
             "yesterday_contacts":yesterday_contacts,"pending_count":pending,"pending_requests":[dict(x) for x in pending_rows],
             "bookings_count":bookings_count,"confirmed_bookings":[dict(x) for x in bookings_rows],
-            "important_items":important_items}
+            "important_items":important_items,"automation_level":automation_level}
     _dashboard_cache[uid] = (now_timestamp, res)
     return res
 
@@ -1446,12 +1454,36 @@ def resolve_conversion(request_id:int,user=Depends(current_user)):
     if not cur.rowcount: raise HTTPException(404,"Pedido pendente não encontrado.")
     return {"ok":True}
 
+@app.post("/api/conversions/{request_id}/confirm-semi")
+async def confirm_semi_conversion(request_id: int, user=Depends(current_user)):
+    try:
+        res = await send_conversion_decision_email(user["id"], request_id, confirmed=True)
+        invalidate_dashboard_cache(user["id"])
+        return res
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        logger.error(f"Erro ao confirmar pedido {request_id}: {exc}")
+        raise HTTPException(500, "Não foi possível confirmar o pedido.")
+
 @app.post("/api/conversions/{request_id}/cancel")
-def cancel_conversion(request_id: int, user=Depends(current_user)):
+async def cancel_conversion(request_id: int, user=Depends(current_user)):
+    try:
+        res = await send_conversion_decision_email(user["id"], request_id, confirmed=False)
+        invalidate_dashboard_cache(user["id"])
+        return res
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:
+        logger.error(f"Erro ao desmarcar pedido {request_id}: {exc}")
+        raise HTTPException(500, "Não foi possível efetuar a desmarcação.")
+
+@app.delete("/api/conversions/{request_id}/important")
+def delete_important_conversion(request_id: int, user=Depends(current_user)):
     with connect() as c:
         cur = c.execute(
-            "UPDATE conversion_requests SET status='cancelled', resolved_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?",
-            (request_id, user["id"]),
+            "DELETE FROM conversion_requests WHERE id=? AND user_id=?",
+            (request_id, user["id"])
         )
     if not cur.rowcount:
         raise HTTPException(404, "Registo não encontrado.")

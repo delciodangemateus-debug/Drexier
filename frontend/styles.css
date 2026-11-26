@@ -2733,6 +2733,38 @@ textarea {
   color: var(--color-success);
 }
 
+.important-pending-pill {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--border-arcade);
+  background: rgba(245, 158, 11, 0.18);
+  color: #b45309;
+}
+
+.btn-important-trash {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-arcade);
+  background: var(--surface-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.btn-important-trash:hover {
+  background: rgba(239, 68, 68, 0.14);
+  color: #dc2626;
+}
+
 .important-modal-message {
   background: var(--bg-secondary);
   border: 2px solid var(--border-arcade);

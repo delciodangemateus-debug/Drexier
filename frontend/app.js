@@ -1396,6 +1396,54 @@ async function remindImportantClient(item, triggerBtn) {
   }
 }
 
+async function confirmSemiImportantClient(item, triggerBtn, closeAfter = false) {
+  if (!item || !item.id) return;
+  const origText = triggerBtn ? triggerBtn.textContent : "";
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.textContent = "A confirmar...";
+  }
+  try {
+    await api(`/api/conversions/${Number(item.id)}/confirm-semi`, { method: "POST" });
+    if (closeAfter) closeModal();
+    await loadDashboard();
+    const expandedList = $("#important-expanded-list");
+    if (expandedList) {
+      const latest = Array.isArray(dashboardCacheData?.important_items) ? dashboardCacheData.important_items : [];
+      const searchVal = $("#important-search-input")?.value || "";
+      renderImportantExpandedList(latest, searchVal);
+    }
+    showNotice("Pedido confirmado e cliente notificado com sucesso.");
+  } catch (err) {
+    showNotice(err.message || "Não foi possível confirmar o pedido.", true);
+    if (triggerBtn) {
+      triggerBtn.disabled = false;
+      triggerBtn.textContent = origText;
+    }
+  }
+}
+
+async function deleteImportantClient(item, triggerBtn, closeAfter = false) {
+  if (!item || !item.id) return;
+  if (!confirm(`Apagar ${item.name || item.contact_key || "este cliente"} da lista?`)) return;
+  if (triggerBtn) triggerBtn.disabled = true;
+  try {
+    await api(`/api/conversions/${Number(item.id)}/important`, { method: "DELETE" });
+    if (closeAfter) closeModal();
+    await loadDashboard();
+    const expandedList = $("#important-expanded-list");
+    if (expandedList) {
+      const latest = Array.isArray(dashboardCacheData?.important_items) ? dashboardCacheData.important_items : [];
+      const searchVal = $("#important-search-input")?.value || "";
+      renderImportantExpandedList(latest, searchVal);
+    }
+    showNotice("Registo apagado com sucesso.");
+  } catch (err) {
+    showNotice(err.message || "Não foi possível apagar o registo.", true);
+    if (triggerBtn) triggerBtn.disabled = false;
+  }
+}
+
 function createImportantClientElement(item) {
   const rect = document.createElement("div");
   rect.className = "important-client-rect";
@@ -1405,36 +1453,73 @@ function createImportantClientElement(item) {
   const reqType = String(item.request_type || "").toLowerCase();
   const isPurchase = reqType === "purchase" || reqType === "compra";
   const typeLabel = isPurchase ? "Compra" : "Agendamento";
+  const isSemiPending =
+    (dashboardCacheData?.automation_level || "semi") === "semi" &&
+    (item.status === "pending" || item.status === "validating");
 
   const info = document.createElement("div");
   info.className = "important-client-info";
   info.innerHTML = `
     <span class="important-client-name">${escapeHtml(item.name || item.contact_key || "Cliente")}</span>
     <span class="important-type-pill ${isPurchase ? "purchase" : ""}">${typeLabel}</span>
+    ${isSemiPending ? '<span class="important-pending-pill">Por confirmar</span>' : ""}
   `;
 
   const actions = document.createElement("div");
   actions.className = "important-client-actions";
 
-  const remindBtn = document.createElement("button");
-  remindBtn.type = "button";
-  remindBtn.className = "btn outline xs";
-  remindBtn.textContent = "Lembrar com IA";
-  remindBtn.addEventListener("click", e => {
+  if (isSemiPending) {
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "btn primary xs";
+    confirmBtn.textContent = "Confirmar";
+    confirmBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      confirmSemiImportantClient(item, confirmBtn, false);
+    });
+
+    const rejectBtn = document.createElement("button");
+    rejectBtn.type = "button";
+    rejectBtn.className = "btn outline xs danger";
+    rejectBtn.textContent = "Não confirmar";
+    rejectBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      cancelImportantClient(item, rejectBtn, false);
+    });
+    actions.append(confirmBtn, rejectBtn);
+  } else {
+    const remindBtn = document.createElement("button");
+    remindBtn.type = "button";
+    remindBtn.className = "btn outline xs";
+    remindBtn.textContent = "Lembrar com IA";
+    remindBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      remindImportantClient(item, remindBtn);
+    });
+
+    const unbookBtn = document.createElement("button");
+    unbookBtn.type = "button";
+    unbookBtn.className = "btn outline xs danger";
+    unbookBtn.textContent = "Desmarcar";
+    unbookBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      cancelImportantClient(item, unbookBtn, false);
+    });
+    actions.append(remindBtn, unbookBtn);
+  }
+
+  const trashBtn = document.createElement("button");
+  trashBtn.type = "button";
+  trashBtn.className = "btn-important-trash";
+  trashBtn.title = "Apagar";
+  trashBtn.setAttribute("aria-label", `Apagar ${item.name || item.contact_key || "cliente"}`);
+  trashBtn.innerHTML = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>`;
+  trashBtn.addEventListener("click", e => {
     e.stopPropagation();
-    remindImportantClient(item, remindBtn);
+    deleteImportantClient(item, trashBtn, false);
   });
 
-  const unbookBtn = document.createElement("button");
-  unbookBtn.type = "button";
-  unbookBtn.className = "btn outline xs danger";
-  unbookBtn.textContent = "Desmarcar";
-  unbookBtn.addEventListener("click", e => {
-    e.stopPropagation();
-    cancelImportantClient(item, unbookBtn, false);
-  });
-
-  actions.append(remindBtn, unbookBtn);
+  actions.appendChild(trashBtn);
   rect.append(info, actions);
 
   rect.addEventListener("click", () => openImportantMessageModal(item));
@@ -1543,10 +1628,14 @@ function openImportantMessageModal(item) {
   const contactEmail = item.contact_key || "";
   const messageText = item.message || "Intenção importante detectada pela IA.";
 
+  const isSemiPending =
+    (dashboardCacheData?.automation_level || "semi") === "semi" &&
+    (item.status === "pending" || item.status === "validating");
+
   openModal(`
     <div class="expanded-header">
       <div class="expanded-header-left">
-        <div class="expanded-header-kbadge"><span class="expanded-header-kbadge-dot"></span>${badgeLabel}</div>
+        <div class="expanded-header-kbadge"><span class="expanded-header-kbadge-dot"></span>${badgeLabel}${isSemiPending ? " · POR CONFIRMAR" : ""}</div>
         <h2 class="expanded-header-title" id="expanded-modal-title">${escapeHtml(clientName)}</h2>
       </div>
       <button class="expanded-close" id="modal-close-btn">&times;</button>
@@ -1556,9 +1645,17 @@ function openImportantMessageModal(item) {
       <div class="important-modal-message">${escapeHtml(messageText)}</div>
     </div>
     <div class="expanded-footer" style="justify-content:space-between; flex-wrap:wrap; gap:10px;">
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn outline small" id="modal-remind-ai-btn">Lembrar com IA</button>
-        <button class="btn outline small danger" id="modal-unbook-btn">Desmarcar</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        ${
+          isSemiPending
+            ? `<button class="btn primary small" id="modal-semi-confirm-btn">Confirmar</button>
+               <button class="btn outline small danger" id="modal-unbook-btn">Não confirmar</button>`
+            : `<button class="btn outline small" id="modal-remind-ai-btn">Lembrar com IA</button>
+               <button class="btn outline small danger" id="modal-unbook-btn">Desmarcar</button>`
+        }
+        <button class="btn-important-trash" id="modal-trash-btn" title="Apagar" aria-label="Apagar">
+          <svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+        </button>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn outline" id="modal-done-btn">Fechar</button>
@@ -1568,8 +1665,10 @@ function openImportantMessageModal(item) {
   `);
   $("#modal-close-btn").onclick = closeModal;
   $("#modal-done-btn").onclick = closeModal;
-  $("#modal-remind-ai-btn").onclick = e => remindImportantClient(item, e.currentTarget);
+  $("#modal-semi-confirm-btn")?.addEventListener("click", e => confirmSemiImportantClient(item, e.currentTarget, true));
+  $("#modal-remind-ai-btn")?.addEventListener("click", e => remindImportantClient(item, e.currentTarget));
   $("#modal-unbook-btn").onclick = e => cancelImportantClient(item, e.currentTarget, true);
+  $("#modal-trash-btn").onclick = e => deleteImportantClient(item, e.currentTarget, true);
   $("#modal-view-conversation-btn").onclick = () => openImportantConversation(item.contact_id);
 }
 
