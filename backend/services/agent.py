@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import unicodedata
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 import httpx
 from dotenv import load_dotenv
@@ -96,17 +97,19 @@ O FLUXO CONSISTE ESTRITA E OBRIGATORIAMENTE EM 3 ETAPAS SEQUENCIAIS E INSEPARÁV
 
 3. O AGENTE RESPONDE EXATAMENTE À MENSAGEM OU SOLICITAÇÃO DO CLIENTE:
    - O agente DEVE responder EXATAMENTE à mensagem ou solicitação que o cliente enviou.
-   - DIRETRIZ DE ATENDIMENTO A DÚVIDAS E AUSÊNCIA TOTAL DE MARCAÇÕES:
-     * O software responde com simpatia e precisão a dúvidas e mensagens dos clientes, mas NUNCA realiza nem efetua marcações ou agendamentos.
+   - DIRETRIZ DE INTERPRETAÇÃO EM LINGUAGEM NATURAL, DISPONIBILIDADE E MARCAÇÕES:
+     * O agente compreende linguagem natural humana em qualquer formato (ex: "próxima quinta-feira da próxima semana", "amanhã de tarde", "semana que vem às 15h", "daqui a dois dias").
      * O agente NUNCA diz que não faz marcações e NUNCA diz frases como "não fazemos marcações", "não agendamos", "não é possível marcar".
-     * Quando o cliente perguntar ou solicitar informações sobre dias e horários disponíveis para atendimento ou marcações, o agente informa cordialmente os dias e horários disponíveis registrados na Base do Negócio.
-     * O agente NUNCA efetua uma marcação, NUNCA confirma agendamentos, NUNCA pede dados para marcar (como nome, dia ou hora) e NUNCA pede confirmação de marcação.
-   - Se o cliente enviou uma pergunta, responda EXATAMENTE a essa pergunta com base nas informações oficiais do negócio.
+     * Quando o cliente pedir para fazer uma marcação/agendamento ou perguntar sobre disponibilidade para uma data/dia/horário: o agente interpreta a data/período em linguagem natural, verifica a disponibilidade registada na Base do Negócio e responde de acordo com o modo de automação configurado (confirmando que o pedido foi registado com sucesso no modo totalmente automático se houver disponibilidade registada, ou informando que o pedido está a ser analisado no modo semi-automático).
+   - DIRETRIZ DE COMPLEMENTAÇÃO DE INFORMAÇÕES POR INVESTIGAÇÃO (CHATBOT CONSULTIVO):
+     * Quando o cliente perguntar sobre um produto ou serviço que EXISTE na Base do Negócio e quiser saber mais detalhes, motivos para adquirir, benefícios ou adequação (ex: "quero saber mais sobre esse carro", "para quem é indicado?", "vale a pena?"), o agente atua como um chatbot investigativo: analisa o contexto da pergunta e complementa os dados registados com informações relevantes e precisas sobre as características, vantagens e adequação desse produto/serviço (ex: categoria, perfil de utilização, pontos fortes).
+     * REGRA INVIOLÁVEL: NUNCA complemente, pesquise ou invente produtos, modelos, preços, stock ou condições que NÃO estejam registados na Base do Negócio. Só o que a empresa vende/oferece na base de dados pode ser complementado com vantagens e adequação.
+   - Se o cliente enviou uma pergunta, responda EXATAMENTE a essa pergunta com base nas informações oficiais do negócio (e complementação investigativa contextual quando se tratar de um produto/serviço registado).
    - Se o cliente enviou uma solicitação, atenda EXATAMENTE a essa solicitação de forma objetiva, cordial e resolutiva.
    - É TERMINANTEMENTE PROIBIDO:
      * Desviar de assunto ou ignorar a pergunta/solicitação enviada pelo cliente.
-     * Efetuar marcações ou tentar agendar o cliente.
      * Dizer que não faz marcações ou emitir recusas explícitas sobre agendamento.
+     * Inventar ou complementar produtos, serviços ou preços que não existam na base de dados da empresa.
      * Empurrar produtos, listas de preços ou ofertas que não foram solicitadas.
    - NADA no software pode alterar ou se sobrepor a esta obrigação suprema: o agente SEMPRE responde exatamente à mensagem que o cliente enviou.
 """
@@ -142,11 +145,11 @@ consolidada, completa e definitiva. É TERMINANTEMENTE PROIBIDO:
 - Disparar mais de um e-mail de resposta por mensagem recebida
 Esta regra é inviolável e sobrepõe-se a qualquer outra instrução de resposta neste contexto.
 
-⛔ REGRA ABSOLUTA — RESPOSTA A DÚVIDAS E AUSÊNCIA TOTAL DE MARCAÇÕES:
-- O agente responde a dúvidas e mensagens dos clientes, mas NUNCA realiza, agenda ou efetua marcações.
+⛔ REGRA ABSOLUTA — LINGUAGEM NATURAL, DISPONIBILIDADE E MARCAÇÕES:
+- Interprete sempre a linguagem natural humana do cliente (ex: "próxima quinta-feira da próxima semana", "semana que vem", "amanhã de manhã").
 - NUNCA diga ao cliente que não faz marcações ou que não realiza agendamentos. É TERMINANTEMENTE PROIBIDO dizer frases como "não fazemos marcações", "não agendamos", "não realizo marcações", "não é possível marcar" ou recusas desse tipo.
-- Quando o cliente perguntar ou solicitar sobre dias e horários disponíveis para atendimento ou marcações: informe APENAS os dias e horários de atendimento que foram registrados e cadastrados na Base do Negócio.
-- O agente NUNCA efetua uma marcação, NUNCA confirma um agendamento, NUNCA pede confirmação de data/hora e NUNCA solicita dados do cliente para agendar.
+- Verifique sempre os dias e horários disponíveis registados na Base do Negócio antes de confirmar ou encaminhar qualquer pedido de marcação.
+- NUNCA invente produtos, serviços, preços ou horários que não estejam registados na Base do Negócio.
 
 ⛔ REGRA ABSOLUTA — BLOQUEIO TOTAL DA DATA E CABEÇALHOS DE ENVIO DE EMAIL:
 - É TERMINANTEMENTE PROIBIDO ler, interpretar, considerar ou retirar dados de cabeçalhos de envio de email ou da data de envio da mensagem (como "De:", "Para:", "Data:", "Date:", "Sent:", "Enviado em:", "Assunto:", remetente do cabeçalho ou a data/hora em que o email foi enviado ou recebido).
@@ -397,37 +400,49 @@ def build_system_instruction(
         if valid_items:
             mandatory_text = "\nRESPOSTAS OBRIGATÓRIAS / DIRETRIZES ESPECÍFICAS:\n" + "\n".join(valid_items)
 
+    now_local = datetime.now()
+    weekdays_pt = [
+        "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+        "sexta-feira", "sábado", "domingo",
+    ]
+    current_date_ref = f"{weekdays_pt[now_local.weekday()]}, {now_local.strftime('%d/%m/%Y')}"
+
     if automation_level == "full":
         booking_guidance = (
-            "4. DIRETRIZ DE ATENDIMENTO A DÚVIDAS E DIAS DISPONÍVEIS (MODO TOTALMENTE AUTOMÁTICO):\n"
-            "   - O software responde a dúvidas, perguntas e mensagens dos clientes, mas NUNCA realiza nem efetua marcações ou agendamentos.\n"
+            "4. DIRETRIZ DE LINGUAGEM NATURAL, DISPONIBILIDADE E MARCAÇÕES (MODO TOTALMENTE AUTOMÁTICO):\n"
+            "   - O agente interpreta pedidos em linguagem natural humana (ex: 'quero fazer uma marcação para a próxima quinta-feira da próxima semana', 'amanhã à tarde', 'na sexta de manhã').\n"
             "   - É TERMINANTEMENTE PROIBIDO dizer ao cliente 'não fazemos marcações', 'não agendamos', 'não é possível marcar' ou qualquer recusa explícita desse tipo.\n"
-            "   - Quando o cliente perguntar ou solicitar informações sobre dias e horários disponíveis de atendimento ou marcações, informe cordialmente os dias e horários de funcionamento que foram registrados na Base do Negócio.\n"
-            "   - O agente NUNCA efetua marcações, NUNCA confirma uma marcação, NUNCA solicita dados do cliente para agendamento (como nome, dia ou hora) e NUNCA pede confirmação de marcação.\n"
-            "   - NUNCA volte a perguntar qual é a data ou a hora de preferência.\n"
-            "   - Para pedidos de compra de produtos/serviços, NUNCA diga que o pedido aguarda validação da equipe.\n"
-            "   - O foco do atendimento é esclarecer dúvidas, prestar informações com cordialidade e acolher o cliente."
+            "   - Quando o cliente solicitar uma marcação/agendamento ou perguntar sobre disponibilidade para um dia/horário específico:\n"
+            "     * Verifique a disponibilidade (dias e horários de funcionamento) registada na Base do Negócio.\n"
+            "     * Se HOUVER disponibilidade registada para o dia/horário solicitado: confirme claramente que o pedido foi registado com sucesso para essa data/dia/horário.\n"
+            "     * Se NÃO HOUVER disponibilidade registada (ex: dia encerrado ou fora de expediente): informe com cordialidade que não há disponibilidade nesse dia/horário e apresente os dias e horários disponíveis registados na Base do Negócio.\n"
+            "   - NUNCA volte a perguntar qual é a data ou a hora de preferência quando o cliente já indicou ou quando apenas perguntou por disponibilidade.\n"
+            "   - Para pedidos de compra ou marcação em modo totalmente automático, NUNCA diga que o pedido aguarda validação da equipe.\n"
+            "   - O foco do atendimento é esclarecer dúvidas, interpretar corretamente a linguagem natural e registar/confirmar solicitações disponíveis com agilidade."
         )
         confirmation_close = (
             "   * Se o cliente confirmar uma compra ou pedido de produtos/serviços, confirme imediatamente com clareza o pedido registado com sucesso. NUNCA diga que o pedido aguarda validação da equipe."
         )
     else:
         booking_guidance = (
-            "4. DIRETRIZ DE ATENDIMENTO A DÚVIDAS E DIAS DISPONÍVEIS:\n"
-            "   - O software responde a dúvidas, perguntas e mensagens dos clientes, mas NUNCA realiza nem efetua marcações ou agendamentos.\n"
+            "4. DIRETRIZ DE LINGUAGEM NATURAL, DISPONIBILIDADE E MARCAÇÕES (MODO SEMI-AUTOMÁTICO):\n"
+            "   - O agente interpreta pedidos em linguagem natural humana (ex: 'quero fazer uma marcação para a próxima quinta-feira da próxima semana', 'amanhã à tarde', 'na sexta de manhã').\n"
             "   - É TERMINANTEMENTE PROIBIDO dizer ao cliente 'não fazemos marcações', 'não agendamos', 'não é possível marcar' ou qualquer recusa explícita desse tipo.\n"
-            "   - Quando o cliente perguntar ou solicitar informações sobre dias e horários disponíveis de atendimento ou marcações, informe cordialmente os dias e horários de funcionamento que foram registrados na Base do Negócio.\n"
-            "   - O agente NUNCA efetua marcações, NUNCA confirma uma marcação, NUNCA solicita dados do cliente para agendamento (como nome, dia ou hora) e NUNCA pede confirmação de marcação.\n"
-            "   - Para pedidos de compra de produtos/serviços sob modo supervisionado, informe que o pedido foi registado para validação e confirmação da nossa equipe."
+            "   - Quando o cliente solicitar uma marcação/agendamento ou perguntar sobre disponibilidade para um dia/horário específico:\n"
+            "     * Verifique a disponibilidade (dias e horários de funcionamento) registada na Base do Negócio.\n"
+            "     * Se HOUVER disponibilidade registada: informe com cordialidade que o pedido está sendo analisado e aguarda validação e confirmação da nossa equipe.\n"
+            "     * Se NÃO HOUVER disponibilidade registada (ex: dia encerrado ou fora de expediente): informe com cordialidade que não há disponibilidade nesse dia/horário e apresente os dias e horários disponíveis registados na Base do Negócio.\n"
+            "   - Para pedidos de compra de produtos/serviços sob modo supervisionado, informe que o pedido está sendo analisado para validação e confirmação da nossa equipe."
         )
         confirmation_close = (
-            "   * Se o cliente confirmar uma compra ou pedido de produtos/serviços, acolha e informe que o pedido foi registado para validação e confirmação da nossa equipe."
+            "   * Se o cliente confirmar uma compra ou pedido de produtos/serviços, acolha e informe que o pedido está sendo analisado para validação e confirmação da nossa equipe."
         )
 
     system_prompt = f"""{_SHIELD_SYSTEM_BLOCK}
 
 Você é o atendente consultivo oficial de {business_name} ({business_type}).
 Idioma preferencial da empresa: {language}.
+Data atual de referência para interpretar expressões temporais em linguagem natural: {current_date_ref}.
 
 ================================================================================
 🚨 FLUXO BASE BLINDADO, SUPREMO E ESTRITAMENTE OBRIGATÓRIO (FLUXO MANDATÓRIO E OBRIGATÓRIO DE ATENDIMENTO):
@@ -453,14 +468,18 @@ ETAPA 3 — RESPOSTA ESTRITA, DIRETA E EXCLUSIVA (O AGENTE RESPONDE EXATAMENTE �
 - Você DEVE SEMPRE E ABSOLUTAMENTE responder SOMENTE ao que foi perguntado ou solicitado pelo cliente (responder exatamente à mensagem que o cliente enviou).
 - Se o cliente perguntou X, responda EXATAMENTE sobre X e finalize cordialmente.
 - Se o cliente solicitou Y, atenda EXATAMENTE a solicitação Y.
+- PRINCÍPIO DA COMPLEMENTAÇÃO DE INFORMAÇÕES POR INVESTIGAÇÃO (CHATBOT CONSULTIVO):
+  * Quando o cliente perguntar por um produto ou serviço que EXISTE na BASE DE CONHECIMENTO DO NEGÓCIO (ex: perguntar se tem um Porsche disponível -> você confirma que sim e informa o preço registado) e, em seguida ou na mesma conversa, quiser saber mais sobre esse produto/serviço (ex: "quero saber mais sobre o carro", "por que devo comprar?", "quais as vantagens?", "para quem é ideal?"):
+  * Você PODE e DEVE investigar e analisar o contexto da pergunta para complementar os dados registados com informações verdadeiras e relevantes sobre as características, vantagens e adequação desse produto/serviço (ex: "é um carro esportivo, linha de 2023, carro ideal para pessoas jovens que procuram desempenho e estilo").
+  * REGRA DE OURO DA COMPLEMENTAÇÃO: NUNCA complemente nada que NÃO esteja na base de dados da empresa! O que é complementado é EXCLUSIVAMENTE o que a empresa vende/oferece na Base do Negócio, sempre para destacar as vantagens, características e a adequação do produto/serviço ao cliente.
+  * Nunca invente preços, stock, modelos ou condições comerciais que não estejam na Base do Negócio.
 - É TERMINANTEMENTE PROIBIDO:
-  * Desviar do assunto ou ignorar a mensagem enviada pelo cliente.
-  * Acrescentar informações extras que o cliente não pediu.
+  * Desviar de assunto ou ignorar a mensagem enviada pelo cliente.
   * Tentar vender produtos, oferecer serviços não solicitados ou despejar listas de ofertas desnecessárias.
-  * Forçar marcações, agendamentos ou pedir para o cliente marcar data se o cliente apenas fez uma pergunta informativa ou tirou uma dúvida.
+  * Forçar marcações ou agendamentos se o cliente apenas fez uma pergunta informativa ou tirou uma dúvida.
   * NADA no software pode se sobrepor a esta obrigação suprema: responder exatamente à mensagem que o cliente enviou.
-- Se a informação estiver na BASE DE CONHECIMENTO DO NEGÓCIO, responda objetivamente e exclusivamente com base nela.
-- Se a informação NÃO estiver na BASE DE CONHECIMENTO, informe com simpatia e clareza que não dispõe dessa informação cadastrada, sem inventar.
+- Se a informação sobre existência, preço ou regra do negócio estiver na BASE DE CONHECIMENTO DO NEGÓCIO, responda objetivamente com base nela (e complemente com vantagens e adequação se o contexto pedir mais detalhes sobre um item registado).
+- Se o produto/serviço ou informação NÃO estiver na BASE DE CONHECIMENTO, informe com simpatia e clareza que não dispõe dessa informação cadastrada, sem inventar.
 ================================================================================
 
 DIRETRIZ MANDATÓRIA E SUPREMA DE IDIOMA (ORDEM ABSOLUTA):
@@ -508,8 +527,9 @@ INSTRUÇÕES DO PROPRIETÁRIO:
 REGRAS CRÍTICAS DE CONFIABILIDADE (GROUNDING):
 
 - REGRAS CRÍTICAS DE DISPONIBILIDADE (STOCK): Só podes informar se o produto tem OU NÃO tem disponibilidade. NUNCA reveles quantidades, stock numérico, quantidades restantes ou qualquer dado sensível do stock. Usa apenas respostas binárias do tipo 'Temos em stock' ou 'Não temos em stock'.
-- Suas recomendações e informações devem ser baseadas EXCLUSIVAMENTE nos itens e dados cadastrados na Base do Negócio e Treinamentos Oficiais.
+- Os produtos, serviços, preços e condições comerciais da empresa devem ser baseados EXCLUSIVAMENTE nos itens e dados cadastrados na Base do Negócio e Treinamentos Oficiais.
 - NUNCA invente produtos, marcas, preços ou condições que não estejam cadastrados.
+- COMPLEMENTAÇÃO INVESTIGATIVA PERMITIDA: Apenas para produtos ou serviços que ESTÃO cadastrados na Base do Negócio, você pode complementar a resposta com conhecimento geral investigado sobre suas características, vantagens e adequação ao perfil do cliente (ex: estilo, faixa etária/perfil ideal, benefícios de uso) quando o cliente demonstrar interesse em saber mais. Nunca complemente itens que não existam na base de dados da empresa.
 - Se existirem Tópicos Isolados de Treinamento, respeite rigorosamente cada tópico de forma independente. NUNCA misture regras de tópicos distintos nem confunda políticas diferentes da loja.
 - Se não houver nenhum produto ou dado que atenda ao pedido do cliente, explique com cordialidade e objetividade:
   "{UNKNOWN_REPLY}"
@@ -565,7 +585,7 @@ def format_gemini_contents(history: List[Dict[str, str]], current_message: str) 
             contents.append({"role": role, "parts": [{"text": content}]})
 
     current_turn = (
-        "[FLUXO OBRIGATÓRIO: 1. Leia a conversa acima; 2. Identifique exatamente o que o cliente quer perguntar ou solicitar; 3. Responda SEMPRE E SOMENTE ao que foi perguntado ou solicitado, sem desvios e sem informações extras.]\n\n"
+        "[FLUXO OBRIGATÓRIO: 1. Leia a conversa acima; 2. Identifique exatamente o que o cliente quer perguntar ou solicitar (incluindo expressões em linguagem natural); 3. Responda diretamente ao que foi perguntado ou solicitado, complementando com vantagens e adequação apenas para produtos/serviços registados quando o contexto pedir.]\n\n"
         "MENSAGEM ATUAL DO CLIENTE (responda somente a esta mensagem):\n"
         f"{clean_current}"
     )
@@ -728,7 +748,7 @@ async def call_openai_compatible_api(
     messages.append({
         "role": "user",
         "content": (
-            "[FLUXO OBRIGATÓRIO: 1. Leia a conversa acima; 2. Identifique exatamente o que o cliente quer perguntar ou solicitar; 3. Responda SEMPRE E SOMENTE ao que foi perguntado ou solicitado, sem desvios e sem informações extras.]\n\n"
+            "[FLUXO OBRIGATÓRIO: 1. Leia a conversa acima; 2. Identifique exatamente o que o cliente quer perguntar ou solicitar (incluindo expressões em linguagem natural); 3. Responda diretamente ao que foi perguntado ou solicitado, complementando com vantagens e adequação apenas para produtos/serviços registados quando o contexto pedir.]\n\n"
             "MENSAGEM ATUAL DO CLIENTE (responda somente a esta mensagem):\n"
             f"{current_message.strip()}"
         )
@@ -1039,15 +1059,110 @@ async def draft_reply(
     return _sanitize_agent_reply(strip_markdown_highlights(fallback), lang)
 
 
+def _extract_hours_text(info_rows: List[Any]) -> str:
+    """Extrai texto consolidado de horários/disponibilidade a partir de content e metadata.items."""
+    parts = []
+    for r in info_rows or []:
+        kind = (r.get("kind") if isinstance(r, dict) else r["kind"]) or ""
+        if kind.lower() not in ("horarios", "horario", "disponibilidade"):
+            continue
+        content = (r.get("content") if isinstance(r, dict) else r["content"]) or ""
+        if content.strip():
+            parts.append(content.strip())
+        meta = r.get("metadata") if isinstance(r, dict) else {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta or "{}")
+            except Exception:
+                meta = {}
+        if isinstance(meta, dict) and isinstance(meta.get("items"), list):
+            for it in meta["items"]:
+                name = it.get("name") or it.get("title") or ""
+                price = it.get("price") or ""
+                details = it.get("details") or it.get("description") or ""
+                line = " ".join(p for p in (name, price, details) if p).strip()
+                if line:
+                    parts.append(line)
+    return " | ".join(parts)
+
+
+def _extract_requested_weekday(text: str, now: Optional[datetime] = None) -> Optional[int]:
+    """Identifica o dia da semana (0=segunda..6=domingo) referido em linguagem natural."""
+    norm = unicodedata.normalize("NFKD", text.lower())
+    norm = "".join(ch for ch in norm if not unicodedata.combining(ch))
+
+    weekday_patterns = (
+        (0, r"\bsegunda(?:\s*-?\s*feira)?\b"),
+        (1, r"\bterca(?:\s*-?\s*feira)?\b"),
+        (2, r"\bquarta(?:\s*-?\s*feira)?\b"),
+        (3, r"\bquinta(?:\s*-?\s*feira)?\b"),
+        (4, r"\bsexta(?:\s*-?\s*feira)?\b"),
+        (5, r"\bsabado\b"),
+        (6, r"\bdomingo\b"),
+    )
+    for wd, pat in weekday_patterns:
+        if re.search(pat, norm):
+            return wd
+
+    ref = now or datetime.now()
+    if re.search(r"\bdepois\s+de\s+amanha\b", norm):
+        return (ref + timedelta(days=2)).weekday()
+    if re.search(r"\bamanha\b", norm):
+        return (ref + timedelta(days=1)).weekday()
+    if re.search(r"\bhoje\b", norm):
+        return ref.weekday()
+    return None
+
+
+def _open_weekdays_from_hours(hours_info: str) -> Optional[set[int]]:
+    """Infere o conjunto de dias da semana abertos (0..6) a partir do texto de horários."""
+    if not hours_info:
+        return None
+    norm = unicodedata.normalize("NFKD", hours_info.lower())
+    norm = "".join(ch for ch in norm if not unicodedata.combining(ch))
+
+    day_map = [
+        (0, "segunda"), (1, "terca"), (2, "quarta"),
+        (3, "quinta"), (4, "sexta"), (5, "sabado"), (6, "domingo"),
+    ]
+    name_to_idx = {name: idx for idx, name in day_map}
+
+    # Verifica intervalos explícitos, ex: "segunda a sexta", "terca a sabado"
+    open_days: set[int] = set()
+    range_matches = re.findall(
+        r"\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:\s*-?\s*feira)?\s+(?:a|ate)\s+"
+        r"(segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:\s*-?\s*feira)?\b",
+        norm,
+    )
+    for start_name, end_name in range_matches:
+        s_idx = name_to_idx[start_name]
+        e_idx = name_to_idx[end_name]
+        if s_idx <= e_idx:
+            open_days.update(range(s_idx, e_idx + 1))
+        else:
+            open_days.update(range(s_idx, 7))
+            open_days.update(range(0, e_idx + 1))
+
+    # Dias citados individualmente (fora de "fechado/encerrado aos X")
+    for idx, name in day_map:
+        if re.search(rf"\b{name}(?:\s*-?\s*feira)?\b", norm):
+            if not re.search(rf"\b(?:encerrad[oa]|fechad[oa])\s+(?:ao|aos|na|nas|em)?\s*{name}\b", norm):
+                open_days.add(idx)
+
+    return open_days or None
+
+
 def check_business_availability(
     message: str,
     subject: str = "",
     info_rows = None,
-    business_type: str = "Serviços"
+    business_type: str = "Serviços",
+    now: Optional[datetime] = None,
 ) -> dict:
     """
     Verifica a disponibilidade de marcação/pedido do cliente através
-    dos dados registrados na aba Negócio (horários, dias, produtos e stock).
+    dos dados registrados na aba Negócio (horários, dias, produtos e stock),
+    suportando linguagem natural (ex: "próxima quinta feira da próxima semana").
     Retorna:
       - available: bool
       - reason: str (motivo se indisponível, ou confirmação)
@@ -1055,28 +1170,28 @@ def check_business_availability(
     """
     info_rows = info_rows or []
     text = f"{subject} {message}".lower()
+    hours_info = _extract_hours_text(info_rows)
 
-    hours_info = ""
-    for r in info_rows:
-        kind = r.get("kind") if isinstance(r, dict) else r["kind"]
-        if kind in ("horarios", "horario"):
-            hours_info = r.get("content") or ""
-            break
+    weekday_labels = [
+        "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+        "sexta-feira", "sábado", "domingo",
+    ]
 
-    # 1. Verificação de dias encerrados
+    # 1. Verificação de dias encerrados (suportando todos os dias da semana e linguagem natural)
     if hours_info:
-        h_lower = hours_info.lower()
-        if ("domingo" in text or "ao domingo" in text) and "domingo" not in h_lower and ("segunda a sexta" in h_lower or "segunda a sábado" in h_lower):
+        open_days = _open_weekdays_from_hours(hours_info)
+        req_weekday = _extract_requested_weekday(text, now=now)
+        if open_days is not None and req_weekday is not None and req_weekday not in open_days:
+            if req_weekday == 6:
+                reason = "Encerrado aos domingos"
+            elif req_weekday == 5:
+                reason = "Encerrado aos sábados"
+            else:
+                reason = f"Encerrado às {weekday_labels[req_weekday]}s"
             return {
                 "available": False,
-                "reason": "Encerrado aos domingos",
-                "matched_info": hours_info
-            }
-        if ("sábado" in text or "sabado" in text or "ao sábado" in text) and "sábado" not in h_lower and "sabado" not in h_lower and "segunda a sexta" in h_lower:
-            return {
-                "available": False,
-                "reason": "Encerrado aos sábados",
-                "matched_info": hours_info
+                "reason": reason,
+                "matched_info": hours_info,
             }
 
     # 2. Verificação de horários fora de expediente

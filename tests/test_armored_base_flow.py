@@ -52,15 +52,23 @@ def test_local_fallback_responds_exactly_to_customer_message():
     assert "09h às 18h" in res_info
 
 def test_no_booking_system_rules():
-    """Garante que as diretrizes do agente proíbem a criação de marcações e proíbem dizer que não faz marcações."""
-    instruction = build_system_instruction(
+    """Garante que o agente interpreta linguagem natural, verifica disponibilidade e nunca diz que não faz marcações."""
+    instruction_full = build_system_instruction(
         business_context="Disponibilidade: Segunda a Sexta das 9h às 18h.",
         instructions="",
+        mandatory_responses={"automation_level": "full"},
     )
-    assert "NUNCA realiza nem efetua marcações" in instruction
-    assert "É TERMINANTEMENTE PROIBIDO dizer ao cliente 'não fazemos marcações'" in instruction
-    assert "informe cordialmente os dias e horários de funcionamento" in instruction
-    assert "O agente NUNCA efetua marcações" in instruction
+    assert "É TERMINANTEMENTE PROIBIDO dizer ao cliente 'não fazemos marcações'" in instruction_full
+    assert "linguagem natural humana" in instruction_full
+    assert "pedido foi registado com sucesso" in instruction_full
+
+    instruction_semi = build_system_instruction(
+        business_context="Disponibilidade: Segunda a Sexta das 9h às 18h.",
+        instructions="",
+        mandatory_responses={"automation_level": "semi"},
+    )
+    assert "pedido está sendo analisado" in instruction_semi
+    assert "validação e confirmação da nossa equipe" in instruction_semi
 
 def test_no_booking_card_in_frontend():
     """Garante que nenhum card de marcações existe no frontend index.html."""

@@ -300,6 +300,96 @@ def test_format_gemini_contents_deduplicates_current_message():
     assert contents[-1]["role"] == "user"
     assert "Quero confirmar o pedido." in contents[-1]["parts"][0]["text"]
 
+
+def test_complementary_investigative_chatbot_rules_in_prompt():
+    instruction = build_system_instruction(
+        business_context="[PRODUTOS] Porsche 911 Carrera 2023 | Preço/Condição: 145.000€",
+        business_name="Stand Premium",
+        business_type="Automóveis",
+    )
+    assert "COMPLEMENTAÇÃO DE INFORMAÇÕES POR INVESTIGAÇÃO" in instruction
+    assert "NUNCA complemente nada que NÃO esteja na base de dados da empresa" in instruction
+    assert "vantagens e adequação" in instruction
+
+
+def test_check_business_availability_natural_language():
+    from datetime import datetime
+    from backend.services.agent import check_business_availability
+
+    info_rows = [
+        {"kind": "horarios", "title": "Horário", "content": "Segunda a Sexta das 09h às 18h"}
+    ]
+    # Quinta-feira da próxima semana -> aberto
+    res_thu = check_business_availability(
+        "Quero fazer uma marcação para a próxima quinta feira da próxima semana",
+        info_rows=info_rows,
+    )
+    assert res_thu["available"] is True
+
+    # Domingo -> fechado
+    res_sun = check_business_availability(
+        "Quero marcar para o próximo domingo da próxima semana",
+        info_rows=info_rows,
+    )
+    assert res_sun["available"] is False
+    assert "domingo" in res_sun["reason"].lower()
+
+    # Horário fora do expediente
+    res_late = check_business_availability(
+        "Quero marcar na próxima quinta feira às 21h",
+        info_rows=info_rows,
+    )
+    assert res_late["available"] is False
+    assert "21" in res_late["reason"] or "expediente" in res_late["reason"].lower()
+
+    # Metadata items support (ex: aberto apenas Terça a Sábado)
+    meta_rows = [{
+        "kind": "horarios",
+        "title": "Horários",
+        "content": "",
+        "metadata": {"items": [{"name": "Terça a Sábado", "price": "10h às 19h"}]},
+    }]
+    res_mon = check_business_availability(
+        "Posso marcar para a próxima segunda feira?",
+        info_rows=meta_rows,
+        now=datetime(2026, 11, 26, 10, 0),
+    )
+    assert res_mon["available"] is False
+    assert "segunda" in res_mon["reason"].lower()
+
+
+def test_extract_scheduled_at_next_thursday_of_next_week():
+    from datetime import datetime
+    from backend.services.email_service import BUSINESS_TIMEZONE, extract_scheduled_at, detect_booking_or_purchase_intent
+
+    # Sábado 28/11/2026 -> "próxima quinta feira da próxima semana às 10h" deve ser Quinta 03/12/2026 (não 10/12)
+    sat_now = datetime(2026, 11, 28, 12, 0, tzinfo=BUSINESS_TIMEZONE)
+    assert (
+        extract_scheduled_at(
+            "Quero fazer uma marcação para a próxima quinta feira da próxima semana às 10h",
+            sat_now,
+        )
+        == "2026-12-03T10:00:00+00:00"
+    )
+
+    # Segunda 23/11/2026 -> "próxima quinta feira da próxima semana às 10h" deve ser Quinta 03/12/2026
+    mon_now = datetime(2026, 11, 23, 12, 0, tzinfo=BUSINESS_TIMEZONE)
+    assert (
+        extract_scheduled_at(
+            "Quero fazer uma marcação para a próxima quinta feira da próxima semana às 10h",
+            mon_now,
+        )
+        == "2026-12-03T10:00:00+00:00"
+    )
+
+    # Linguagem natural sem verbo "marcar"
+    intent = detect_booking_or_purchase_intent(
+        "Tem vaga para a próxima quinta feira da próxima semana?",
+        "Disponibilidade",
+    )
+    assert intent is not None
+    assert intent["type"] == "booking"
+
 def test_system_instruction_enforces_mandatory_conversation_flow():
     from backend.services.agent import build_system_instruction
     prompt = build_system_instruction(

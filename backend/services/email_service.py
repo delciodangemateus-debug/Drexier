@@ -920,6 +920,10 @@ def detect_booking_or_purchase_intent(incoming_content: str, subject: str) -> Op
         r"\b(?:pode\s+ser|prefiro|gostaria|quero|pretendo)\b.*(\b\d{1,2}[h:]|\b[aà]s\s+\d{1,2}|\bamanh[aã]|\bsegunda|\bter[çc]a|\bquarta|\bquinta|\bsexta|\bs[aá]bado|\bdomingo|\bdia\s+\d{1,2})",
         # Seleção de opção de marcação oferecida anteriormente no Gmail
         r"\b(op[cç][aã]o\s*\d+|seleciono\s+(a\s+)?op[cç][aã]o|escolho\s+(a\s+)?op[cç][aã]o|fico\s+com\s+(a\s+)?op[cç][aã]o)\b",
+        # Linguagem natural sem verbo explícito de marcar
+        r"\b(tem\s+vaga|h[aá]\s+vaga|tem\s+hor[aá]rio|h[aá]\s+hor[aá]rio|posso\s+ir|gostaria\s+de\s+ir|quero\s+ir|queria\s+passar)\b.*(\bsegunda|\bter[çc]a|\bquarta|\bquinta|\bsexta|\bs[aá]bado|\bdomingo|\bamanh[aã]|\bpr[oó]xim[ao]\b|\bsemana\b|\bdia\s+\d{1,2})",
+        # Inglês / Espanhol / Francês
+        r"\b(book|booking|appointment|schedule|cita|rendez-vous)\b",
     ]
 
     purchase_patterns = [
@@ -1297,19 +1301,24 @@ def extract_scheduled_at(message: str, now: Optional[datetime] = None) -> Option
         elif re.search(r"\bhoje\b", text):
             scheduled_date = local_now.date()
         else:
-            prefixed_next = bool(re.search(r"\bpr[oó]xim[ao]\b|\bque\s+vem\b", text))
+            prefixed_next = bool(re.search(r"\bpr[oó]xim[ao]\b|\bque\s+vem\b|\bnext\b", text))
             weekdays = (
-                (("segunda",), 0), (("terça", "terca"), 1), (("quarta",), 2),
-                (("quinta",), 3), (("sexta",), 4), (("sábado", "sabado"), 5),
-                (("domingo",), 6),
+                (("segunda", "monday"), 0), (("terça", "terca", "tuesday"), 1), (("quarta", "wednesday"), 2),
+                (("quinta", "thursday"), 3), (("sexta", "friday"), 4), (("sábado", "sabado", "saturday"), 5),
+                (("domingo", "sunday"), 6),
             )
             for names, weekday in weekdays:
                 if any(re.search(rf"\b{re.escape(n)}(?:\s*-?\s*feira)?\b", text) for n in names):
-                    days_ahead = (weekday - local_now.weekday()) % 7
-                    if prefixed_next:
-                        days_ahead += 7
-                    elif days_ahead == 0:
-                        days_ahead = 7
+                    if next_week:
+                        # Ex: "próxima quinta feira da próxima semana" -> quinta-feira da próxima semana de calendário
+                        days_until_next_monday = 7 - local_now.weekday()
+                        days_ahead = days_until_next_monday + weekday
+                    else:
+                        days_ahead = (weekday - local_now.weekday()) % 7
+                        if prefixed_next:
+                            days_ahead += 7
+                        elif days_ahead == 0:
+                            days_ahead = 7
                     scheduled_date = local_now.date() + timedelta(days=days_ahead)
                     break
             if scheduled_date is None and next_week:
@@ -1870,8 +1879,19 @@ async def process_and_reply_email(
         # Regista intenções de agendamento ou etapa final de compra para o card Importante do dashboard,
         # sem enviar mensagens padrão de confirmação, prompts sim/não ou opções de horários estilizadas.
         intent = detect_booking_or_purchase_intent(incoming_content, subject)
+        availability = None
+        if intent and intent["type"] == "booking":
+            availability = check_business_availability(
+                incoming_content,
+                subject=subject,
+                info_rows=info,
+                business_type=user_dict.get("business_type") or "Serviços",
+            )
+
         if intent:
             if automation_level == "semi":
+                target_status = "pending"
+            elif intent["type"] == "booking" and availability and not availability.get("available", True):
                 target_status = "pending"
             else:
                 target_status = "confirmed" if intent["type"] == "booking" else "pending"
@@ -1905,12 +1925,29 @@ async def process_and_reply_email(
             _safe_invalidate_dashboard_cache(user_id)
 
         reply_instructions = effective_agent_instructions(user_dict)
-        if intent and intent["type"] == "booking" and automation_level != "semi":
+        if intent and intent["type"] == "booking":
+            if availability and not availability.get("available", True):
+                reply_instructions += (
+                    f"\n\nCONTEXTO OPERACIONAL (INDISPONIBILIDADE): Não há disponibilidade registada para o dia/horário solicitado ({availability.get('reason')}). "
+                    f"Informe cordialmente o cliente sobre a indisponibilidade e apresente os dias e horários disponíveis registados na Base do Negócio ({availability.get('matched_info')})."
+                )
+            elif automation_level == "semi":
+                reply_instructions += (
+                    "\n\nCONTEXTO OPERACIONAL (MODO SEMI-AUTOMÁTICO): Há disponibilidade registada para o pedido de marcação/agendamento deste cliente. "
+                    "Informe claramente o cliente que o pedido está sendo analisado para validação e confirmação da nossa equipe, "
+                    "e responda também a quaisquer outras dúvidas que o cliente tenha colocado."
+                )
+            else:
+                reply_instructions += (
+                    "\n\nCONTEXTO OPERACIONAL (MODO TOTALMENTE AUTOMÁTICO): O pedido de marcação/agendamento deste cliente foi registado com sucesso. "
+                    "Avise claramente o cliente na sua resposta que o pedido foi registado com sucesso, "
+                    "e responda também a quaisquer outras dúvidas que o cliente tenha colocado. "
+                    "NÃO inclua opções de horários estilizadas, links externos de marcação, nem peça para responder 'sim' ou 'não'."
+                )
+        elif intent and intent["type"] == "purchase" and automation_level == "semi":
             reply_instructions += (
-                "\n\nCONTEXTO OPERACIONAL: O pedido de marcação/agendamento deste cliente foi registado com sucesso. "
-                "Avise claramente o cliente na sua resposta que a marcação foi efetuada com sucesso, "
-                "e responda também a quaisquer outras dúvidas que o cliente tenha colocado. "
-                "NÃO inclua opções de horários estilizadas, links externos de marcação, nem peça para responder 'sim' ou 'não'."
+                "\n\nCONTEXTO OPERACIONAL (MODO SEMI-AUTOMÁTICO): O pedido deste cliente foi recebido e está sendo analisado "
+                "para validação e confirmação da nossa equipe."
             )
 
     # Gerar resposta com a IA Drexier (Gemini ou fallback)
