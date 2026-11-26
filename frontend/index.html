@@ -1172,7 +1172,7 @@ O vosso pedido de cotação já foi registado na nossa central comercial e envi�
         </article>
       </div>
 
-      <!-- MAIN ROW: GRÁFICO PRINCIPAL -->
+      <!-- MAIN ROW: GRÁFICO PRINCIPAL + IMPORTANTE -->
       <div class="dashboard-main-row">
         <div class="panel dashboard-chart-panel">
           <div class="panel-heading">
@@ -1182,6 +1182,17 @@ O vosso pedido de cotação já foi registado na nossa central comercial e envi�
             </div>
           </div>
           <div id="dashboard-chart" class="chart"></div>
+        </div>
+
+        <div class="panel dashboard-important-panel" id="panel-important-clients">
+          <div class="panel-heading">
+            <div>
+              <h2>Importante</h2>
+              <p class="muted" style="margin:2px 0 0;font-size:12.5px;">Clientes com intenção de agendamento ou etapa final de compra.</p>
+            </div>
+            <span class="badge" id="important-count-badge" style="background:var(--violet-subtle); color:var(--lavender);">0</span>
+          </div>
+          <div id="important-list" class="empty">Nenhum cliente com intenção detectada.</div>
         </div>
       </div>
 

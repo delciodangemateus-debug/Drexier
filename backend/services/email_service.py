@@ -407,51 +407,15 @@ def create_mime_message(
     if references:
         msg["References"] = references
 
-    has_options = bool(booking_token and booking_options)
-    base_url = get_public_base_url()
-
-    # ── 1. Parte texto puro ──────────────────────────────────────────────────
+    # Opções de agendamento estilizadas e links de marcação desativados permanentemente
     plain_text = body_text
-    if has_options:
-        plain_text += _build_option_confirm_links_plaintext(
-            booking_options, booking_token, base_url
-        )
-    elif booking_url and booking_url not in plain_text:
-        plain_text += (
-            f"\n\n----------------------------------------\n"
-            f"📅 Para escolher o seu horário de marcação, aceda a:\n"
-            f"{booking_url}\n"
-            f"----------------------------------------"
-        )
     msg.attach(MIMEText(plain_text, "plain", "utf-8"))
 
     # ── 2. Parte HTML ────────────────────────────────────────────────────────
-    if has_options:
-        # Cards clicáveis por opção — seleção direta no próprio Gmail
-        booking_block_html = _build_option_confirm_links_html(
-            booking_options, booking_token, base_url, sender_email=sender, subject=subject
-        )
-    elif booking_url:
-        # Fallback: botão oficial (com espaçamento padrão preservado para testes)
-        booking_block_html = (
-            f'<div style="margin: 28px 0 16px 0; text-align: left;">'
-            f'<a href="{html.escape(booking_url)}" target="_blank" style="'
-            f'background-color: #2563eb; color: #ffffff; padding: 13px 26px; '
-            f'text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; '
-            f'display: inline-block; '
-            f'font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif; '
-            f'box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">'
-            f'📅 Escolher Horário de Marcação'
-            f'</a></div>'
-        )
-    else:
-        booking_block_html = ""
-
     html_content = (
         "<div style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, "
         "Helvetica, Arial, sans-serif; font-size: 15px; color: #222; line-height: 1.6;\">"
         + f"<p style=\"white-space: pre-line; margin: 0 0 16px 0;\">{html.escape(body_text)}</p>"
-        + booking_block_html
         + "</div>"
     )
     msg.attach(MIMEText(html_content, "html", "utf-8"))
@@ -488,39 +452,12 @@ async def send_email(
     opt_token: Optional[str] = None
     opt_options: Optional[List[Dict[str, Any]]] = None
 
-    # As opções para escolher só são entregues quando interpretado pela IA (include_booking_options=True)
-    if include_booking_options and not booking_url and to_email:
-        try:
-            with connect() as c:
-                uid = integration.get("user_id")
-                if uid:
-                    row = c.execute(
-                        "SELECT id, user_id, name FROM contacts WHERE user_id = ? AND contact_key = ?",
-                        (uid, to_email),
-                    ).fetchone()
-                else:
-                    row = c.execute(
-                        "SELECT id, user_id, name FROM contacts WHERE contact_key = ? ORDER BY id DESC LIMIT 1",
-                        (to_email,),
-                    ).fetchone()
-                if row:
-                    _uid = row["user_id"]
-                    _cid = row["id"]
-                    _cname = row["name"] or ""
-                    opt_token = build_booking_token(_uid, _cid, to_email, _cname)
-                    info_rows = c.execute(
-                        "SELECT kind, title, content FROM business_info WHERE user_id=?", (_uid,)
-                    ).fetchall()
-                    opt_options = generate_booking_options(info_rows)
-        except Exception as _exc:
-            logger.debug(f"[Email Opções] Erro a preparar cards de horário: {_exc}")
-
     google_token = await refresh_google_token_if_needed(integration)
     mime_msg = create_mime_message(
         from_header, to_email, subject, body_text, in_reply_to, references,
-        booking_url=booking_url,          # fallback apenas se não houver opções
-        booking_token=opt_token,
-        booking_options=opt_options,
+        booking_url=None,
+        booking_token=None,
+        booking_options=None,
     )
     raw_base64 = base64.urlsafe_b64encode(mime_msg.as_bytes()).decode("utf-8")
 
@@ -1884,20 +1821,6 @@ async def process_and_reply_email(
                 (user_id, cid, full_current_content)
             )
 
-        # URL com botão oficial para acesso direto ao campo de opções de marcação
-        booking_url = build_booking_action_url(user_id, cid, customer_email, booking_customer_name or customer_name or "")
-
-        # No modo totalmente automático o cliente confirma a marcação antes de ela
-        # entrar no quadro "Marcações da Semana". Nenhum outro modo usa este fluxo.
-        pending_confirmation = c.execute(
-            """SELECT r.id, r.request_type, r.details, r.scheduled_at
-               FROM conversion_requests r
-               WHERE r.user_id = ? AND r.contact_id = ?
-                 AND r.status = 'awaiting_client_confirmation'
-               ORDER BY r.id DESC LIMIT 1""",
-            (user_id, cid),
-        ).fetchone()
-
         # Loop guard: Se for apenas confirmação breve ("obrigado", "ok") e a IA já respondeu antes
         last_agent_msg = c.execute(
             "SELECT id, content FROM messages WHERE contact_id = ? AND user_id = ? AND sender = 'agent' ORDER BY id DESC LIMIT 1",
@@ -1906,7 +1829,6 @@ async def process_and_reply_email(
         clean_stripped = incoming_content.strip().lower()
         if (
             last_agent_msg
-            and not pending_confirmation
             and any(re.search(pat, clean_stripped, re.IGNORECASE) for pat in LOOP_ACKNOWLEDGMENT_PATTERNS)
         ):
             logger.info(f"[Anti-Loop] Agradecimento ou confirmação breve de {customer_email} recebido após resposta da IA. Não requer nova resposta automática.")
@@ -1935,588 +1857,45 @@ async def process_and_reply_email(
             (user_id,)
         ).fetchall()
 
-        # Um pedido que já está a aguardar resposta do cliente deve ser sempre
-        # concluído, mesmo que o nível de automação tenha mudado entretanto.
-        # Caso contrário o cliente fica preso num ciclo interminável de perguntas.
-        if pending_confirmation:
-            language = detect_message_language(incoming_content)
-            confirmation_details = pending_confirmation["details"] or ""
-            confirmation_scheduled_at = pending_confirmation["scheduled_at"]
-
-            # ── BLINDAGEM 1-MENSAGEM-POR-TURNO ────────────────────────────────────
-            # Usa recent_msgs (lido ANTES da inserção da nova mensagem customer)
-            # para verificar se esta mensagem já foi respondida antes pelo agente.
-            if (
-                len(recent_msgs) >= 2
-                and recent_msgs[0]["sender"] == "agent"
-                and recent_msgs[1]["sender"] == "customer"
-                and recent_msgs[1]["content"] == full_current_content
-            ):
-                logger.info(
-                    f"[Blindagem 1-msg] Mensagem de {customer_email} já foi respondida. "
-                    "Ignorando reenvio duplicado."
-                )
-                return recent_msgs[0]["content"]
-            # ─────────────────────────────────────────────────────────────────
-
-            # O cliente pode responder "Sim, mas quinta às 16h" ou apenas "às 16h".
-            # Nesses casos a marcação registada é atualizada antes da decisão, para
-            # que a confirmação use sempre a data/hora mais recente pedida por ele.
-            clean_incoming = clean_email_body(incoming_content)
-            new_schedule = extract_scheduled_at(clean_incoming)
-            if new_schedule and new_schedule != confirmation_scheduled_at:
-                confirmation_scheduled_at = new_schedule
-                confirmation_details = (
-                    f"{confirmation_details}\nData e hora escolhidas pelo cliente: {incoming_content[:200]}"
-                ).strip()
-                c.execute(
-                    """UPDATE conversion_requests SET details = ?, scheduled_at = ?
-                       WHERE id = ? AND user_id = ?""",
-                    (confirmation_details, confirmation_scheduled_at, pending_confirmation["id"], user_id),
-                )
-            elif not new_schedule and confirmation_scheduled_at:
-                only_time = _extract_schedule_time(clean_incoming)
-                if only_time:
-                    previous = _parse_utc_datetime(confirmation_scheduled_at)
-                    if previous is not None:
-                        adjusted = previous.astimezone(BUSINESS_TIMEZONE).replace(
-                            hour=only_time[0], minute=only_time[1]
-                        )
-                        if adjusted > datetime.now(BUSINESS_TIMEZONE):
-                            updated_at = adjusted.astimezone(timezone.utc).isoformat()
-                            if updated_at != confirmation_scheduled_at:
-                                confirmation_scheduled_at = updated_at
-                                confirmation_details = (
-                                    f"{confirmation_details}\nHora escolhida pelo cliente: {incoming_content[:200]}"
-                                ).strip()
-                                c.execute(
-                                    """UPDATE conversion_requests SET details = ?, scheduled_at = ?
-                                       WHERE id = ? AND user_id = ?""",
-                                    (confirmation_details, confirmation_scheduled_at, pending_confirmation["id"], user_id),
-                                )
-
-            decision = detect_client_confirmation(incoming_content)
-
-            # ── ANTI-LOOP DE CONFIRMAÇÃO ──────────────────────────────────────
-            # Se a decisão for ambígua (None) mas a marcação já tem data/hora
-            # definida e o cliente está a responder a uma pergunta de confirmação,
-            # trata-se como positivo (evita reperguntar indefinidamente).
-            if decision is None and confirmation_scheduled_at:
-                # Verifica se há pelo menos uma palavra curta não-negativa
-                raw_stripped = (clean_email_body(incoming_content) or incoming_content).strip()
-                raw_lower = re.sub(r"[^\w\s]", "", raw_stripped.lower()).strip()
-                # Palavras absolutamente neutras ou muito curtas são positivas neste contexto
-                _NEUTRAL_BUT_POSITIVE = {"ok", "okay", "certo", "bom", "sim", "s", "yes", "y"}
-                if raw_lower in _NEUTRAL_BUT_POSITIVE or len(raw_lower) <= 3:
-                    decision = "positive"
-                    logger.info(
-                        f"[Anti-Loop] Resposta curta/neutra '{raw_lower}' de {customer_email} "
-                        "tratada como confirmação positiva (marcação já tem data/hora)."
-                    )
-            # ─────────────────────────────────────────────────────────────────
-
-            if decision == "positive":
-                reply_text = _build_request_status_reply(
-                    customer_name=booking_customer_name,
-                    business_name=user_dict.get("name") or "nosso negócio",
-                    details=confirmation_details,
-                    confirmed=True,
-                    language=language,
-                    request_type="booking",
-                    scheduled_at=confirmation_scheduled_at,
-                )
-                claimed_status, final_status = "validating", "confirmed"
-            elif decision == "negative":
-                display_name = customer_name.strip() if customer_name and "@" not in customer_name else ""
-                greeting = f"Olá, {display_name}." if display_name else "Olá."
-                if language == "en":
-                    greeting = f"Hello, {display_name}." if display_name else "Hello."
-                    body = (
-                        "Understood. The booking was not confirmed. "
-                        "If you wish, we can arrange another date and time."
-                    )
-                    closing = f"Kind regards,\n{user_dict.get('name') or 'nosso negócio'}"
-                else:
-                    body = (
-                        "Compreendido. A marcação não foi confirmada. "
-                        "Se desejar, podemos agendar outra data e hora."
-                    )
-                    closing = f"Com os melhores cumprimentos,\n{user_dict.get('name') or 'nosso negócio'}"
-                reply_text = f"{greeting}\n\n{body}\n\n{closing}"
-                claimed_status, final_status = "validating", "treated"
-            else:
-                # Decisão ambígua sem data definida: repergunta UMA vez.
-                # Mas se já existe uma mensagem do agente a fazer esta pergunta
-                # (mesmo texto), não a envia de novo → anti-loop absoluto.
-                _conf_question = _build_booking_confirmation_question(
-                    customer_name=booking_customer_name,
-                    business_name=user_dict.get("name") or "nosso negócio",
-                    details=confirmation_details,
-                    scheduled_at=confirmation_scheduled_at,
-                    language=language,
-                )
-                previous_agent_content = (last_agent_msg["content"] or "") if last_agent_msg else ""
-                if (
-                    "Deseja prosseguir e confirmar" in previous_agent_content
-                    or "Do you want to proceed and confirm" in previous_agent_content
-                ):
-                    # Já foi perguntado antes — se o cliente não confirma nem
-                    # nega, encerra silenciosamente sem enviar nova mensagem
-                    logger.info(
-                        f"[Anti-Loop] Pergunta de confirmação já enviada a {customer_email}. "
-                        "Cliente não respondeu de forma reconhecida. Aguardando."
-                    )
-                    return "(Aguardando resposta do cliente - pergunta de confirmação já enviada)"
-                reply_text = _conf_question
-                claimed_status, final_status = None, "awaiting_client_confirmation"
-
-            if claimed_status:
-                claimed = c.execute(
-                    """UPDATE conversion_requests SET status = ?
-                       WHERE id = ? AND user_id = ? AND status = 'awaiting_client_confirmation'""",
-                    (claimed_status, pending_confirmation["id"], user_id),
-                )
-                if not claimed.rowcount:
-                    raise ValueError("Esta marcação já não está a aguardar confirmação do cliente.")
-
-            reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-            if auto_reply:
-                try:
-                    await send_email(
-                        integration=integration,
-                        to_email=customer_email,
-                        subject=reply_subject,
-                        body_text=reply_text,
-                        thread_id=thread_id,
-                        in_reply_to=message_id_header,
-                        references=message_id_header,
-                    )
-                except Exception as e_send:
-                    if claimed_status:
-                        c.execute(
-                            """UPDATE conversion_requests SET status = 'awaiting_client_confirmation'
-                               WHERE id = ? AND user_id = ? AND status = ?""",
-                            (pending_confirmation["id"], user_id, claimed_status),
-                        )
-                    logger.error(f"Erro ao enviar resposta de confirmação automática: {e_send}")
-                    raise
-            if claimed_status:
-                # Dois UPDATEs simples em vez de COALESCE para compatibilidade
-                # máxima com o adaptador Supabase (evita split incorreto da vírgula
-                # dentro de COALESCE ao tokenizar o SET).
-                c.execute(
-                    """UPDATE conversion_requests SET status = ?, resolved_at = CURRENT_TIMESTAMP
-                       WHERE id = ? AND user_id = ? AND status = ?""",
-                    (final_status, pending_confirmation["id"], user_id, claimed_status),
-                )
-                if confirmation_scheduled_at:
-                    c.execute(
-                        "UPDATE conversion_requests SET scheduled_at = ? WHERE id = ? AND user_id = ?",
-                        (confirmation_scheduled_at, pending_confirmation["id"], user_id),
-                    )
-                _safe_invalidate_dashboard_cache(user_id)
-            if auto_reply:
-                c.execute(
-                    "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-                    (user_id, cid, reply_text),
-                )
-                c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
-            if decision == "positive":
-                return "(Marcação confirmada pelo cliente - Nível Totalmente Automático)"
-            if decision == "negative":
-                return "(Marcação não confirmada pelo cliente - Nível Totalmente Automático)"
-            return "(Confirmação da marcação solicitada ao cliente - Nível Totalmente Automático)"
-
         if not auto_reply or automation_level == "disabled":
             logger.info(
                 f"[Auto-Reply Desativado] Mensagem de {customer_email} registada com sucesso. Nível de automação desativado."
             )
             return "(Resposta automática desativada pelo utilizador - Nível Desativado)"
 
-        # ── SELEÇÃO DIRETA DE OPÇÃO DE MARCAÇÃO PELO CLIENTE NO GMAIL ────────
-        # O cliente escolheu uma das opções (respondeu 'Opção 1', 'Opção 2', clicou para responder no Gmail, etc.)
-        # Sem ser transferido para link externo! A marcação é gravada imediatamente no sistema.
-        available_booking_options = generate_booking_options(info)
-        chosen_opt = extract_booking_option_choice(incoming_content, available_booking_options)
-        if chosen_opt:
-            chosen_slot_label = chosen_opt["label"]
-            chosen_scheduled_at = chosen_opt["iso"]
-            chosen_date_str = f"Dia {chosen_opt['date']} às {chosen_opt['time']}"
-            details_text = (
-                f"Opção de marcação escolhida pelo cliente: {chosen_slot_label}\n"
-                f"Data e hora escolhidas pelo cliente: {chosen_date_str}"
-            )
-            final_customer_name = stated_name_from_text or customer_name or "Cliente"
-
-            existing_req = c.execute(
-                """SELECT id, status FROM conversion_requests
-                   WHERE user_id = ? AND contact_id = ?
+        # Regista intenções de agendamento ou etapa final de compra para o card Importante do dashboard,
+        # sem enviar mensagens padrão de confirmação, prompts sim/não ou opções de horários estilizadas.
+        intent = detect_booking_or_purchase_intent(incoming_content, subject)
+        if intent:
+            has_open_req = c.execute(
+                """SELECT id FROM conversion_requests
+                   WHERE user_id = ? AND contact_id = ? AND request_type = ?
                      AND status IN ('pending', 'validating', 'awaiting_schedule', 'awaiting_client_confirmation')
                    ORDER BY id DESC LIMIT 1""",
-                (user_id, cid),
+                (user_id, cid, intent["type"]),
             ).fetchone()
-
-            if automation_level == "full":
-                # NÍVEL TOTALMENTE AUTOMÁTICO:
-                # Entra imediatamente no card de Marcações da Semana (status='confirmed')
-                if existing_req:
-                    c.execute(
-                        """UPDATE conversion_requests
-                           SET status = 'confirmed', scheduled_at = ?, resolved_at = CURRENT_TIMESTAMP, details = ?
-                           WHERE id = ? AND user_id = ?""",
-                        (chosen_scheduled_at, details_text, existing_req["id"], user_id),
-                    )
-                else:
-                    c.execute(
-                        """INSERT INTO conversion_requests
-                           (user_id, contact_id, request_type, details, status, scheduled_at, resolved_at)
-                           VALUES (?, ?, 'booking', ?, 'confirmed', ?, CURRENT_TIMESTAMP)""",
-                        (user_id, cid, details_text, chosen_scheduled_at),
-                    )
-                _safe_invalidate_dashboard_cache(user_id)
-
-                reply_text = _build_request_status_reply(
-                    customer_name=final_customer_name,
-                    business_name=user_dict.get("name") or "nosso negócio",
-                    details=details_text,
-                    confirmed=True,
-                    language=detect_message_language(incoming_content),
-                    request_type="booking",
-                    scheduled_at=chosen_scheduled_at,
-                )
-
-                reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-                try:
-                    await send_email(
-                        integration=integration,
-                        to_email=customer_email,
-                        subject=reply_subject,
-                        body_text=reply_text,
-                        thread_id=thread_id,
-                        in_reply_to=message_id_header,
-                        references=message_id_header,
-                    )
-                except Exception as e_send:
-                    logger.error(f"Erro ao enviar confirmação de marcação automática: {e_send}")
-
+            details_text = f"Assunto: {subject}\n{incoming_content[:400]}".strip()
+            if has_open_req:
                 c.execute(
-                    "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-                    (user_id, cid, reply_text),
+                    "UPDATE conversion_requests SET details = ? WHERE id = ? AND user_id = ?",
+                    (details_text, has_open_req["id"], user_id),
                 )
-                c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
-                return "(Marcação confirmada automaticamente no quadro de Marcações da Semana - Nível Totalmente Automático)"
-
             else:
-                # NÍVEL SEMI-AUTOMÁTICO:
-                # Aparece no card de Esperando Validação (status='pending') até ser validado pelo proprietário!
-                if existing_req:
-                    c.execute(
-                        """UPDATE conversion_requests
-                           SET status = 'pending', scheduled_at = ?, details = ?
-                           WHERE id = ? AND user_id = ?""",
-                        (chosen_scheduled_at, details_text, existing_req["id"], user_id),
-                    )
-                else:
-                    c.execute(
-                        """INSERT INTO conversion_requests
-                           (user_id, contact_id, request_type, details, status, scheduled_at)
-                           VALUES (?, ?, 'booking', ?, 'pending', ?)""",
-                        (user_id, cid, details_text, chosen_scheduled_at),
-                    )
-                _safe_invalidate_dashboard_cache(user_id)
-
-                lang = detect_message_language(incoming_content)
-                greeting = f"Olá, {final_customer_name}." if final_customer_name and "@" not in final_customer_name else "Olá."
-                biz_name = user_dict.get("name") or "nosso negócio"
-                if lang == "en":
-                    greeting = f"Hello, {final_customer_name}." if final_customer_name and "@" not in final_customer_name else "Hello."
-                    body_msg = (
-                        f"We have received your booking choice for {chosen_date_str}.\n\n"
-                        f"Your request is currently awaiting validation by our team. "
-                        f"We will contact you shortly once it is confirmed."
-                    )
-                    closing = f"Kind regards,\n{biz_name}"
-                else:
-                    body_msg = (
-                        f"Recebemos a sua escolha para {chosen_date_str}.\n\n"
-                        f"O seu pedido de marcação aguarda validação da nossa equipa. "
-                        f"Entraremos em contacto brevemente assim que a marcação for confirmada."
-                    )
-                    closing = f"Com os melhores cumprimentos,\n{biz_name}"
-                reply_text = f"{greeting}\n\n{body_msg}\n\n{closing}"
-
-                reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-                try:
-                    await send_email(
-                        integration=integration,
-                        to_email=customer_email,
-                        subject=reply_subject,
-                        body_text=reply_text,
-                        thread_id=thread_id,
-                        in_reply_to=message_id_header,
-                        references=message_id_header,
-                    )
-                except Exception as e_send:
-                    logger.error(f"Erro ao enviar aviso de validação pendente: {e_send}")
-
                 c.execute(
-                    "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-                    (user_id, cid, reply_text),
+                    """INSERT INTO conversion_requests
+                       (user_id, contact_id, request_type, details, status, scheduled_at)
+                       VALUES (?, ?, ?, ?, 'pending', ?)""",
+                    (
+                        user_id,
+                        cid,
+                        intent["type"],
+                        details_text,
+                        extract_scheduled_at(incoming_content),
+                    ),
                 )
-                c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
-                return "(Pedido de marcação registado e aguardando validação no card - Nível Semi-Automático)"
-
-        # A marcação só avança para validação quando o cliente fornece data e hora.
-        intent = detect_booking_or_purchase_intent(incoming_content, subject)
-        if intent is None:
-            # Respostas como "quinta às 16h" ou "20/11 às 15h" podem vir sem verbo
-            # de agendamento. Se já existir um pedido em aberto, tratamos a data
-            # informada como continuação desse pedido.
-            unresolved_request = c.execute(
-                """SELECT 1 FROM conversion_requests
-                   WHERE user_id = ? AND contact_id = ?
-                     AND status IN ('awaiting_schedule', 'pending', 'awaiting_client_confirmation')
-                   LIMIT 1""",
-                (user_id, cid),
-            ).fetchone()
-            if unresolved_request and extract_scheduled_at(
-                f"{subject or ''}\n{clean_email_body(incoming_content)}"
-            ):
-                intent = {"type": "booking", "details": incoming_content[:300].strip()}
-        scheduled_request = capture_scheduled_request(
-            c, user_id, cid, incoming_content, subject, intent
-        )
-        waiting_for_schedule = bool(
-            scheduled_request and scheduled_request["status"] == "awaiting_schedule"
-        )
-        if scheduled_request and not waiting_for_schedule:
-            intent = {"type": scheduled_request["request_type"], "details": scheduled_request["details"]}
-        else:
-            intent = None
-
-        known_schedule_text = "\n".join(
-            part for part in (
-                (scheduled_request or {}).get("details"),
-                incoming_content,
-                subject,
-            ) if part
-        )
-        known_schedule_fragment = _client_schedule_fragment(known_schedule_text)
-        need_date = not bool(_SCHEDULE_DATE_CUE_PATTERN.search(known_schedule_fragment))
-        need_time = _extract_schedule_time(known_schedule_text) is None
-        has_specific_schedule = bool(not need_date or not need_time)
-
-        # Verifica previamente se é intenção ou pergunta sobre marcações
-        inquiry_intent = is_booking_inquiry(
-            incoming_content=incoming_content,
-            subject=subject,
-            intent=intent,
-            waiting_for_schedule=waiting_for_schedule,
-            has_specific_schedule=has_specific_schedule,
-        )
+            _safe_invalidate_dashboard_cache(user_id)
 
         reply_instructions = effective_agent_instructions(user_dict)
-        if inquiry_intent and not has_specific_schedule:
-            reply_instructions += (
-                "\n\nCONTEXTO OPERACIONAL: O cliente demonstrou interesse em agendamento ou tirou dúvidas sobre o negócio. "
-                "DIRETRIZ MANDATÓRIA: Leia toda a conversa, identifique com precisão a dúvida ou pergunta do cliente, "
-                "e responda PRIMEIRO e com PRIORIDADE ABSOLUTA exatamente ao que ele perguntou. "
-                "Se o cliente tiver expressado intenção de agendamento, indique cordialmente que ele pode selecionar uma das opções de data disponíveis apresentadas no e-mail. "
-                "NUNCA envie apenas frases prontas de marcação ignorando as perguntas reais do cliente."
-            )
-        elif waiting_for_schedule:
-            missing_parts = []
-            if need_date:
-                missing_parts.append("a data")
-            if need_time:
-                missing_parts.append("a hora")
-            missing_text = " e ".join(missing_parts) if missing_parts else "novos dados"
-            reply_instructions += (
-                "\n\nCONTEXTO OPERACIONAL: Há um pedido anterior do cliente aguardando data e hora "
-                "do agendamento. Responda à mensagem atual do cliente, usando o histórico para "
-                f"entender o pedido. O cliente já indicou: {known_schedule_fragment or 'nenhum dado'} . "
-                f"Pergunte somente {missing_text}, sem repetir o que o cliente já informou. "
-                "Não diga que o pedido foi confirmado nem que aguarda validação da equipe."
-            )
-        if intent:
-            if automation_level == "full":
-                # Nível Totalmente Automático: verifica disponibilidade nos dados registrados na aba Negócio
-                availability_context = (
-                    f"{scheduled_request['details']}\n{incoming_content}"
-                    if scheduled_request else incoming_content
-                )
-                avail = check_business_availability(
-                    availability_context,
-                    subject,
-                    info,
-                    user_dict.get("business_type") or "Serviços",
-                )
-                if avail["available"]:
-                    booking_awaits_client = (
-                        intent["type"] == "booking"
-                        and bool((scheduled_request or {}).get("scheduled_at"))
-                    )
-                    if booking_awaits_client:
-                        reply_text = _build_booking_confirmation_question(
-                            customer_name=booking_customer_name,
-                            business_name=user_dict.get("name") or "nosso negócio",
-                            details=scheduled_request["details"],
-                            scheduled_at=scheduled_request["scheduled_at"],
-                            language=detect_message_language(incoming_content),
-                        )
-                        final_status = "awaiting_client_confirmation"
-                    else:
-                        reply_text = _build_request_status_reply(
-                            customer_name=booking_customer_name,
-                            business_name=user_dict.get("name") or "nosso negócio",
-                            details=incoming_content,
-                            confirmed=True,
-                            language=detect_message_language(incoming_content),
-                            request_type=intent["type"],
-                            scheduled_at=(scheduled_request or {}).get("scheduled_at"),
-                        )
-                        final_status = "confirmed"
-                    reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-                    try:
-                        await send_email(
-                            integration=integration,
-                            to_email=customer_email,
-                            subject=reply_subject,
-                            body_text=reply_text,
-                            thread_id=thread_id,
-                            in_reply_to=message_id_header,
-                            references=message_id_header,
-                            include_booking_options=True,
-                        )
-                    except Exception as e_send:
-                        logger.error(f"Erro ao enviar confirmação automática de e-mail: {e_send}")
-                        raise
-                    if scheduled_request:
-                        if final_status == "confirmed":
-                            c.execute(
-                                """UPDATE conversion_requests SET status='confirmed', resolved_at=CURRENT_TIMESTAMP
-                                   WHERE id=? AND user_id=?""",
-                                (scheduled_request["id"], user_id),
-                            )
-                            if (scheduled_request or {}).get("scheduled_at"):
-                                c.execute(
-                                    "UPDATE conversion_requests SET scheduled_at = ? WHERE id = ? AND user_id = ?",
-                                    ((scheduled_request or {}).get("scheduled_at"), scheduled_request["id"], user_id),
-                                )
-                        else:
-                            c.execute(
-                                """UPDATE conversion_requests SET status='awaiting_client_confirmation'
-                                   WHERE id=? AND user_id=?""",
-                                (scheduled_request["id"], user_id),
-                            )
-                            if (scheduled_request or {}).get("scheduled_at"):
-                                c.execute(
-                                    "UPDATE conversion_requests SET scheduled_at = ? WHERE id = ? AND user_id = ?",
-                                    ((scheduled_request or {}).get("scheduled_at"), scheduled_request["id"], user_id),
-                                )
-                        _safe_invalidate_dashboard_cache(user_id)
-                    else:
-                        c.execute(
-                            """INSERT INTO conversion_requests
-                               (user_id, contact_id, request_type, details, status, scheduled_at, resolved_at)
-                               VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
-                            (
-                                user_id, cid, intent["type"],
-                                f"Assunto: {subject}\n{incoming_content[:400]}",
-                                final_status,
-                                extract_scheduled_at(incoming_content),
-                            ),
-                        )
-                    c.execute(
-                        "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-                        (user_id, cid, reply_text)
-                    )
-                    c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
-                    if booking_awaits_client:
-                        return "(Confirmação da marcação solicitada ao cliente - Nível Totalmente Automático)"
-                    return f"(Marcação de {intent['type']} validada e confirmada automaticamente - Nível Totalmente Automático)"
-                else:
-                    reply_text = _build_request_status_reply(
-                        customer_name=customer_name,
-                        business_name=user_dict.get("name") or "nosso negócio",
-                        details=incoming_content,
-                        confirmed=False,
-                        language=detect_message_language(incoming_content),
-                        note=avail["reason"],
-                        request_type=intent["type"],
-                        scheduled_at=(scheduled_request or {}).get("scheduled_at"),
-                    )
-                    reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-                    try:
-                        await send_email(
-                            integration=integration,
-                            to_email=customer_email,
-                            subject=reply_subject,
-                            body_text=reply_text,
-                            thread_id=thread_id,
-                            in_reply_to=message_id_header,
-                            references=message_id_header,
-                            include_booking_options=True,
-                        )
-                    except Exception as e_send:
-                        logger.error(f"Erro ao enviar alternativa: {e_send}")
-                        raise
-                    if scheduled_request:
-                        c.execute(
-                            """UPDATE conversion_requests SET status='treated', resolved_at=CURRENT_TIMESTAMP
-                               WHERE id=? AND user_id=?""",
-                            (scheduled_request["id"], user_id),
-                        )
-                    else:
-                        c.execute(
-                            """INSERT INTO conversion_requests
-                               (user_id, contact_id, request_type, details, status, scheduled_at, resolved_at)
-                               VALUES (?, ?, ?, ?, 'treated', ?, CURRENT_TIMESTAMP)""",
-                            (
-                                user_id, cid, intent["type"],
-                                f"Assunto: {subject}\n{incoming_content[:400]}",
-                                extract_scheduled_at(incoming_content),
-                            ),
-                        )
-                    c.execute(
-                        "INSERT INTO messages(user_id, contact_id, sender, content) VALUES (?, ?, 'agent', ?)",
-                        (user_id, cid, reply_text)
-                    )
-                    c.execute("UPDATE contacts SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?", (cid,))
-                    return f"(Pedido de {intent['type']} tratado automaticamente por indisponibilidade)"
-            else:
-                # Nível Semi: a IA responde mas não valida de forma automática a marcação final, aguardando validação do usuário
-                has_pending = c.execute(
-                    "SELECT id FROM conversion_requests WHERE user_id = ? AND contact_id = ? AND status = 'pending'",
-                    (user_id, cid)
-                ).fetchone()
-                if not has_pending:
-                    c.execute(
-                        """INSERT INTO conversion_requests
-                           (user_id, contact_id, request_type, details, status, scheduled_at)
-                           VALUES (?, ?, ?, ?, 'pending', ?)""",
-                        (
-                            user_id, cid, intent["type"],
-                            f"Assunto: {subject}\n{incoming_content[:400]}",
-                            extract_scheduled_at(incoming_content),
-                        )
-                    )
-                    logger.info(f"[Validação Pendente - Semi] Intenção de {intent['type']} de {customer_email} registada na Dashboard para validação.")
-                if not waiting_for_schedule:
-                    # No modo totalmente automático NUNCA dizer que aguarda validação
-                    if automation_level == "full":
-                        reply_instructions += (
-                            "\n\nCONTEXTO OPERACIONAL: Você tem autonomia máxima. "
-                            "Responda à mensagem atual confirmando o agendamento diretamente. "
-                            "NUNCA diga que aguarda validação da equipe."
-                        )
-                    else:
-                        reply_instructions += (
-                            "\n\nCONTEXTO OPERACIONAL: O pedido do cliente está registrado e aguarda "
-                            "validação do proprietário. Responda à mensagem atual confirmando apenas o "
-                            "recebimento e que aguarda validação. Não diga que já foi confirmado, "
-                            "reservado ou concluído."
-                        )
 
     # Gerar resposta com a IA Drexier (Gemini ou fallback)
     try:
@@ -2539,10 +1918,6 @@ async def process_and_reply_email(
             else UNKNOWN_REPLY
         )
 
-    # Marcações eliminadas por completo do software:
-    # O agente responde estritamente à mensagem/dúvida do cliente sem adicionar opções de agendamento.
-    should_include_options = False
-
     # Envia o e-mail de resposta de volta ao cliente pelo provedor configurado
     reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
     send_kwargs = {
@@ -2554,8 +1929,6 @@ async def process_and_reply_email(
         "in_reply_to": message_id_header,
         "references": message_id_header,
     }
-    if should_include_options and not has_specific_schedule:
-        send_kwargs["include_booking_options"] = True
     try:
         await send_email(**send_kwargs)
         logger.info(f"Resposta enviada com sucesso por e-mail para {customer_email}")

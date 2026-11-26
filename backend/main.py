@@ -922,6 +922,10 @@ def dashboard(user=Depends(current_user)):
         pending_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,r.status,ct.name,ct.contact_key
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
           WHERE r.user_id=? AND r.status IN ('pending', 'validating') ORDER BY r.created_at DESC""",(uid,)).fetchall()
+        important_rows=c.execute("""SELECT r.id,r.contact_id,r.request_type,r.details,r.created_at,r.status,r.scheduled_at,ct.name,ct.contact_key
+          FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
+          WHERE r.user_id=? AND r.status IN ('pending', 'validating', 'awaiting_schedule', 'awaiting_client_confirmation', 'confirmed', 'confirmed_manual')
+          ORDER BY r.created_at DESC""",(uid,)).fetchall()
         booking_rows=c.execute("""SELECT r.id,r.request_type,r.details,r.created_at,r.resolved_at,r.status,r.scheduled_at,ct.id AS contact_id,ct.name,ct.contact_key
           FROM conversion_requests r JOIN contacts ct ON ct.id=r.contact_id
           WHERE r.user_id=? AND r.status IN ('confirmed', 'confirmed_manual')
@@ -955,9 +959,31 @@ def dashboard(user=Depends(current_user)):
             item["name"] = item.get("name") or item.get("contact_key") or "Cliente"
             bookings_rows.append(item)
     bookings_count = len(bookings_rows)
+    important_items = []
+    seen_important_contacts = set()
+    for row in important_rows:
+        item = dict(row)
+        cid = item.get("contact_id")
+        if not cid or cid in seen_important_contacts:
+            continue
+        req_type = (item.get("request_type") or "").strip().lower()
+        if req_type and req_type not in ("booking", "purchase", "agendamento", "compra"):
+            continue
+        seen_important_contacts.add(cid)
+        important_items.append({
+            "id": item.get("id"),
+            "contact_id": cid,
+            "name": item.get("name") or item.get("contact_key") or "Cliente",
+            "contact_key": item.get("contact_key") or "",
+            "request_type": item.get("request_type") or "",
+            "message": (item.get("details") or "").strip(),
+            "created_at": item.get("created_at"),
+            "status": item.get("status"),
+        })
     res = {"messages_answered":total_messages,"messages_received":received_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
             "yesterday_contacts":yesterday_contacts,"pending_count":pending,"pending_requests":[dict(x) for x in pending_rows],
-            "bookings_count":bookings_count,"confirmed_bookings":[dict(x) for x in bookings_rows]}
+            "bookings_count":bookings_count,"confirmed_bookings":[dict(x) for x in bookings_rows],
+            "important_items":important_items}
     _dashboard_cache[uid] = (now_timestamp, res)
     return res
 

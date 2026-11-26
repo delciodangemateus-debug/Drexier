@@ -2624,17 +2624,87 @@ textarea {
 }
 .kpi-trend-pill.up { background: var(--color-success-bg); color: var(--color-success); }
 
-/* MAIN ROW: GRÁFICO PRINCIPAL */
+/* MAIN ROW: GRÁFICO + IMPORTANTE */
 .dashboard-main-row {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1.6fr 1fr;
   gap: 24px;
   margin-bottom: 24px;
 }
 
-.dashboard-chart-panel, .dashboard-pending-panel {
+.dashboard-chart-panel, .dashboard-pending-panel, .dashboard-important-panel {
   display: flex;
   flex-direction: column;
+}
+
+.important-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.important-client-rect {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-arcade);
+  border-radius: var(--radius-md);
+  box-shadow: 2px 2px 0 var(--border-arcade);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.important-client-rect:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--border-arcade);
+  background: var(--surface-interaction);
+}
+
+.important-client-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.important-type-pill {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--border-arcade);
+  background: var(--violet-subtle);
+  color: var(--lavender);
+}
+
+.important-type-pill.purchase {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.important-modal-message {
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-arcade);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .chart {

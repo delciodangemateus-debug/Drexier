@@ -1376,6 +1376,56 @@ function renderBars(target, values) {
 }
 
 /* Dashboard com Cards Expansíveis */
+function openImportantMessageModal(item) {
+  if (!item) return;
+  const reqType = String(item.request_type || "").toLowerCase();
+  const isPurchase = reqType === "purchase" || reqType === "compra";
+  const badgeLabel = isPurchase ? "ETAPA FINAL DE COMPRA" : "INTENÇÃO DE AGENDAMENTO";
+  const clientName = item.name || item.contact_key || "Cliente";
+  const contactEmail = item.contact_key || "";
+  const messageText = item.message || "Intenção importante detectada pela IA.";
+
+  openModal(`
+    <div class="expanded-header">
+      <div class="expanded-header-left">
+        <div class="expanded-header-kbadge"><span class="expanded-header-kbadge-dot"></span>${badgeLabel}</div>
+        <h2 class="expanded-header-title" id="expanded-modal-title">${escapeHtml(clientName)}</h2>
+      </div>
+      <button class="expanded-close" id="modal-close-btn">&times;</button>
+    </div>
+    <div class="expanded-body">
+      ${contactEmail && contactEmail !== clientName ? `<p class="muted" style="margin:0 0 12px; font-size:13px;">${escapeHtml(contactEmail)}</p>` : ""}
+      <div class="important-modal-message">${escapeHtml(messageText)}</div>
+    </div>
+    <div class="expanded-footer" style="justify-content:flex-end; gap:10px;">
+      <button class="btn outline" id="modal-done-btn">Fechar</button>
+      <button class="btn primary" id="modal-view-conversation-btn">Ver toda a conversa</button>
+    </div>
+  `);
+  $("#modal-close-btn").onclick = closeModal;
+  $("#modal-done-btn").onclick = closeModal;
+  $("#modal-view-conversation-btn").onclick = () => openImportantConversation(item.contact_id);
+}
+
+async function openImportantConversation(contactId) {
+  const id = Number(contactId);
+  if (!Number.isInteger(id)) return;
+
+  closeModal();
+  await navigate("messages");
+  if (!contactsCache.some(contact => Number(contact.id) === id)) {
+    await loadContacts();
+  }
+  if (!contactsCache.some(contact => Number(contact.id) === id)) {
+    showNotice("Não foi possível encontrar a conversa deste cliente.", true);
+    return;
+  }
+
+  await openConversation(id);
+  $("#messages-inbox-col")?.classList.remove("hidden");
+  $("#messages-canvas-col")?.classList.remove("active");
+}
+
 function expandMetricCard(title, value, description) {
   openModal(`
     <div class="expanded-header">
@@ -1572,6 +1622,34 @@ function renderDashboardData(d) {
     }
     insightsEl.innerHTML = insightHtml;
     insightsEl.querySelector("#btn-insight-validate")?.addEventListener("click", () => openPendingConfirmationsModal());
+  }
+
+  const importantItems = Array.isArray(d.important_items) ? d.important_items : [];
+  const importantBadge = $("#important-count-badge");
+  if (importantBadge) importantBadge.textContent = String(importantItems.length);
+  const importantList = $("#important-list");
+  if (importantList) {
+    if (!importantItems.length) {
+      importantList.className = "empty";
+      importantList.textContent = "Nenhum cliente com intenção detectada.";
+    } else {
+      importantList.className = "important-list";
+      importantList.innerHTML = "";
+      importantItems.forEach(item => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "important-client-rect";
+        const reqType = String(item.request_type || "").toLowerCase();
+        const isPurchase = reqType === "purchase" || reqType === "compra";
+        const typeLabel = isPurchase ? "Compra" : "Agendamento";
+        btn.innerHTML = `
+          <span class="important-client-name">${escapeHtml(item.name || item.contact_key || "Cliente")}</span>
+          <span class="important-type-pill ${isPurchase ? "purchase" : ""}">${typeLabel}</span>
+        `;
+        btn.addEventListener("click", () => openImportantMessageModal(item));
+        importantList.appendChild(btn);
+      });
+    }
   }
 
   const list = $("#pending-list");
