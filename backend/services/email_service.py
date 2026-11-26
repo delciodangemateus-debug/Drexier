@@ -928,6 +928,10 @@ def detect_booking_or_purchase_intent(incoming_content: str, subject: str) -> Op
         r"\b(confirmar\s+(o\s+)?pedido|confirmo\s+(o\s+)?pedido|confirmo|confirmar\s+(a\s+)?compra|confirmo\s+(a\s+)?compra|pode\s+fechar)\b",
     ]
 
+    for pat in booking_patterns:
+        if re.search(pat, text, re.IGNORECASE):
+            return {"type": "booking", "details": incoming_content[:300].strip()}
+
     for pat in purchase_patterns:
         if re.search(pat, text, re.IGNORECASE):
             return {"type": "purchase", "details": incoming_content[:300].strip()}
@@ -1867,35 +1871,44 @@ async def process_and_reply_email(
         # sem enviar mensagens padrão de confirmação, prompts sim/não ou opções de horários estilizadas.
         intent = detect_booking_or_purchase_intent(incoming_content, subject)
         if intent:
+            target_status = "confirmed" if intent["type"] == "booking" else "pending"
             has_open_req = c.execute(
                 """SELECT id FROM conversion_requests
                    WHERE user_id = ? AND contact_id = ? AND request_type = ?
-                     AND status IN ('pending', 'validating', 'awaiting_schedule', 'awaiting_client_confirmation')
+                     AND status IN ('pending', 'validating', 'awaiting_schedule', 'awaiting_client_confirmation', 'confirmed', 'confirmed_manual')
                    ORDER BY id DESC LIMIT 1""",
                 (user_id, cid, intent["type"]),
             ).fetchone()
             details_text = f"Assunto: {subject}\n{incoming_content[:400]}".strip()
             if has_open_req:
                 c.execute(
-                    "UPDATE conversion_requests SET details = ? WHERE id = ? AND user_id = ?",
-                    (details_text, has_open_req["id"], user_id),
+                    "UPDATE conversion_requests SET details = ?, status = ? WHERE id = ? AND user_id = ?",
+                    (details_text, target_status, has_open_req["id"], user_id),
                 )
             else:
                 c.execute(
                     """INSERT INTO conversion_requests
                        (user_id, contact_id, request_type, details, status, scheduled_at)
-                       VALUES (?, ?, ?, ?, 'pending', ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?)""",
                     (
                         user_id,
                         cid,
                         intent["type"],
                         details_text,
+                        target_status,
                         extract_scheduled_at(incoming_content),
                     ),
                 )
             _safe_invalidate_dashboard_cache(user_id)
 
         reply_instructions = effective_agent_instructions(user_dict)
+        if intent and intent["type"] == "booking":
+            reply_instructions += (
+                "\n\nCONTEXTO OPERACIONAL: O pedido de marcação/agendamento deste cliente foi registado com sucesso. "
+                "Avise claramente o cliente na sua resposta que a marcação foi efetuada com sucesso, "
+                "e responda também a quaisquer outras dúvidas que o cliente tenha colocado. "
+                "NÃO inclua opções de horários estilizadas, links externos de marcação, nem peça para responder 'sim' ou 'não'."
+            )
 
     # Gerar resposta com a IA Drexier (Gemini ou fallback)
     try:
@@ -2489,7 +2502,7 @@ async def process_confirmation_action(
 
 
 async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, Any]:
-    """Generate and send a contextual reminder for a future scheduled request."""
+    """Generate and send a contextual AI reminder focused only on the client's intention (never mentioning dates or times)."""
     with connect() as c:
         req = c.execute(
             """SELECT r.id, r.request_type, r.details, r.status, r.scheduled_at,
@@ -2499,14 +2512,10 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
                WHERE r.id = ? AND r.user_id = ?""",
             (request_id, user_id),
         ).fetchone()
-        if not req or not req["scheduled_at"]:
-            raise ValueError("Este pedido ainda não tem data e hora registadas.")
-        if req["status"] not in ("confirmed", "confirmed_manual"):
-            raise ValueError("Só é possível enviar lembretes para marcações já validadas.")
-
-        scheduled_at = _parse_utc_datetime(req["scheduled_at"])
-        if scheduled_at is None or scheduled_at <= datetime.now(timezone.utc):
-            raise ValueError("Só é possível lembrar o cliente sobre uma marcação futura.")
+        if not req:
+            raise ValueError("Pedido não encontrado.")
+        if req["status"] in ("treated", "cancelled", "rejected"):
+            raise ValueError("Este pedido já foi encerrado ou desmarcado.")
 
         user = c.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         email_integration = c.execute(
@@ -2523,6 +2532,10 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
                WHERE contact_id = ? AND user_id = ? ORDER BY id DESC LIMIT 10""",
             (req["contact_id"], user_id),
         ).fetchall()
+        info_rows = c.execute(
+            "SELECT kind, title, content, metadata FROM business_info WHERE user_id = ? AND kind NOT IN ('subscription', 'assinatura', 'ai_report')",
+            (user_id,),
+        ).fetchall()
 
     customer_key = req["contact_key"]
     if "@" not in customer_key:
@@ -2530,15 +2543,6 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
     if not email_integration:
         raise ValueError("Não há e-mail conectado para enviar o lembrete deste cliente.")
 
-    local_scheduled = scheduled_at.astimezone(BUSINESS_TIMEZONE)
-    days_remaining = (local_scheduled.date() - datetime.now(BUSINESS_TIMEZONE).date()).days
-    date_text = local_scheduled.strftime("%d/%m/%Y às %H:%M")
-    if days_remaining == 0:
-        countdown = "hoje"
-    elif days_remaining == 1:
-        countdown = "amanhã (falta 1 dia)"
-    else:
-        countdown = f"daqui a {days_remaining} dias (faltam {days_remaining} dias)"
     user_dict = dict(user) if user else {}
     business_name = user_dict.get("name") or "nosso negócio"
     contact_name = req["name"] or customer_key
@@ -2551,28 +2555,43 @@ async def send_ai_booking_reminder(user_id: int, request_id: int) -> Dict[str, A
         if latest_customer_message
         else ("en" if (user_dict.get("language") or "").lower().startswith("en") else "pt")
     )
-    request_details = _client_schedule_fragment((req["details"] or "").strip())
-    booking_time = f"Data e hora da marcação: {date_text}"
-    if language == "en":
-        reply_text = (
-            f"Hello, {contact_name}.\n\n"
-            f"This is a reminder that your {req['request_type']} is scheduled for "
-            f"{date_text} ({countdown}).\n\n"
-            f"Appointment date and time: {date_text}"
+    is_purchase = (req["request_type"] or "").lower() in ("purchase", "compra")
+
+    history = [{"sender": r["sender"], "content": r["content"]} for r in reversed(history_rows)]
+    reminder_topic = "compra" if is_purchase else "marcação"
+    reminder_instructions = (
+        f"{effective_agent_instructions(user_dict)}\n\n"
+        f"CONTEXTO OPERACIONAL: Envie um lembrete cordial e breve ao cliente {contact_name} "
+        f"lembrando APENAS da sua intenção de {reminder_topic}, com base no histórico da conversa. "
+        f"REGRA OBRIGATÓRIA: NUNCA mencione horários, horas, datas ou dias de marcação na sua resposta. "
+        f"Apenas lembre o cliente da sua intenção de {reminder_topic} e coloque-se à disposição."
+    )
+    try:
+        reply_text = await draft_reply(
+            message=f"Enviar lembrete ao cliente apenas sobre a sua intenção de {reminder_topic}, sem mencionar datas ou horários.",
+            info_rows=info_rows,
+            instructions=reminder_instructions,
+            language=user_dict.get("language") or "Português",
+            history=history,
+            business_name=business_name,
+            business_type=user_dict.get("business_type") or "Serviços",
+            business_description=user_dict.get("business_description") or "",
         )
-        if request_details:
-            reply_text += f"\n\nRequest details: {request_details}"
-        reply_text += f"\n\nRegards,\n{business_name}"
-    else:
-        reply_text = (
-            f"Olá, {contact_name}.\n\n"
-            f"Este é um lembrete de que o seu pedido ({req['request_type']}) está marcado "
-            f"para {date_text} ({countdown}).\n\n"
-            f"{booking_time}"
-        )
-        if request_details:
-            reply_text += f"\n\nDetalhes do pedido: {request_details}"
-        reply_text += f"\n\nCom os melhores cumprimentos,\n{business_name}"
+    except Exception:
+        if language == "en":
+            reply_text = (
+                f"Hello, {contact_name}.\n\n"
+                f"This is a friendly reminder regarding your {'purchase' if is_purchase else 'booking'} interest with {business_name}. "
+                f"Please let us know if you need any further assistance.\n\n"
+                f"Regards,\n{business_name}"
+            )
+        else:
+            reply_text = (
+                f"Olá, {contact_name}.\n\n"
+                f"Enviamos este lembrete cordial relativamente ao seu interesse de {reminder_topic} com {business_name}. "
+                f"Estamos disponíveis caso necessite de alguma informação adicional.\n\n"
+                f"Com os melhores cumprimentos,\n{business_name}"
+            )
 
     integration_dict = dict(email_integration)
     subject = email_thread["subject"] if email_thread and email_thread["subject"] else "Lembrete da sua marcação"

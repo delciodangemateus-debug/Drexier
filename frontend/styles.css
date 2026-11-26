@@ -2643,7 +2643,12 @@ textarea {
   gap: 10px;
   max-height: 280px;
   overflow-y: auto;
-  padding-right: 2px;
+  padding-right: 4px;
+}
+
+.important-list.important-list-expanded {
+  max-height: 62vh;
+  gap: 12px;
 }
 
 .important-client-rect {
@@ -2652,6 +2657,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
   padding: 12px 14px;
   background: var(--bg-secondary);
   border: 2px solid var(--border-arcade);
@@ -2664,6 +2670,38 @@ textarea {
   text-align: left;
   cursor: pointer;
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.important-client-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.important-client-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.important-expanded-search {
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 2px solid var(--border-arcade);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+.expanded-card-shell.important-expanded-shell {
+  max-width: 960px;
+  width: 94vw;
 }
 
 .important-client-rect:hover {
@@ -4153,7 +4191,8 @@ textarea {
   position: fixed;
   inset: 0;
   background: rgba(23, 25, 35, 0.65);
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
   align-items: center;

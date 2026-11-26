@@ -1446,6 +1446,18 @@ def resolve_conversion(request_id:int,user=Depends(current_user)):
     if not cur.rowcount: raise HTTPException(404,"Pedido pendente não encontrado.")
     return {"ok":True}
 
+@app.post("/api/conversions/{request_id}/cancel")
+def cancel_conversion(request_id: int, user=Depends(current_user)):
+    with connect() as c:
+        cur = c.execute(
+            "UPDATE conversion_requests SET status='cancelled', resolved_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?",
+            (request_id, user["id"]),
+        )
+    if not cur.rowcount:
+        raise HTTPException(404, "Registo não encontrado.")
+    invalidate_dashboard_cache(user["id"])
+    return {"ok": True}
+
 @app.delete("/api/conversions/{request_id}")
 def delete_pending_conversion(request_id: int, user=Depends(current_user)):
     with connect() as c:
