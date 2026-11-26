@@ -2526,10 +2526,10 @@ textarea {
   flex-wrap: wrap;
 }
 
-/* 5 KPI CARDS GRID */
+/* 4 KPI CARDS GRID */
 .kpi-seven-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 18px;
   margin-bottom: 24px;
 }
@@ -2586,6 +2586,7 @@ textarea {
 #card-metric-messages .kpi-card-icon { background: var(--blue-arcade); color: #FFFDF7; }
 #card-metric-ai .kpi-card-icon { background: var(--lime-arcade); }
 #card-metric-today .kpi-card-icon { background: var(--purple-arcade); color: #FFFDF7; }
+#card-metric-contacts .kpi-card-icon { background: var(--orange-arcade); }
 #card-metric-revenue .kpi-card-icon { background: var(--lime-arcade); }
 #card-metric-pending .kpi-card-icon { background: var(--orange-arcade); }
 #card-metric-conversion .kpi-card-icon { background: var(--purple-arcade); color: #FFFDF7; }
@@ -2623,10 +2624,10 @@ textarea {
 }
 .kpi-trend-pill.up { background: var(--color-success-bg); color: var(--color-success); }
 
-/* MAIN ROW: GRÁFICO + PEDIDOS PENDENTES (ESTRUTURA CORRIGIDA) */
+/* MAIN ROW: GRÁFICO PRINCIPAL */
 .dashboard-main-row {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: 1fr;
   gap: 24px;
   margin-bottom: 24px;
 }

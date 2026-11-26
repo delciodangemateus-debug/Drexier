@@ -1412,20 +1412,21 @@ function renderDashboardData(d) {
     localStorage.setItem("drexier_dashboard_cache", JSON.stringify(d));
   } catch (_) {}
 
-  const msgs = Number(d.messages_answered) || 0;
+  const receivedMsgs = Number(d.messages_received) || 0;
+  const sentMsgs = Number(d.messages_answered) || 0;
   const contacts = Number(d.total_contacts) || 0;
   const today = Number(d.today_contacts) || 0;
   const yest = Number(d.yesterday_contacts) || 0;
   const pending = Number(d.pending_count) || 0;
   const reqs = Array.isArray(d.pending_requests) ? d.pending_requests : [];
 
-  // 1: Mensagens respondidas
+  // 1: Mensagens recebidas pelo agente
   const mMessages = $("#metric-messages");
-  if (mMessages) mMessages.textContent = msgs;
+  if (mMessages) mMessages.textContent = receivedMsgs;
 
-  // 2: Conversas atendidas pela IA (baseado em mensagens e contactos)
+  // 2: Mensagens atendidas/enviadas pela IA
   const mAi = $("#metric-ai-conversations");
-  if (mAi) mAi.textContent = msgs > 0 ? Math.max(msgs, contacts) : contacts;
+  if (mAi) mAi.textContent = sentMsgs;
 
   // 3: Aquisições em janelas consecutivas de 24 horas
   const mToday = $("#metric-today");
@@ -1460,12 +1461,10 @@ function renderDashboardData(d) {
   // Tornar os KPI cards clicáveis e expansíveis
   const metrics = $$(".kpi-card");
   const metricData = [
-    { title: "Mensagens Recebidas", val: msgs, desc: "Total de respostas geradas e enviadas aos clientes pelo agente e pelos atendentes oficiais." },
-    { title: "Atendidas pela IA", val: msgs > 0 ? Math.max(msgs, contacts) : contacts, desc: "Volume de conversas geridas autonomamente pelo agente de inteligência artificial comercial." },
+    { title: "Mensagens Recebidas", val: receivedMsgs, desc: "Total de mensagens recebidas dos clientes pelo agente." },
+    { title: "Atendidas pela IA", val: sentMsgs, desc: "Total de mensagens enviadas autonomamente pelo agente de inteligência artificial." },
     { title: "Novos Clientes (24h)", val: `${today} (24h anteriores: ${yest})`, desc: "Novos contactos nas últimas 24 horas, comparados com as 24 horas imediatamente anteriores." },
-    { title: "Clientes na Base", val: contacts, desc: "Número acumulado de contactos únicos que iniciaram conversa com o seu negócio." },
-    { title: "Vendas & Pedidos", val: pending, desc: "Intenções de compra recolhidas pelo agente aguardando a sua validação ou confirmação." },
-    { title: "Taxa de Conversão", val: mConv ? mConv.textContent : "0%", desc: "Proporção de contactos que evoluíram para intenção de compra." }
+    { title: "Clientes na Base", val: contacts, desc: "Número acumulado de contactos únicos que iniciaram conversa com o seu negócio." }
   ];
 
   metrics.forEach((m, i) => {
@@ -1494,7 +1493,7 @@ function renderDashboardData(d) {
   // Atividade recente
   const actFeed = $("#dashboard-activity-feed");
   if (actFeed) {
-    if (!reqs.length && contacts === 0 && msgs === 0) {
+    if (!reqs.length && contacts === 0 && receivedMsgs === 0 && sentMsgs === 0) {
       actFeed.innerHTML = `
         <div class="activity-item">
           <div class="activity-icon-bubble">
@@ -1556,11 +1555,11 @@ function renderDashboardData(d) {
         </div>
       `;
     }
-    if (msgs > 0) {
+    if (sentMsgs > 0) {
       insightHtml += `
         <div class="insight-box">
           <strong>Atendimento Eficiente</strong>
-          <p>Foram enviadas ${msgs} respostas oficiais com alta fidelidade às diretrizes do catálogo.</p>
+          <p>Foram enviadas ${sentMsgs} respostas oficiais com alta fidelidade às diretrizes do catálogo.</p>
         </div>
       `;
     } else {

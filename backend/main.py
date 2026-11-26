@@ -908,6 +908,7 @@ def dashboard(user=Depends(current_user)):
     window_end = now.strftime("%Y-%m-%d %H:%M:%S")
     with connect() as c:
         total_messages=c.execute("SELECT COUNT(*) n FROM messages WHERE user_id=? AND sender='agent'",(uid,)).fetchone()["n"]
+        received_messages=c.execute("SELECT COUNT(*) n FROM messages WHERE user_id=? AND sender='customer'",(uid,)).fetchone()["n"]
         total_contacts=c.execute("SELECT COUNT(*) n FROM contacts WHERE user_id=?",(uid,)).fetchone()["n"]
         today_contacts=c.execute(
             "SELECT COUNT(*) n FROM contacts WHERE user_id=? AND created_at>=? AND created_at<?",
@@ -954,7 +955,7 @@ def dashboard(user=Depends(current_user)):
             item["name"] = item.get("name") or item.get("contact_key") or "Cliente"
             bookings_rows.append(item)
     bookings_count = len(bookings_rows)
-    res = {"messages_answered":total_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
+    res = {"messages_answered":total_messages,"messages_received":received_messages,"total_contacts":total_contacts,"today_contacts":today_contacts,
             "yesterday_contacts":yesterday_contacts,"pending_count":pending,"pending_requests":[dict(x) for x in pending_rows],
             "bookings_count":bookings_count,"confirmed_bookings":[dict(x) for x in bookings_rows]}
     _dashboard_cache[uid] = (now_timestamp, res)
