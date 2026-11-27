@@ -586,7 +586,15 @@ class SupabaseCursor:
             if where_clause:
                 query, _ = _apply_where_conditions(query, where_clause, p, 0)
 
-            res = query.select("*").execute()
+            try:
+                res = query.select("*").execute()
+            except Exception as e:
+                err_str = str(e)
+                if "PGRST205" in err_str or "schema cache" in err_str.lower():
+                    logger.warning(f"[SupabaseCursor] Tabela {table} ausente no Supabase; DELETE ignorado.")
+                    self.rowcount = 0
+                    return self
+                raise
             self.rowcount = len(res.data or [])
             return self
 

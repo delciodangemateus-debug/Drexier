@@ -701,6 +701,7 @@ window.addEventListener("drexier:languagechange", () => {
     if (reconnectTitle) reconnectTitle.textContent = getEmailReconnectMessage();
     const liveStatusText = $("#live-status-text");
     if (liveStatusText) liveStatusText.textContent = getEmailReconnectMessage();
+    updateDashboardFrozenBanner(true);
   }
 });
 
@@ -1060,6 +1061,10 @@ async function boot() {
   openApp(); // Abre a interface da conta de forma instantânea sem piscar landing
   try {
     me = await api("/api/me");
+    if (me && me.refreshed_token) {
+      token = me.refreshed_token;
+      localStorage.setItem("drexier_token", token);
+    }
     startLivePolling();
     $("#side-user").textContent = me.name;
     fillSettings();
@@ -1981,7 +1986,42 @@ function renderDashboardData(d) {
   }
 
   updateDashboardKnowledgeBanner();
+  updateDashboardFrozenBanner(Boolean(d.email_needs_reconnect));
 }
+
+function updateDashboardFrozenBanner(needsReconnect) {
+  isTokenNeedsReconnect = Boolean(needsReconnect);
+  const banner = $("#dashboard-email-frozen-banner");
+  if (banner) {
+    banner.classList.toggle("hidden", !isTokenNeedsReconnect);
+    const isEn = (window.DrexierI18n && typeof window.DrexierI18n.getLanguage === "function" && window.DrexierI18n.getLanguage() === "en") ||
+                 localStorage.getItem("drexier_language") === "en";
+    const titleEl = $("#dashboard-email-frozen-title");
+    const descEl = $("#dashboard-email-frozen-desc");
+    const btnEl = $("#btn-dash-reconnect-gmail");
+    if (titleEl) {
+      titleEl.textContent = isEn
+        ? "Your account has been frozen — Reconnect Gmail"
+        : "A sua conta foi congelada — Reconecte o Gmail";
+    }
+    if (descEl) {
+      descEl.textContent = isEn
+        ? "Your token expired after 7 days without logging in and the agent was paused. Disconnect and reconnect your Gmail to resume service."
+        : "O token expirou após 7 dias sem entrar na conta e o agente foi pausado. Desconecte e reconecte o seu Gmail para reativar o atendimento.";
+    }
+    if (btnEl) {
+      btnEl.textContent = isEn ? "Reconnect Gmail" : "Reconectar Gmail";
+    }
+  }
+  syncGlobalAgentState();
+}
+
+$("#btn-dash-reconnect-gmail")?.addEventListener("click", async () => {
+  await navigate("settings");
+  $$("[data-setting]").forEach(x => x.classList.toggle("active", x.dataset.setting === "integration"));
+  $$(".setting-panel").forEach(x => x.classList.toggle("hidden", x.id !== "setting-integration"));
+  await loadEmailStatus();
+});
 
 async function loadDashboard() {
   const d = await api("/api/dashboard");
@@ -5314,7 +5354,7 @@ $("#btn-connect-google")?.addEventListener("click", async () => {
   const statusEl = $("#email-connect-status");
   try {
     if (statusEl) statusEl.textContent = "A preparar ligação segura com a Google...";
-    const res = await api("/api/email/oauth/google/url");
+    const res = await api(`/api/email/oauth/google/url?frontend_url=${encodeURIComponent(window.location.origin)}`);
     if (res && res.url) {
       if (statusEl) statusEl.textContent = "A redirecionar para a página oficial da Google...";
       window.location.href = res.url;

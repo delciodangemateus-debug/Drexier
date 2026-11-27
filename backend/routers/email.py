@@ -1,7 +1,9 @@
 import json
 import logging
+import os
 import time
 from typing import Optional
+from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -22,6 +24,8 @@ from backend.services.email_service import (
     get_email_config,
     send_email,
     sync_emails_for_user,
+    sync_user_activity_and_check_inactivity,
+    _touch_user_last_active,
 )
 
 logger = logging.getLogger("drexier.email_router")
@@ -50,6 +54,7 @@ def get_current_user(authorization: Optional[str] = Header(default=None)):
     if claims and "v" in claims and user_data.get("token_version") is not None:
         if int(claims["v"]) != int(user_data["token_version"]):
             raise HTTPException(401, "Sessão revogada. Por favor, inicie sessão novamente.")
+    sync_user_activity_and_check_inactivity(int(uid), touch=True)
     return user_data
 
 
@@ -167,17 +172,103 @@ def get_email_status(user: dict = Depends(get_current_user)):
     }
 
 
+def _is_safe_frontend_url(candidate: Optional[str], request: Request) -> Optional[str]:
+    if not candidate:
+        return None
+    parsed = urlparse(candidate.strip())
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    allowed_hosts = {
+        "localhost:5173",
+        "127.0.0.1:5173",
+        "localhost:3000",
+        "127.0.0.1:3000",
+        "localhost:8000",
+        "127.0.0.1:8000",
+        "testserver",
+    }
+    for env_key in ("FRONTEND_URL", "PUBLIC_URL", "APP_URL"):
+        env_val = os.getenv(env_key, "").strip()
+        if env_val:
+            env_netloc = urlparse(env_val).netloc
+            if env_netloc:
+                allowed_hosts.add(env_netloc)
+    raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+    for orig in raw_origins.split(","):
+        orig_netloc = urlparse(orig.strip()).netloc
+        if orig_netloc:
+            allowed_hosts.add(orig_netloc)
+    req_netloc = urlparse(str(request.base_url)).netloc
+    if req_netloc:
+        allowed_hosts.add(req_netloc)
+    if parsed.netloc in allowed_hosts:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return None
+
+
+def _resolve_frontend_base_url(request: Request, client_base_url: Optional[str] = None) -> str:
+    """Resolve a URL segura do frontend para redirecionamento após OAuth (evita cair na porta 8000 do backend)."""
+    direct = _is_safe_frontend_url(client_base_url, request)
+    if direct:
+        return direct
+
+    for header_name in ("origin", "referer"):
+        header_val = request.headers.get(header_name)
+        safe_header = _is_safe_frontend_url(header_val, request)
+        if safe_header:
+            return safe_header
+
+    env_frontend = os.getenv("FRONTEND_URL", "").strip()
+    safe_env = _is_safe_frontend_url(env_frontend, request)
+    if safe_env:
+        return safe_env
+
+    is_prod = os.getenv("APP_ENV") == "production" or os.getenv("ENVIRONMENT") == "production"
+    req_parsed = urlparse(str(request.base_url))
+    if not is_prod and req_parsed.netloc in ("localhost:8000", "127.0.0.1:8000"):
+        return "http://localhost:5173"
+
+    for env_key in ("PUBLIC_URL", "APP_URL"):
+        env_val = os.getenv(env_key, "").strip()
+        if env_val:
+            return env_val.rstrip("/")
+    return ""
+
+
+def _extract_redirect_base(state: Optional[str], request: Request) -> str:
+    if state:
+        try:
+            claims = jwt.decode(
+                state,
+                SECRET_KEY,
+                algorithms=[ALGORITHM],
+                options={"verify_exp": False},
+            )
+            safe = _is_safe_frontend_url(claims.get("redirect_base"), request)
+            if safe:
+                return safe
+        except Exception:
+            pass
+    return _resolve_frontend_base_url(request)
+
+
 @router.get("/oauth/google/url")
-def get_google_oauth_url(user: dict = Depends(require_email_subscription)):
+def get_google_oauth_url(
+    request: Request,
+    frontend_url: Optional[str] = Query(None),
+    user: dict = Depends(require_email_subscription),
+):
     """
     Retorna o link oficial de autorização da Google para que o utilizador
     possa aceder e conceder as permissões solicitadas.
     SEC-16: Gera um token de estado temporário (15min) com nonce único contra CSRF.
     """
+    redirect_base = _resolve_frontend_base_url(request, frontend_url)
     state_token = jwt.encode(
         {
             "sub": str(user["id"]),
             "nonce": secrets.token_hex(16),
+            "redirect_base": redirect_base,
             "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
         },
         SECRET_KEY,
@@ -192,6 +283,7 @@ def get_google_oauth_url(user: dict = Depends(require_email_subscription)):
 
 @router.get("/oauth/google/callback")
 async def google_oauth_callback(
+    request: Request,
     code: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
@@ -200,34 +292,40 @@ async def google_oauth_callback(
     Callback oficial do Google OAuth 2.0.
     Troca o código por tokens, obtém o e-mail do cliente e grava a integração.
     """
+    redirect_base = _extract_redirect_base(state, request)
     if error:
         import urllib.parse as _urlparse
         safe_err = _urlparse.quote(str(error), safe="")
-        return RedirectResponse(f"/?email_auth=error&reason={safe_err}")
+        return RedirectResponse(f"{redirect_base}/?email_auth=error&reason={safe_err}")
 
     if not code or not state:
-        return RedirectResponse("/?email_auth=error&reason=missing_code_or_state")
+        return RedirectResponse(f"{redirect_base}/?email_auth=error&reason=missing_code_or_state")
 
-    # SEC-16: Previne replay de state em ataques de Login CSRF (C3: DB-persisted)
+    # SEC-16: Previne replay de state em ataques de Login CSRF (C3: DB-persisted com fallback seguro)
     import hashlib as _hashlib
     state_hash = _hashlib.sha256(state.encode()).hexdigest()
-    with connect() as c:
-        c.execute("CREATE TABLE IF NOT EXISTS used_oauth_states (state_hash TEXT PRIMARY KEY, used_at TEXT NOT NULL, expires_at TEXT NOT NULL)")
-        # Clean up expired states older than 15 minutes
-        c.execute("DELETE FROM used_oauth_states WHERE expires_at < ?", (datetime.now(timezone.utc).isoformat(),))
-        already_used = c.execute("SELECT 1 FROM used_oauth_states WHERE state_hash=?", (state_hash,)).fetchone()
-        if already_used:
-            return RedirectResponse("/?email_auth=error&reason=state_already_used")
-        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=16)).isoformat()
-        c.execute("INSERT OR IGNORE INTO used_oauth_states(state_hash, used_at, expires_at) VALUES(?,?,?)",
-                  (state_hash, datetime.now(timezone.utc).isoformat(), expires_at))
+    try:
+        with connect() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS used_oauth_states (state_hash TEXT PRIMARY KEY, used_at TEXT NOT NULL, expires_at TEXT NOT NULL)")
+            # Clean up expired states older than 15 minutes
+            c.execute("DELETE FROM used_oauth_states WHERE expires_at < ?", (datetime.now(timezone.utc).isoformat(),))
+            already_used = c.execute("SELECT 1 FROM used_oauth_states WHERE state_hash=?", (state_hash,)).fetchone()
+            if already_used:
+                return RedirectResponse(f"{redirect_base}/?email_auth=error&reason=state_already_used")
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=16)).isoformat()
+            c.execute("INSERT OR IGNORE INTO used_oauth_states(state_hash, used_at, expires_at) VALUES(?,?,?)",
+                      (state_hash, datetime.now(timezone.utc).isoformat(), expires_at))
+    except Exception as state_exc:
+        if "duplicate key" in str(state_exc).lower() or "unique constraint" in str(state_exc).lower():
+            return RedirectResponse(f"{redirect_base}/?email_auth=error&reason=state_already_used")
+        logger.warning("Aviso na verificação persistida de state OAuth: %s", state_exc)
 
     uid = decode_token(state)
     if not uid:
-        return RedirectResponse("/?email_auth=error&reason=invalid_state")
+        return RedirectResponse(f"{redirect_base}/?email_auth=error&reason=invalid_state")
 
     if not is_subscription_active(uid):
-        return RedirectResponse("/?billing=paywall&reason=subscription_required")
+        return RedirectResponse(f"{redirect_base}/?billing=paywall&reason=subscription_required")
 
     try:
         token_data = await exchange_google_code(code)
@@ -262,14 +360,15 @@ async def google_oauth_callback(
                        updated_at = CURRENT_TIMESTAMP""",
                 (uid, email_addr, display_name, enc_access_token, enc_refresh_token, expires_at),
             )
+            _touch_user_last_active(c, int(uid), datetime.now(timezone.utc).isoformat())
 
         # SEC-03: O token JWT da sessão não é vazado na URL
-        return RedirectResponse("/?email_auth=success&provider=google")
+        return RedirectResponse(f"{redirect_base}/?email_auth=success&provider=google")
     except Exception as e:
         import urllib.parse as _urlparse
         logger.error("Erro no callback do Google OAuth: %s", str(e).replace('\n', '\\n'))
         safe_reason = _urlparse.quote("Falha na autenticação com a Google. Tente novamente.", safe="")
-        return RedirectResponse(f"/?email_auth=error&reason={safe_reason}")
+        return RedirectResponse(f"{redirect_base}/?email_auth=error&reason={safe_reason}")
 
 
 @router.post("/auto-reply")

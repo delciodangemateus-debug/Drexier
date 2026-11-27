@@ -161,9 +161,82 @@ def _decrypt_integration(row: Optional[Any]) -> Optional[Dict[str, Any]]:
     return d
 
 
+INACTIVITY_EXPIRY_DAYS = 7
+_ACTIVITY_TOUCH_THROTTLE_SECONDS = 60
+
+
 class EmailTokenExpiredError(RuntimeError):
     """Exceção levantada quando o token Google perde a validade e requer reconexão."""
     pass
+
+
+def is_user_inactive_expired(last_active_at: Any, now: Optional[datetime] = None) -> bool:
+    """Retorna True se o utilizador ficou 7 dias ou mais sem entrar na conta."""
+    last_dt = _parse_utc_datetime(last_active_at)
+    if last_dt is None:
+        return False
+    now_utc = now or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    return (now_utc - last_dt) >= timedelta(days=INACTIVITY_EXPIRY_DAYS)
+
+
+def _touch_user_last_active(c: Any, user_id: int, now_iso: str) -> None:
+    """Atualiza last_active_at do utilizador com fallback seguro para updated_at."""
+    try:
+        c.execute("UPDATE users SET last_active_at = ? WHERE id = ?", (now_iso, user_id))
+    except Exception:
+        try:
+            c.execute("UPDATE users SET updated_at = ? WHERE id = ?", (now_iso, user_id))
+        except Exception as exc:
+            logger.debug(f"[Activity] Não foi possível atualizar atividade para user {user_id}: {exc}")
+
+
+def sync_user_activity_and_check_inactivity(user_id: int, touch: bool = True) -> bool:
+    """
+    Verifica se o utilizador ficou >= 7 dias sem entrar na conta.
+    - Se ficou >= 7 dias inativo: congela a integração Gmail (status='needs_reconnect', auto_reply_enabled=0).
+    - Se touch=True: atualiza last_active_at para agora (com throttle de 60s quando ativo).
+    Retorna True se o utilizador estava expirado por inatividade de 7+ dias.
+    """
+    now_utc = datetime.now(timezone.utc)
+    now_iso = now_utc.isoformat()
+    last_active_val: Any = None
+    try:
+        with connect() as c:
+            try:
+                row = c.execute(
+                    "SELECT last_active_at, updated_at, created_at FROM users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+            except Exception:
+                row = c.execute(
+                    "SELECT updated_at, created_at FROM users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+            if not row:
+                return False
+            row_dict = dict(row)
+            last_active_val = row_dict.get("last_active_at") or row_dict.get("updated_at") or row_dict.get("created_at")
+
+            expired = is_user_inactive_expired(last_active_val, now=now_utc)
+            if expired:
+                c.execute(
+                    "UPDATE email_integrations SET status = 'needs_reconnect', auto_reply_enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND provider = 'google' AND status = 'connected'",
+                    (user_id,),
+                )
+                if touch:
+                    _touch_user_last_active(c, user_id, now_iso)
+                return True
+
+            if touch:
+                last_dt = _parse_utc_datetime(last_active_val)
+                if last_dt is None or (now_utc - last_dt).total_seconds() >= _ACTIVITY_TOUCH_THROTTLE_SECONDS:
+                    _touch_user_last_active(c, user_id, now_iso)
+            return False
+    except Exception as exc:
+        logger.warning(f"[Activity] Erro ao verificar inatividade para user {user_id}: {exc}")
+        return False
 
 
 def mark_integration_token_expired(integration_id: Optional[int] = None, user_id: Optional[int] = None):
@@ -185,8 +258,19 @@ def mark_integration_token_expired(integration_id: Optional[int] = None, user_id
 
 
 async def refresh_google_token_if_needed(integration: dict) -> str:
-    """Renova o token da Google se expirado ou prestes a expirar."""
+    """
+    Renova o token da Google se expirado ou prestes a expirar, desde que o utilizador
+    não tenha ficado 7 dias sem entrar na conta.
+    """
     from backend.services.token_crypto import encrypt_token, decrypt_token
+
+    uid = integration.get("user_id")
+    if uid and sync_user_activity_and_check_inactivity(int(uid), touch=False):
+        mark_integration_token_expired(integration.get("id"), uid)
+        raise EmailTokenExpiredError(
+            "A sua conta foi congelada após 7 dias sem acesso. Desconecte e reconecte o Gmail."
+        )
+
     access_token = decrypt_token(integration.get("access_token", ""))
     refresh_token = decrypt_token(integration.get("refresh_token", ""))
     expires_at = integration.get("token_expires_at")
@@ -194,9 +278,8 @@ async def refresh_google_token_if_needed(integration: dict) -> str:
     now = time.time()
     try:
         expires_timestamp = float(expires_at) if expires_at else None
-    except (TypeError, ValueError) as exc:
-        mark_integration_token_expired(integration.get("id"), integration.get("user_id"))
-        raise EmailTokenExpiredError("Data de expiração do token Google inválida; reconecte a conta Gmail.") from exc
+    except (TypeError, ValueError):
+        expires_timestamp = None
     # Se ainda tem validade (com margem de 60s), usa o atual
     if expires_timestamp and expires_timestamp > (now + 60) and access_token:
         return access_token

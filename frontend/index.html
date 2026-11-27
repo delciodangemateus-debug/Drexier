@@ -1068,6 +1068,22 @@ O vosso pedido de cotação já foi registado na nossa central comercial e envi�
         </button>
       </div>
 
+      <!-- Banner Conta Congelada / Reconectar Gmail -->
+      <div id="dashboard-email-frozen-banner" class="integration-alert-box hidden" style="border-left: 4px solid var(--color-error, #ef4444); background: var(--color-error-bg, rgba(239, 68, 68, 0.1)); margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="integration-alert-icon" style="color: var(--color-error, #ef4444); display: flex; align-items: center;">
+            <svg class="svg-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          </div>
+          <div class="integration-alert-content">
+            <strong id="dashboard-email-frozen-title" style="color: var(--color-error, #ef4444); display: block; font-size: 13.5px;">A sua conta foi congelada — Reconecte o Gmail</strong>
+            <p class="muted" id="dashboard-email-frozen-desc" style="margin: 2px 0 0; font-size: 12.5px;">O token expirou após 7 dias sem entrar na conta e o agente foi pausado. Desconecte e reconecte o seu Gmail para reativar o atendimento.</p>
+          </div>
+        </div>
+        <button type="button" class="btn small danger" id="btn-dash-reconnect-gmail" style="white-space: nowrap;">
+          Reconectar Gmail
+        </button>
+      </div>
+
       <!-- Banner de Calibração da Base de Conhecimento -->
       <div class="knowledge-hero-banner" id="dashboard-knowledge-banner">
         <div class="knowledge-hero-content">

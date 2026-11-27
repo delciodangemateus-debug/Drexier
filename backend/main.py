@@ -40,6 +40,7 @@ from backend.services.email_service import (
     extract_scheduled_at,
     generate_booking_options,
     handle_booking_selection,
+    sync_user_activity_and_check_inactivity,
 )
 from backend.services.resend_email import (
     get_resend_config,
@@ -86,6 +87,9 @@ async def background_email_worker():
             
             for row in active_users:
                 uid = row["user_id"]
+                if sync_user_activity_and_check_inactivity(int(uid), touch=False):
+                    logger.warning(f"[IA Drexier] Conta congelada por 7 dias de inatividade para user {uid}.")
+                    continue
                 # Validação SaaS: processa automações apenas se o pagamento estiver em dia
                 if not is_subscription_active(uid):
                     logger.debug(f"[SaaS Paywall] Automação suspensa para user {uid}: assinatura inativa ou pendente.")
@@ -356,6 +360,9 @@ def current_user(authorization: Optional[str] = Header(default=None)):
     if claims and "v" in claims and user_data.get("token_version") is not None:
         if int(claims["v"]) != int(user_data["token_version"]):
             raise HTTPException(401, "Sessão revogada. Por favor, inicie sessão novamente.")
+    sync_user_activity_and_check_inactivity(int(uid), touch=True)
+    if claims and claims.get("exp"):
+        user_data["_token_exp"] = claims.get("exp")
     return user_data
 
 def user_id(user=Depends(current_user)):
@@ -634,6 +641,7 @@ def verify_auth_code(data: AuthCode, request: Request):
         return {"token": create_token(uid), "user_id": uid}
 
     if login_payload:
+        sync_user_activity_and_check_inactivity(int(login_payload["user_id"]), touch=True)
         send_login_confirmation_email(
             login_payload["email"],
             login_payload["name"],
@@ -696,8 +704,17 @@ def complete_password_reset(data: PasswordResetComplete):
 
 @app.get("/api/me")
 def me(user=Depends(current_user)):
+    token_exp = user.pop("_token_exp", None)
     user["mandatory_responses"] = json.loads(user["mandatory_responses"] or "{}")
     user["default_agent_personality"] = DEFAULT_AGENT_PERSONALITY
+    # Sliding session: renova o JWT se o utilizador entrar regularmente (evita expirar em uso contínuo)
+    if token_exp is not None:
+        remaining = float(token_exp) - datetime.now(timezone.utc).timestamp()
+        if remaining < timedelta(days=6).total_seconds():
+            user["refreshed_token"] = create_token(
+                user["id"],
+                token_version=user.get("token_version") or 1,
+            )
     return user
 
 @app.put("/api/account")
@@ -896,14 +913,29 @@ def invalidate_dashboard_cache(user_id: int):
     """Invalida o cache do dashboard imediatamente quando há nova interação/ação."""
     _dashboard_cache.pop(user_id, None)
 
+def _get_dashboard_email_state(uid: int) -> dict:
+    with connect() as c:
+        row = c.execute(
+            "SELECT status, email_address FROM email_integrations WHERE user_id = ? AND provider = 'google'",
+            (uid,),
+        ).fetchone()
+    if not row:
+        return {"email_needs_reconnect": False, "email_address": None}
+    return {
+        "email_needs_reconnect": row["status"] == "needs_reconnect",
+        "email_address": row["email_address"],
+    }
+
+
 @app.get("/api/dashboard")
 def dashboard(user=Depends(current_user)):
     uid = user["id"]
     now = datetime.now(timezone.utc)
     now_timestamp = now.timestamp()
+    email_state = _get_dashboard_email_state(uid)
     cached = _dashboard_cache.get(uid)
     if cached and (now_timestamp - cached[0] < DASHBOARD_CACHE_TTL):
-        return cached[1]
+        return {**cached[1], **email_state}
     today_window_start = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     yesterday_window_start = (now - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
     window_end = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -993,7 +1025,7 @@ def dashboard(user=Depends(current_user)):
             "bookings_count":bookings_count,"confirmed_bookings":[dict(x) for x in bookings_rows],
             "important_items":important_items,"automation_level":automation_level}
     _dashboard_cache[uid] = (now_timestamp, res)
-    return res
+    return {**res, **email_state}
 
 
 @app.post("/api/conversions/{request_id}/remind")

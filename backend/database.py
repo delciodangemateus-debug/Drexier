@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
   agent_adopted_style TEXT DEFAULT '',
   mandatory_responses TEXT DEFAULT '{}',
   token_version INTEGER DEFAULT 1,
+  last_active_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -187,6 +188,12 @@ def _ensure_sqlite_schema(conn: sqlite3.Connection) -> None:
         if "token_version" not in user_columns:
             try:
                 conn.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 1")
+            except Exception:
+                pass
+        if "last_active_at" not in user_columns:
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN last_active_at TEXT")
+                conn.execute("UPDATE users SET last_active_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP) WHERE last_active_at IS NULL")
             except Exception:
                 pass
         conversion_columns = {
